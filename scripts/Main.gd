@@ -95,7 +95,8 @@ func build_ui() -> void:
 	root.add_child(status_label)
 
 	var log_panel := PanelContainer.new()
-	log_panel.custom_minimum_size = Vector2(0, 260)
+	log_panel.custom_minimum_size = Vector2(0, 150)
+	log_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var log_panel_style := StyleBoxFlat.new()
 	log_panel_style.bg_color = COLOR_PANEL
 	log_panel_style.set_corner_radius_all(4)
@@ -110,7 +111,7 @@ func build_ui() -> void:
 	log_box.bbcode_enabled = true
 	log_box.scroll_following = true
 	log_box.fit_content = false
-	log_box.custom_minimum_size = Vector2(0, 260)
+	log_box.custom_minimum_size = Vector2(0, 150)
 	log_box.add_theme_color_override("default_color", COLOR_TEXT)
 	log_panel.add_child(log_box)
 
@@ -134,8 +135,7 @@ func build_ui() -> void:
 	root.add_child(options_label)
 
 	var options_scroll := ScrollContainer.new()
-	options_scroll.custom_minimum_size = Vector2(0, 200)
-	options_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	options_scroll.custom_minimum_size = Vector2(0, 210)
 	options_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	root.add_child(options_scroll)
 
@@ -505,7 +505,7 @@ func refresh_ui() -> void:
 			options_label.text = "Draw 3, pick 1 to add to your hand:"
 			for i in range(current_draft_options.size()):
 				var cv := make_card_view(current_draft_options[i])
-				cv.picked.connect(_on_draft_card_picked.bind(cv, i))
+				cv.picked.connect(_make_draft_pick_callback(i))
 				options_container.add_child(cv)
 
 		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
@@ -590,6 +590,10 @@ func _on_draft_card_picked(cv: CardView, index: int) -> void:
 
 
 # --- Callback factories (needed so each card view captures the right index) ---
+func _make_draft_pick_callback(i: int) -> Callable:
+	return func(cv): _on_draft_card_picked(cv, i)
+
+
 func _make_discard_callback(i: int) -> Callable:
 	return func(_cv): on_discard_pick(i)
 

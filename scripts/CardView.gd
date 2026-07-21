@@ -47,13 +47,11 @@ func setup(p_card: Dictionary, p_interactive: bool = true, p_compact: bool = fal
 func _build() -> void:
 	var card_size := COMPACT_SIZE if compact else CARD_SIZE
 	custom_minimum_size = card_size
-	size = card_size
 	pivot_offset = card_size / 2.0
 
 	var accent := type_color(card.get("type", "iron"))
 
 	var shadow := PanelContainer.new()
-	shadow.set_anchors_preset(Control.PRESET_FULL_RECT)
 	shadow.position = Vector2(3, 5)
 	shadow.size = card_size
 	var shadow_style := StyleBoxFlat.new()
@@ -64,7 +62,7 @@ func _build() -> void:
 	add_child(shadow)
 
 	_panel = PanelContainer.new()
-	_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_panel.position = Vector2.ZERO
 	_panel.size = card_size
 	var style := StyleBoxFlat.new()
 	style.bg_color = BoogieTheme.CARD_BG
