@@ -9,16 +9,22 @@ extends Control
 #   -> Green Deck push-your-luck putting
 # ---------------------------------------------------------
 
-enum State { DRAFT, DISCARD_FOR_DRAFT, CLUB_SELECT, DISCARD_FOR_HAZARD, PUTTING, DONE }
+enum State { DRAFT, DISCARD_FOR_DRAFT, CLUB_SELECT, TIER_SELECT, DISCARD_FOR_HAZARD, PUTTING, DONE }
 
 const HAND_CAP := 14
 const GREEN_THRESHOLD := 20.0  # yards remaining that triggers the putting phase
-const DIE_SIZES := [4, 6, 8, 10, 12]
 
-# Faded white / dark green theme (matches Title.gd)
-const COLOR_DARK_GREEN := Color(0.043, 0.129, 0.078)
-const COLOR_DARK_GREEN_PANEL := Color(0.078, 0.184, 0.114)
-const COLOR_FADED_WHITE := Color(0.949, 0.949, 0.925)
+const Palette := preload("res://scripts/BoogieTheme.gd")
+
+# Parchment / fairway theme, shared with Title.gd via BoogieTheme.
+const COLOR_BG := Palette.PARCHMENT
+const COLOR_PANEL := Palette.PARCHMENT_RAISED
+const COLOR_TEXT := Palette.INK
+const COLOR_TEXT_SOFT := Palette.INK_SOFT
+const COLOR_ACCENT := Palette.FAIRWAY_DEEP
+const COLOR_SAND := Palette.SAND_DEEP
+const COLOR_WATER := Palette.WATER_DEEP
+const COLOR_FLAG := Palette.FLAG
 
 var state: int = State.DRAFT
 
@@ -40,6 +46,7 @@ var putting_progress: int = 0
 
 var pending_new_card = null
 var current_draft_options: Array = []
+var pending_club: Dictionary = {}
 
 # --- UI node refs (built in code) ---
 var status_label: Label
@@ -62,7 +69,7 @@ func _ready() -> void:
 # ---------------------------------------------------------
 func build_ui() -> void:
 	var bg := ColorRect.new()
-	bg.color = COLOR_DARK_GREEN
+	bg.color = COLOR_BG
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
@@ -78,19 +85,19 @@ func build_ui() -> void:
 	var title := Label.new()
 	title.text = "Boogie — Single Hole Prototype"
 	title.add_theme_font_size_override("font_size", 22)
-	title.add_theme_color_override("font_color", COLOR_FADED_WHITE)
+	title.add_theme_color_override("font_color", COLOR_ACCENT)
 	root.add_child(title)
 
 	status_label = Label.new()
 	status_label.text = "Loading..."
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	status_label.add_theme_color_override("font_color", COLOR_FADED_WHITE)
+	status_label.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
 	root.add_child(status_label)
 
 	var log_panel := PanelContainer.new()
 	log_panel.custom_minimum_size = Vector2(0, 260)
 	var log_panel_style := StyleBoxFlat.new()
-	log_panel_style.bg_color = COLOR_DARK_GREEN_PANEL
+	log_panel_style.bg_color = COLOR_PANEL
 	log_panel_style.set_corner_radius_all(4)
 	log_panel_style.content_margin_left = 8
 	log_panel_style.content_margin_right = 8
@@ -104,26 +111,37 @@ func build_ui() -> void:
 	log_box.scroll_following = true
 	log_box.fit_content = false
 	log_box.custom_minimum_size = Vector2(0, 260)
-	log_box.add_theme_color_override("default_color", COLOR_FADED_WHITE)
+	log_box.add_theme_color_override("default_color", COLOR_TEXT)
 	log_panel.add_child(log_box)
 
 	hand_label = Label.new()
 	hand_label.text = "Your Hand:"
-	hand_label.add_theme_color_override("font_color", COLOR_FADED_WHITE)
+	hand_label.add_theme_color_override("font_color", COLOR_TEXT)
 	root.add_child(hand_label)
+
+	var hand_scroll := ScrollContainer.new()
+	hand_scroll.custom_minimum_size = Vector2(0, 134)
+	hand_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(hand_scroll)
 
 	hand_container = HBoxContainer.new()
 	hand_container.add_theme_constant_override("separation", 8)
-	root.add_child(hand_container)
+	hand_scroll.add_child(hand_container)
 
 	options_label = Label.new()
 	options_label.text = ""
-	options_label.add_theme_color_override("font_color", COLOR_FADED_WHITE)
+	options_label.add_theme_color_override("font_color", COLOR_TEXT)
 	root.add_child(options_label)
+
+	var options_scroll := ScrollContainer.new()
+	options_scroll.custom_minimum_size = Vector2(0, 200)
+	options_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	options_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(options_scroll)
 
 	options_container = HBoxContainer.new()
 	options_container.add_theme_constant_override("separation", 8)
-	root.add_child(options_container)
+	options_scroll.add_child(options_container)
 
 	restart_button = Button.new()
 	restart_button.text = "Restart Hole"
@@ -154,18 +172,6 @@ func make_club(cname: String, min_y: float, max_y: float, acc_die: int, ctype: S
 		"limited": limited,
 		"ability": ability
 	}
-
-
-func card_label(card: Dictionary) -> String:
-	if card.type == "bad":
-		return "%s (BAD CARD)" % card.name
-	if card.type == "putter":
-		return "%s (green only)" % card.name
-	var tag := " [LE]" if card.limited else ""
-	var s := "%s%s\n%d-%d yds, d%d" % [card.name, tag, int(card.min_yard), int(card.max_yard), card.acc_die]
-	if card.ability != "":
-		s += "\n(%s)" % card.ability
-	return s
 
 
 # ---------------------------------------------------------
@@ -235,30 +241,38 @@ func start_hole() -> void:
 	restart_button.visible = false
 	log_box.clear()
 	log_msg("[b]Hole 1 — Par %d — %d yards[/b]" % [hole_par, int(hole_yardage)])
-	state = State.DRAFT
 	begin_draft_phase()
-	refresh_ui()
 
 
-func step_die(die: int, lie: String) -> int:
-	if die == 0:
-		return 0
-	var idx := DIE_SIZES.find(die)
-	if idx == -1:
-		idx = 1
-	if lie == "rough" or lie == "bunker":
-		idx = max(0, idx - 1)
-	return DIE_SIZES[idx]
-
-
-func resolve_lie(roll: int, die_size: int) -> String:
-	var ratio := float(roll) / float(die_size)
-	if ratio <= 0.15:
-		return "water" if randf() < 0.5 else "bunker"
-	elif ratio <= 0.4:
-		return "rough"
-	else:
-		return "fairway"
+# Derives the resulting lie from the Accuracy roll's degree band + Power
+# outcome. There's no real 2D course board yet, so this stands in for the
+# physical aim-tool placement: PERFECT/GOOD keeps you in play, OFF/MISS
+# scale up the odds of finding rough/bunker/water, and overshooting adds
+# extra risk on top since you've carried past the target.
+func derive_lie(accuracy: Dictionary, power: Dictionary) -> String:
+	var band: String = accuracy.band
+	var overshoot: bool = power.outcome == "overshoot"
+	var roll := randf()
+	match band:
+		"PERFECT":
+			return "fairway"
+		"GOOD":
+			return "rough" if roll < 0.1 else "fairway"
+		"OFF":
+			if roll < 0.15:
+				return "water" if overshoot else "bunker"
+			elif roll < 0.55:
+				return "rough"
+			else:
+				return "fairway"
+		"MISS":
+			if roll < 0.35:
+				return "water" if overshoot else "bunker"
+			elif roll < 0.85:
+				return "rough"
+			else:
+				return "fairway"
+	return "fairway"
 
 
 # --- Draft phase: draw 3, pick 1, permanently into hand ---
@@ -283,7 +297,7 @@ func on_draft_pick(index: int) -> void:
 	else:
 		hand.append(card)
 		log_msg("Added [b]%s[/b] to your hand." % card.name)
-		state = State.CLUB_SELECT
+		finish_hole_done()
 	refresh_ui()
 
 
@@ -296,71 +310,107 @@ func on_discard_pick(index: int) -> void:
 	pending_new_card = null
 
 	if state == State.DISCARD_FOR_DRAFT:
-		state = State.CLUB_SELECT
+		finish_hole_done()
 	else:
 		# was DISCARD_FOR_HAZARD -> shot already resolved, move on
 		advance_after_shot()
 	refresh_ui()
 
 
-# --- Club select + shot resolution ---
+# --- Club select -> tier select -> shot resolution ---
 func on_club_select(index: int, playable_indices: Array) -> void:
 	var hand_index: int = playable_indices[index]
-	var card: Dictionary = hand[hand_index]
-	play_shot(card)
+	pending_club = hand[hand_index]
+	state = State.TIER_SELECT
+	refresh_ui()
 
 
-func play_shot(card: Dictionary) -> void:
-	var eff_die := step_die(card.acc_die, current_lie)
-	var power_roll := randf()
-	var shot_distance: float = lerp(card.min_yard, card.max_yard, power_roll)
+func on_tier_select(tier: int) -> void:
+	var card := pending_club
+	pending_club = {}
+	play_shot(card, tier)
 
-	if current_lie == "bunker":
-		shot_distance = min(shot_distance, card.max_yard * 0.5)
 
-	var acc_roll := 1
-	var lie_result := "fairway"
-	if eff_die > 0:
-		acc_roll = randi_range(1, eff_die)
-		lie_result = resolve_lie(acc_roll, eff_die)
+func play_shot(card: Dictionary, tier: int) -> void:
+	# Bad cards are self-consuming: trigger on the very next shot, then discard.
+	var active_bad_card: Dictionary = {}
+	for c in hand:
+		if c.type == "bad":
+			active_bad_card = c
+			break
+
+	var effective_tier := tier
+	if active_bad_card.get("name", "") == "Duffed":
+		effective_tier = ShotResolver.Tier.EXTREME_FINESSE
+
+	var accuracy_width_mod := 0
+	if active_bad_card.get("name", "") == "Yips":
+		accuracy_width_mod = -2
+
+	var result := ShotResolver.resolve_shot(card, effective_tier, current_lie, 0, accuracy_width_mod)
+	var power: Dictionary = result.power
+	var accuracy: Dictionary = result.accuracy
+
+	if active_bad_card.get("name", "") == "Shank":
+		accuracy.band = "OFF"
 
 	strokes += 1
 	var before := distance_remaining
-	distance_remaining = max(0.0, distance_remaining - shot_distance)
+	distance_remaining = max(0.0, distance_remaining - power.distance)
 
-	log_msg("\n[b]Stroke %d[/b] — played %s (lie: %s)" % [strokes, card.name, current_lie])
-	log_msg("Power roll -> %d yards. Accuracy roll: %d/d%d -> %s." % [int(shot_distance), acc_roll, eff_die, lie_result])
+	log_msg("\n[b]Stroke %d[/b] — played %s, %s (lie: %s)" % [strokes, card.name, ShotResolver.tier_name(tier), current_lie])
+	log_msg("Power roll: %d vs Sweet Spot [%d-%d] (width %d) -> %s, %d yards." % [
+		power.roll, power.bounds.x, power.bounds.y, power.width, power.outcome, int(power.distance)])
+	log_msg("Accuracy roll: %d vs Sweet Spot [%d-%d] -> %s, %s %d°." % [
+		accuracy.roll, accuracy.bounds.x, accuracy.bounds.y, accuracy.band,
+		ShotResolver.side_label(accuracy.side), accuracy.degree])
 	log_msg("Distance: %d -> %d yards remaining." % [int(before), int(distance_remaining)])
+
+	if not active_bad_card.is_empty():
+		log_msg("[color=#%s](%s triggered and was discarded.)[/color]" % [COLOR_TEXT_SOFT.to_html(false), active_bad_card.name])
+		hand.erase(active_bad_card)
+		club_discard.append(active_bad_card)
+
+	if active_bad_card.get("name", "") == "Lost Ball":
+		strokes += 1
+		log_msg("[color=#%s]Lost Ball — +1 penalty stroke on top of this shot.[/color]" % COLOR_FLAG.to_html(false))
+
+	var lie_result := derive_lie(accuracy, power)
 
 	var hazard_hit := false
 	if lie_result == "water":
 		strokes += 1
 		current_lie = "rough"
-		log_msg("[color=cyan]Splash! Water hazard — +1 penalty stroke, dropped in the rough.[/color]")
+		log_msg("[color=#%s]Splash! Water hazard — +1 penalty stroke, dropped in the rough.[/color]" % COLOR_WATER.to_html(false))
 		hazard_hit = true
 	elif lie_result == "bunker":
 		current_lie = "bunker"
-		log_msg("[color=orange]In the sand.[/color]")
+		log_msg("[color=#%s]In the sand.[/color]" % COLOR_SAND.to_html(false))
 		hazard_hit = true
 	elif lie_result == "rough":
 		current_lie = "rough"
 	else:
 		current_lie = "fairway"
 
-	if hazard_hit and randf() < 0.4:
-		maybe_add_bad_card()
+	if hazard_hit and randf() < (1.0 / 6.0):
+		maybe_add_bad_card(lie_result)
 		return  # bad-card flow will call advance_after_shot() itself if needed
 
 	advance_after_shot()
 
 
-func maybe_add_bad_card() -> void:
-	var bad := make_club("Shank", 0, 0, 4, "bad")
-	log_msg("[color=red]Picked up a Shank card![/color]")
+const BAD_CARDS := ["Yips", "Shank", "Lost Ball", "Duffed"]
+
+
+func maybe_add_bad_card(lie_result: String) -> void:
+	# Weight odds heavier toward Bunker/Water than Rough per Section 5.
+	var name: String = BAD_CARDS[randi_range(0, BAD_CARDS.size() - 1)]
+	var bad := make_club(name, 0, 0, 0, "bad")
+	log_msg("[color=#%s]Picked up a %s card![/color]" % [COLOR_FLAG.to_html(false), name])
 	if hand.size() >= HAND_CAP:
 		pending_new_card = bad
 		state = State.DISCARD_FOR_HAZARD
-		log_msg("Hand is full — discard a card to make room for the Shank.")
+		log_msg("Hand is full — discard a card to make room for the %s." % name)
 		refresh_ui()
 	else:
 		hand.append(bad)
@@ -411,7 +461,6 @@ func on_putt_bank() -> void:
 
 
 func finish_hole() -> void:
-	state = State.DONE
 	var diff := strokes - hole_par
 	var diff_text := "Even par"
 	if diff < 0:
@@ -419,8 +468,15 @@ func finish_hole() -> void:
 	elif diff > 0:
 		diff_text = "%d over par" % diff
 	log_msg("\n[b]Holed out![/b] Total strokes: %d (par %d) — %s" % [strokes, hole_par, diff_text])
+	log_msg("\n[b]End of hole.[/b] Draw 3, pick 1 to add to your hand permanently.")
+	begin_draft_phase()
+
+
+# Called once the end-of-hole draft pick has been resolved (with or without
+# a forced discard) — the hole is now fully over.
+func finish_hole_done() -> void:
+	state = State.DONE
 	restart_button.visible = true
-	refresh_ui()
 
 
 func _on_restart_pressed() -> void:
@@ -431,17 +487,16 @@ func _on_restart_pressed() -> void:
 # ---------------------------------------------------------
 # UI REFRESH
 # ---------------------------------------------------------
+var _animating: bool = false  # blocks refresh_ui() from clobbering an in-flight pick animation
+
+
 func refresh_ui() -> void:
 	status_label.text = "%d yards remaining | Lie: %s | Strokes so far: %d" % [int(distance_remaining), current_lie, strokes]
 
-	# Hand display
-	clear_container(hand_container)
-	for card in hand:
-		var l := Label.new()
-		l.text = card_label(card)
-		l.custom_minimum_size = Vector2(140, 0)
-		l.add_theme_color_override("font_color", COLOR_FADED_WHITE)
-		hand_container.add_child(l)
+	if _animating:
+		return
+
+	rebuild_hand_row()
 
 	clear_container(options_container)
 
@@ -449,33 +504,43 @@ func refresh_ui() -> void:
 		State.DRAFT:
 			options_label.text = "Draw 3, pick 1 to add to your hand:"
 			for i in range(current_draft_options.size()):
-				var b := Button.new()
-				b.text = card_label(current_draft_options[i])
-				b.custom_minimum_size = Vector2(160, 60)
-				b.pressed.connect(_make_draft_callback(i))
-				options_container.add_child(b)
+				var cv := make_card_view(current_draft_options[i])
+				cv.picked.connect(_on_draft_card_picked.bind(cv, i))
+				options_container.add_child(cv)
 
 		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
 			options_label.text = "Hand full — choose a card to discard:"
 			for i in range(hand.size()):
-				var b := Button.new()
-				b.text = "Discard: " + card_label(hand[i])
-				b.custom_minimum_size = Vector2(160, 60)
-				b.pressed.connect(_make_discard_callback(i))
-				options_container.add_child(b)
+				var cv := make_card_view(hand[i])
+				cv.picked.connect(_make_discard_callback(i))
+				options_container.add_child(cv)
 
 		State.CLUB_SELECT:
 			options_label.text = "Choose a club to play:"
+			if current_lie == "bunker":
+				options_label.text += " (bunker — irons/wedges only)"
 			var playable_indices: Array = []
 			for i in range(hand.size()):
-				if hand[i].type != "putter":
-					playable_indices.append(i)
+				var c = hand[i]
+				if c.type == "putter" or c.type == "bad":
+					continue
+				if current_lie == "bunker" and c.type == "wood":
+					continue
+				playable_indices.append(i)
 			for j in range(playable_indices.size()):
 				var card = hand[playable_indices[j]]
+				var cv := make_card_view(card)
+				cv.picked.connect(_make_club_callback(j, playable_indices))
+				options_container.add_child(cv)
+
+		State.TIER_SELECT:
+			options_label.text = "Playing %s — choose your swing:" % pending_club.name
+			for tier in [ShotResolver.Tier.FULL, ShotResolver.Tier.MID, ShotResolver.Tier.FINESSE, ShotResolver.Tier.EXTREME_FINESSE]:
+				var yard_range: Vector2 = ShotResolver.tier_yardage_range(pending_club, tier)
 				var b := Button.new()
-				b.text = "Play: " + card_label(card)
+				b.text = "%s\n(~%d-%d yds)" % [ShotResolver.tier_name(tier), int(yard_range.x), int(yard_range.y)]
 				b.custom_minimum_size = Vector2(160, 60)
-				b.pressed.connect(_make_club_callback(j, playable_indices))
+				b.pressed.connect(_make_tier_callback(tier))
 				options_container.add_child(b)
 
 		State.PUTTING:
@@ -496,14 +561,42 @@ func refresh_ui() -> void:
 			options_label.text = "Hole complete."
 
 
-# --- Callback factories (needed so each button captures the right index) ---
-func _make_draft_callback(i: int) -> Callable:
-	return func(): on_draft_pick(i)
+func rebuild_hand_row() -> void:
+	clear_container(hand_container)
+	for card in hand:
+		var cv := make_card_view(card, false, true)
+		hand_container.add_child(cv)
 
 
+func make_card_view(card: Dictionary, interactive: bool = true, compact: bool = false) -> CardView:
+	var cv := CardView.new()
+	cv.setup(card, interactive, compact)
+	return cv
+
+
+# --- Draft pick: pop, then fly the chosen card into the hand row before
+# actually mutating game state, so the pick reads as a physical action. ---
+func _on_draft_card_picked(cv: CardView, index: int) -> void:
+	_animating = true
+	for other in options_container.get_children():
+		if other != cv:
+			other.play_fade_out()
+
+	var target_pos: Vector2 = hand_container.global_position + Vector2(hand_container.size.x, hand_container.size.y * 0.5)
+	cv.play_fly_to_hand(target_pos, func():
+		_animating = false
+		on_draft_pick(index)
+	)
+
+
+# --- Callback factories (needed so each card view captures the right index) ---
 func _make_discard_callback(i: int) -> Callable:
-	return func(): on_discard_pick(i)
+	return func(_cv): on_discard_pick(i)
 
 
 func _make_club_callback(i: int, playable_indices: Array) -> Callable:
-	return func(): on_club_select(i, playable_indices)
+	return func(_cv): on_club_select(i, playable_indices)
+
+
+func _make_tier_callback(tier: int) -> Callable:
+	return func(): on_tier_select(tier)

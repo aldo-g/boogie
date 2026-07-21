@@ -9,10 +9,11 @@ extends Control
 
 const COURSE_MAP := preload("res://assets/maps/llanfair-course.jpeg")
 const TITLE_FONT := preload("res://assets/fonts/AlexBrush-Regular.ttf")
+const Palette := preload("res://scripts/BoogieTheme.gd")
 const MAIN_SCENE := "res://scenes/Main.tscn"
 
-const COLOR_DARK_GREEN := Color(0.086, 0.220, 0.137)
-const COLOR_FADED_WHITE := Color(0.980, 0.980, 0.965)
+const COLOR_DARK_GREEN := Palette.FAIRWAY_DEEP
+const COLOR_FADED_WHITE := Palette.PARCHMENT
 
 
 func _ready() -> void:
