@@ -15,6 +15,11 @@ const HAND_CAP := 14
 const GREEN_THRESHOLD := 20.0  # yards remaining that triggers the putting phase
 const DIE_SIZES := [4, 6, 8, 10, 12]
 
+# Faded white / dark green theme (matches Title.gd)
+const COLOR_DARK_GREEN := Color(0.043, 0.129, 0.078)
+const COLOR_DARK_GREEN_PANEL := Color(0.078, 0.184, 0.114)
+const COLOR_FADED_WHITE := Color(0.949, 0.949, 0.925)
+
 var state: int = State.DRAFT
 
 var hand: Array = []
@@ -56,6 +61,11 @@ func _ready() -> void:
 # UI CONSTRUCTION
 # ---------------------------------------------------------
 func build_ui() -> void:
+	var bg := ColorRect.new()
+	bg.color = COLOR_DARK_GREEN
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+
 	var root := VBoxContainer.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_theme_constant_override("separation", 10)
@@ -68,15 +78,25 @@ func build_ui() -> void:
 	var title := Label.new()
 	title.text = "Boogie — Single Hole Prototype"
 	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", COLOR_FADED_WHITE)
 	root.add_child(title)
 
 	status_label = Label.new()
 	status_label.text = "Loading..."
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	status_label.add_theme_color_override("font_color", COLOR_FADED_WHITE)
 	root.add_child(status_label)
 
 	var log_panel := PanelContainer.new()
 	log_panel.custom_minimum_size = Vector2(0, 260)
+	var log_panel_style := StyleBoxFlat.new()
+	log_panel_style.bg_color = COLOR_DARK_GREEN_PANEL
+	log_panel_style.set_corner_radius_all(4)
+	log_panel_style.content_margin_left = 8
+	log_panel_style.content_margin_right = 8
+	log_panel_style.content_margin_top = 8
+	log_panel_style.content_margin_bottom = 8
+	log_panel.add_theme_stylebox_override("panel", log_panel_style)
 	root.add_child(log_panel)
 
 	log_box = RichTextLabel.new()
@@ -84,10 +104,12 @@ func build_ui() -> void:
 	log_box.scroll_following = true
 	log_box.fit_content = false
 	log_box.custom_minimum_size = Vector2(0, 260)
+	log_box.add_theme_color_override("default_color", COLOR_FADED_WHITE)
 	log_panel.add_child(log_box)
 
 	hand_label = Label.new()
 	hand_label.text = "Your Hand:"
+	hand_label.add_theme_color_override("font_color", COLOR_FADED_WHITE)
 	root.add_child(hand_label)
 
 	hand_container = HBoxContainer.new()
@@ -96,6 +118,7 @@ func build_ui() -> void:
 
 	options_label = Label.new()
 	options_label.text = ""
+	options_label.add_theme_color_override("font_color", COLOR_FADED_WHITE)
 	root.add_child(options_label)
 
 	options_container = HBoxContainer.new()
@@ -417,6 +440,7 @@ func refresh_ui() -> void:
 		var l := Label.new()
 		l.text = card_label(card)
 		l.custom_minimum_size = Vector2(140, 0)
+		l.add_theme_color_override("font_color", COLOR_FADED_WHITE)
 		hand_container.add_child(l)
 
 	clear_container(options_container)

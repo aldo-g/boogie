@@ -57,6 +57,9 @@ Solo mode plays against par; multiplayer plays head-to-head.
 ```
 Boogie/
 ├── project.godot     Godot project config
+├── assets/
+│   └── maps/
+│       └── llanfair-course.jpeg   Reference course layout (18 holes)
 ├── scenes/
 │   └── Main.tscn     Single scene: a Control node + script, no editor wiring
 └── scripts/
