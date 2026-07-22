@@ -443,7 +443,7 @@ func advance_after_shot() -> void:
 	if current_lie == "green":
 		start_putting()
 	else:
-		begin_draft_phase()
+		state = State.CLUB_SELECT
 	refresh_ui()
 
 
