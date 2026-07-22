@@ -12,7 +12,6 @@ extends Control
 enum State { DRAFT, DISCARD_FOR_DRAFT, CLUB_SELECT, TIER_SELECT, DISCARD_FOR_HAZARD, PUTTING, DONE }
 
 const HAND_CAP := 14
-const GREEN_THRESHOLD := 20.0  # yards remaining that triggers the putting phase
 
 const Palette := preload("res://scripts/BoogieTheme.gd")
 
@@ -35,9 +34,11 @@ var club_discard: Array = []
 var green_deck: Array = []
 var green_discard: Array = []
 
+var hole: HoleData
 var hole_yardage: float = 380.0
 var hole_par: int = 4
-var distance_remaining: float = 0.0
+var ball_pos: Vector2 = Vector2.ZERO  # yard-space, (0,0) at tee, +y toward pin
+var shot_path: Array = []  # history of ball_pos points this hole, for drawing the trail
 var strokes: int = 0
 var current_lie: String = "tee"
 
@@ -50,12 +51,12 @@ var pending_club: Dictionary = {}
 
 # --- UI node refs (built in code) ---
 var status_label: Label
+var map_view: CourseMapView
 var log_box: RichTextLabel
 var hand_label: Label
 var hand_container: HBoxContainer
 var options_label: Label
 var options_container: HBoxContainer
-var restart_button: Button
 
 
 func _ready() -> void:
@@ -94,9 +95,29 @@ func build_ui() -> void:
 	status_label.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
 	root.add_child(status_label)
 
+	var mid_row := HBoxContainer.new()
+	mid_row.add_theme_constant_override("separation", 10)
+	mid_row.custom_minimum_size = Vector2(0, 150)
+	mid_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(mid_row)
+
+	var map_panel := PanelContainer.new()
+	map_panel.custom_minimum_size = Vector2(340, 0)
+	var map_panel_style := StyleBoxFlat.new()
+	map_panel_style.bg_color = COLOR_PANEL
+	map_panel_style.set_corner_radius_all(4)
+	map_panel_style.content_margin_left = 6
+	map_panel_style.content_margin_right = 6
+	map_panel_style.content_margin_top = 6
+	map_panel_style.content_margin_bottom = 6
+	map_panel.add_theme_stylebox_override("panel", map_panel_style)
+	mid_row.add_child(map_panel)
+
+	map_view = CourseMapView.new()
+	map_panel.add_child(map_view)
+
 	var log_panel := PanelContainer.new()
-	log_panel.custom_minimum_size = Vector2(0, 150)
-	log_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	log_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var log_panel_style := StyleBoxFlat.new()
 	log_panel_style.bg_color = COLOR_PANEL
 	log_panel_style.set_corner_radius_all(4)
@@ -105,13 +126,12 @@ func build_ui() -> void:
 	log_panel_style.content_margin_top = 8
 	log_panel_style.content_margin_bottom = 8
 	log_panel.add_theme_stylebox_override("panel", log_panel_style)
-	root.add_child(log_panel)
+	mid_row.add_child(log_panel)
 
 	log_box = RichTextLabel.new()
 	log_box.bbcode_enabled = true
 	log_box.scroll_following = true
 	log_box.fit_content = false
-	log_box.custom_minimum_size = Vector2(0, 150)
 	log_box.add_theme_color_override("default_color", COLOR_TEXT)
 	log_panel.add_child(log_box)
 
@@ -142,12 +162,6 @@ func build_ui() -> void:
 	options_container = HBoxContainer.new()
 	options_container.add_theme_constant_override("separation", 8)
 	options_scroll.add_child(options_container)
-
-	restart_button = Button.new()
-	restart_button.text = "Restart Hole"
-	restart_button.visible = false
-	restart_button.pressed.connect(_on_restart_pressed)
-	root.add_child(restart_button)
 
 
 func log_msg(text: String) -> void:
@@ -235,44 +249,19 @@ func draw_from_deck(deck: Array, discard: Array) -> Dictionary:
 # HOLE FLOW
 # ---------------------------------------------------------
 func start_hole() -> void:
-	distance_remaining = hole_yardage
+	hole = HoleData.hole_1()
+	hole_yardage = hole.yardage
+	hole_par = hole.par
+	ball_pos = hole.tee_pos
+	shot_path = [hole.tee_pos]
 	strokes = 0
 	current_lie = "tee"
-	restart_button.visible = false
 	log_box.clear()
 	log_msg("[b]Hole 1 — Par %d — %d yards[/b]" % [hole_par, int(hole_yardage)])
-	begin_draft_phase()
-
-
-# Derives the resulting lie from the Accuracy roll's degree band + Power
-# outcome. There's no real 2D course board yet, so this stands in for the
-# physical aim-tool placement: PERFECT/GOOD keeps you in play, OFF/MISS
-# scale up the odds of finding rough/bunker/water, and overshooting adds
-# extra risk on top since you've carried past the target.
-func derive_lie(accuracy: Dictionary, power: Dictionary) -> String:
-	var band: String = accuracy.band
-	var overshoot: bool = power.outcome == "overshoot"
-	var roll := randf()
-	match band:
-		"PERFECT":
-			return "fairway"
-		"GOOD":
-			return "rough" if roll < 0.1 else "fairway"
-		"OFF":
-			if roll < 0.15:
-				return "water" if overshoot else "bunker"
-			elif roll < 0.55:
-				return "rough"
-			else:
-				return "fairway"
-		"MISS":
-			if roll < 0.35:
-				return "water" if overshoot else "bunker"
-			elif roll < 0.85:
-				return "rough"
-			else:
-				return "fairway"
-	return "fairway"
+	map_view.set_hole(hole)
+	map_view.set_ball(ball_pos, shot_path)
+	state = State.CLUB_SELECT
+	refresh_ui()
 
 
 # --- Draft phase: draw 3, pick 1, permanently into hand ---
@@ -355,8 +344,7 @@ func play_shot(card: Dictionary, tier: int) -> void:
 		accuracy.band = "OFF"
 
 	strokes += 1
-	var before := distance_remaining
-	distance_remaining = max(0.0, distance_remaining - power.distance)
+	var before_pos := ball_pos
 
 	log_msg("\n[b]Stroke %d[/b] — played %s, %s (lie: %s)" % [strokes, card.name, ShotResolver.tier_name(tier), current_lie])
 	log_msg("Power roll: %d vs Sweet Spot [%d-%d] (width %d) -> %s, %d yards." % [
@@ -364,7 +352,6 @@ func play_shot(card: Dictionary, tier: int) -> void:
 	log_msg("Accuracy roll: %d vs Sweet Spot [%d-%d] -> %s, %s %d°." % [
 		accuracy.roll, accuracy.bounds.x, accuracy.bounds.y, accuracy.band,
 		ShotResolver.side_label(accuracy.side), accuracy.degree])
-	log_msg("Distance: %d -> %d yards remaining." % [int(before), int(distance_remaining)])
 
 	if not active_bad_card.is_empty():
 		log_msg("[color=#%s](%s triggered and was discarded.)[/color]" % [COLOR_TEXT_SOFT.to_html(false), active_bad_card.name])
@@ -375,22 +362,57 @@ func play_shot(card: Dictionary, tier: int) -> void:
 		strokes += 1
 		log_msg("[color=#%s]Lost Ball — +1 penalty stroke on top of this shot.[/color]" % COLOR_FLAG.to_html(false))
 
-	var lie_result := derive_lie(accuracy, power)
+	_animating = true
+	map_view.play_aim_animation(power.distance, float(accuracy.degree), accuracy.side, card.max_yard, func():
+		_resolve_shot_landing(before_pos, power, accuracy)
+	)
+
+
+func _resolve_shot_landing(before_pos: Vector2, power: Dictionary, accuracy: Dictionary) -> void:
+	_animating = false
+
+	var aim_dir: Vector2 = (hole.pin_pos - before_pos).normalized()
+	if aim_dir.length_squared() < 0.0001:
+		aim_dir = Vector2.UP
+	# Vector2.rotated() turns clockwise for +angle in Godot's Y-down convention,
+	# so Draw (curves left) needs a positive angle here to end up on -x.
+	var sign: float = 0.0
+	if accuracy.side == ShotResolver.Side.DRAW:
+		sign = 1.0
+	elif accuracy.side == ShotResolver.Side.FADE:
+		sign = -1.0
+	var angle_rad: float = deg_to_rad(float(accuracy.degree)) * sign
+	var shot_dir := aim_dir.rotated(angle_rad)
+	var landing_pos: Vector2 = before_pos + shot_dir * power.distance
+
+	var lie_result := hole.terrain_at(landing_pos)
+	log_msg("Distance: %d yards -> landed in %s, %d yards from the pin." % [
+		int(power.distance), lie_result, int(landing_pos.distance_to(hole.pin_pos))])
 
 	var hazard_hit := false
 	if lie_result == "water":
 		strokes += 1
-		current_lie = "rough"
-		log_msg("[color=#%s]Splash! Water hazard — +1 penalty stroke, dropped in the rough.[/color]" % COLOR_WATER.to_html(false))
+		ball_pos = before_pos
+		current_lie = "rough" if hole.terrain_at(before_pos) != "fairway" else "fairway"
+		log_msg("[color=#%s]Splash! Water hazard — +1 penalty stroke, dropped back near your previous position.[/color]" % COLOR_WATER.to_html(false))
 		hazard_hit = true
 	elif lie_result == "bunker":
+		ball_pos = landing_pos
 		current_lie = "bunker"
 		log_msg("[color=#%s]In the sand.[/color]" % COLOR_SAND.to_html(false))
 		hazard_hit = true
 	elif lie_result == "rough":
+		ball_pos = landing_pos
 		current_lie = "rough"
+	elif lie_result == "green":
+		ball_pos = landing_pos
+		current_lie = "green"
 	else:
+		ball_pos = landing_pos
 		current_lie = "fairway"
+
+	shot_path.append(ball_pos)
+	map_view.set_ball(ball_pos, shot_path)
 
 	if hazard_hit and randf() < (1.0 / 6.0):
 		maybe_add_bad_card(lie_result)
@@ -418,8 +440,7 @@ func maybe_add_bad_card(lie_result: String) -> void:
 
 
 func advance_after_shot() -> void:
-	if distance_remaining <= GREEN_THRESHOLD:
-		current_lie = "green"
+	if current_lie == "green":
 		start_putting()
 	else:
 		begin_draft_phase()
@@ -429,7 +450,8 @@ func advance_after_shot() -> void:
 # --- Putting phase ---
 func start_putting() -> void:
 	state = State.PUTTING
-	putting_target = clamp(int(round(distance_remaining / 3.0)) + 3, 4, 12)
+	var dist_to_pin: float = ball_pos.distance_to(hole.pin_pos)
+	putting_target = clamp(int(round(dist_to_pin / 3.0)) + 3, 4, 12)
 	putting_progress = 0
 	log_msg("\n[b]On the green.[/b] Target to sink the putt: %d" % putting_target)
 	refresh_ui()
@@ -476,7 +498,13 @@ func finish_hole() -> void:
 # a forced discard) — the hole is now fully over.
 func finish_hole_done() -> void:
 	state = State.DONE
-	restart_button.visible = true
+	var diff := strokes - hole_par
+	var diff_text := "Even par"
+	if diff < 0:
+		diff_text = "%d under par" % -diff
+	elif diff > 0:
+		diff_text = "%d over par" % diff
+	log_msg("\n[b]Demo complete.[/b] Final score: %d (%s). Hit Restart Hole to play again." % [strokes, diff_text])
 
 
 func _on_restart_pressed() -> void:
@@ -491,7 +519,8 @@ var _animating: bool = false  # blocks refresh_ui() from clobbering an in-flight
 
 
 func refresh_ui() -> void:
-	status_label.text = "%d yards remaining | Lie: %s | Strokes so far: %d" % [int(distance_remaining), current_lie, strokes]
+	var dist_to_pin: float = ball_pos.distance_to(hole.pin_pos) if hole else 0.0
+	status_label.text = "%d yards to pin | Lie: %s | Strokes so far: %d" % [int(dist_to_pin), current_lie, strokes]
 
 	if _animating:
 		return
@@ -558,7 +587,18 @@ func refresh_ui() -> void:
 			options_container.add_child(bank_btn)
 
 		State.DONE:
-			options_label.text = "Hole complete."
+			var diff := strokes - hole_par
+			var diff_text := "even par"
+			if diff < 0:
+				diff_text = "%d under par" % -diff
+			elif diff > 0:
+				diff_text = "%d over par" % diff
+			options_label.text = "Demo complete — %d strokes (%s)." % [strokes, diff_text]
+			var restart_btn := Button.new()
+			restart_btn.text = "Restart Hole"
+			restart_btn.custom_minimum_size = Vector2(160, 60)
+			restart_btn.pressed.connect(_on_restart_pressed)
+			options_container.add_child(restart_btn)
 
 
 func rebuild_hand_row() -> void:
