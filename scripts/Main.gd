@@ -57,6 +57,10 @@ var hand_label: Label
 var hand_container: HBoxContainer
 var options_label: Label
 var options_container: HBoxContainer
+var dice_panel: PanelContainer
+var power_die: DiceView
+var accuracy_die: DiceView
+var dice_result_label: Label
 
 
 func _ready() -> void:
@@ -134,6 +138,47 @@ func build_ui() -> void:
 	log_box.fit_content = false
 	log_box.add_theme_color_override("default_color", COLOR_TEXT)
 	log_panel.add_child(log_box)
+
+	dice_panel = PanelContainer.new()
+	dice_panel.custom_minimum_size = Vector2(190, 0)
+	dice_panel.visible = false
+	var dice_panel_style := StyleBoxFlat.new()
+	dice_panel_style.bg_color = COLOR_PANEL
+	dice_panel_style.set_corner_radius_all(4)
+	dice_panel_style.content_margin_left = 8
+	dice_panel_style.content_margin_right = 8
+	dice_panel_style.content_margin_top = 8
+	dice_panel_style.content_margin_bottom = 8
+	dice_panel.add_theme_stylebox_override("panel", dice_panel_style)
+	mid_row.add_child(dice_panel)
+
+	var dice_vbox := VBoxContainer.new()
+	dice_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	dice_vbox.add_theme_constant_override("separation", 6)
+	dice_panel.add_child(dice_vbox)
+
+	var dice_row := HBoxContainer.new()
+	dice_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	dice_row.add_theme_constant_override("separation", 10)
+	dice_vbox.add_child(dice_row)
+
+	power_die = DiceView.new()
+	power_die.accent = Palette.FAIRWAY_DEEP
+	power_die.set_caption("Power")
+	dice_row.add_child(power_die)
+
+	accuracy_die = DiceView.new()
+	accuracy_die.accent = Palette.WATER_DEEP
+	accuracy_die.set_caption("Accuracy")
+	dice_row.add_child(accuracy_die)
+
+	dice_result_label = Label.new()
+	dice_result_label.text = ""
+	dice_result_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	dice_result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dice_result_label.add_theme_font_size_override("font_size", 12)
+	dice_result_label.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
+	dice_vbox.add_child(dice_result_label)
 
 	hand_label = Label.new()
 	hand_label.text = "Your Hand:"
@@ -347,24 +392,45 @@ func play_shot(card: Dictionary, tier: int) -> void:
 	var before_pos := ball_pos
 
 	log_msg("\n[b]Stroke %d[/b] — played %s, %s (lie: %s)" % [strokes, card.name, ShotResolver.tier_name(tier), current_lie])
-	log_msg("Power roll: %d vs Sweet Spot [%d-%d] (width %d) -> %s, %d yards." % [
-		power.roll, power.bounds.x, power.bounds.y, power.width, power.outcome, int(power.distance)])
-	log_msg("Accuracy roll: %d vs Sweet Spot [%d-%d] -> %s, %s %d°." % [
-		accuracy.roll, accuracy.bounds.x, accuracy.bounds.y, accuracy.band,
-		ShotResolver.side_label(accuracy.side), accuracy.degree])
-
-	if not active_bad_card.is_empty():
-		log_msg("[color=#%s](%s triggered and was discarded.)[/color]" % [COLOR_TEXT_SOFT.to_html(false), active_bad_card.name])
-		hand.erase(active_bad_card)
-		club_discard.append(active_bad_card)
-
-	if active_bad_card.get("name", "") == "Lost Ball":
-		strokes += 1
-		log_msg("[color=#%s]Lost Ball — +1 penalty stroke on top of this shot.[/color]" % COLOR_FLAG.to_html(false))
 
 	_animating = true
-	map_view.play_aim_animation(power.distance, float(accuracy.degree), accuracy.side, card.max_yard, func():
-		_resolve_shot_landing(before_pos, power, accuracy)
+	_play_dice_then_shot(card, power, accuracy, active_bad_card, before_pos)
+
+
+# Rolls the Power die, then the Accuracy die, logging each as it settles —
+# so the player watches the dice land instead of reading numbers cold —
+# then hands off to the existing aim/flight animation once both are done.
+func _play_dice_then_shot(card: Dictionary, power: Dictionary, accuracy: Dictionary, active_bad_card: Dictionary, before_pos: Vector2) -> void:
+	dice_panel.visible = true
+	dice_result_label.text = "Rolling for Power..."
+
+	power_die.roll_to(power.roll, 0.65, func():
+		log_msg("Power roll: %d vs Sweet Spot [%d-%d] (width %d) -> %s, %d yards." % [
+			power.roll, power.bounds.x, power.bounds.y, power.width, power.outcome, int(power.distance)])
+		dice_result_label.text = "Power: %s\nRolling for Accuracy..." % power.outcome.capitalize()
+
+		accuracy_die.roll_to(accuracy.roll, 0.65, func():
+			log_msg("Accuracy roll: %d vs Sweet Spot [%d-%d] -> %s, %s %d°." % [
+				accuracy.roll, accuracy.bounds.x, accuracy.bounds.y, accuracy.band,
+				ShotResolver.side_label(accuracy.side), accuracy.degree])
+			dice_result_label.text = "Power: %s\nAccuracy: %s" % [power.outcome.capitalize(), accuracy.band.capitalize()]
+
+			if not active_bad_card.is_empty():
+				log_msg("[color=#%s](%s triggered and was discarded.)[/color]" % [COLOR_TEXT_SOFT.to_html(false), active_bad_card.name])
+				hand.erase(active_bad_card)
+				club_discard.append(active_bad_card)
+
+			if active_bad_card.get("name", "") == "Lost Ball":
+				strokes += 1
+				log_msg("[color=#%s]Lost Ball — +1 penalty stroke on top of this shot.[/color]" % COLOR_FLAG.to_html(false))
+
+			get_tree().create_timer(0.35).timeout.connect(func():
+				dice_panel.visible = false
+				map_view.play_aim_animation(power.distance, float(accuracy.degree), accuracy.side, card.max_yard, func():
+					_resolve_shot_landing(before_pos, power, accuracy)
+				)
+			)
+		)
 	)
 
 
@@ -565,12 +631,7 @@ func refresh_ui() -> void:
 		State.TIER_SELECT:
 			options_label.text = "Playing %s — choose your swing:" % pending_club.name
 			for tier in [ShotResolver.Tier.FULL, ShotResolver.Tier.MID, ShotResolver.Tier.FINESSE, ShotResolver.Tier.EXTREME_FINESSE]:
-				var yard_range: Vector2 = ShotResolver.tier_yardage_range(pending_club, tier)
-				var b := Button.new()
-				b.text = "%s\n(~%d-%d yds)" % [ShotResolver.tier_name(tier), int(yard_range.x), int(yard_range.y)]
-				b.custom_minimum_size = Vector2(160, 60)
-				b.pressed.connect(_make_tier_callback(tier))
-				options_container.add_child(b)
+				options_container.add_child(make_tier_button(pending_club, tier))
 
 		State.PUTTING:
 			options_label.text = "Putting — push your luck (%d/%d):" % [putting_progress, putting_target]
@@ -612,6 +673,89 @@ func make_card_view(card: Dictionary, interactive: bool = true, compact: bool = 
 	var cv := CardView.new()
 	cv.setup(card, interactive, compact)
 	return cv
+
+
+# Builds a swing-tier button that shows both the implied yardage and the
+# actual odds for this club/tier/lie combo, computed straight from
+# ShotResolver's Sweet Spot math — so the guidance never drifts from what
+# the dice actually do. Clean % and Good-accuracy % are the headline
+# numbers; risk of a bad miss is called out in the flag color when high.
+func make_tier_button(club: Dictionary, tier: int) -> Button:
+	var yard_range: Vector2 = ShotResolver.tier_yardage_range(club, tier)
+	var power_odds := ShotResolver.power_odds(club, tier, current_lie)
+	var acc_odds := ShotResolver.accuracy_odds(club, tier, current_lie)
+
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(196, 156)
+	b.clip_text = false
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 3)
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.add_child(vbox)
+	b.add_child(margin)
+
+	var title := Label.new()
+	title.text = ShotResolver.tier_name(tier)
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", COLOR_TEXT)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(title)
+
+	var yard_line := Label.new()
+	yard_line.text = "~%d-%d yds" % [int(yard_range.x), int(yard_range.y)]
+	yard_line.add_theme_font_size_override("font_size", 11)
+	yard_line.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
+	yard_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(yard_line)
+
+	var rule := ColorRect.new()
+	rule.color = BoogieTheme.RULE
+	rule.custom_minimum_size = Vector2(0, 1)
+	vbox.add_child(rule)
+
+	var power_label := Label.new()
+	power_label.text = "POWER"
+	power_label.add_theme_font_size_override("font_size", 9)
+	power_label.add_theme_color_override("font_color", COLOR_ACCENT)
+	power_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(power_label)
+
+	var power_line := Label.new()
+	power_line.text = "Clean %d%% · Under %d%% · Over %d%%" % [
+		int(round(power_odds.clean * 100)), int(round(power_odds.undershoot * 100)), int(round(power_odds.overshoot * 100))]
+	power_line.autowrap_mode = TextServer.AUTOWRAP_WORD
+	power_line.add_theme_font_size_override("font_size", 10)
+	power_line.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
+	power_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(power_line)
+
+	var acc_label := Label.new()
+	acc_label.text = "ACCURACY"
+	acc_label.add_theme_font_size_override("font_size", 9)
+	acc_label.add_theme_color_override("font_color", COLOR_ACCENT)
+	acc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(acc_label)
+
+	var acc_line := Label.new()
+	acc_line.text = "On-line %d%% · Off/Miss %d%%" % [
+		int(round(acc_odds.good * 100)), int(round(acc_odds.off_miss * 100))]
+	acc_line.autowrap_mode = TextServer.AUTOWRAP_WORD
+	acc_line.add_theme_font_size_override("font_size", 10)
+	acc_line.add_theme_color_override("font_color", COLOR_FLAG if acc_odds.off_miss > 0.5 else COLOR_TEXT_SOFT)
+	acc_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(acc_line)
+
+	b.pressed.connect(_make_tier_callback(tier))
+	return b
 
 
 # --- Draft pick: pop, then fly the chosen card into the hand row before

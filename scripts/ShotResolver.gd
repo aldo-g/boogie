@@ -239,3 +239,35 @@ static func side_label(side: int) -> String:
 		Side.DRAW: return "Draw (left)"
 		Side.FADE: return "Fade (right)"
 	return "Straight"
+
+
+# --- Odds preview for UI: given a club+tier+lie, what are the chances of
+# each Power outcome (before any card/hazard modifiers)? Pure d20-counting
+# against the same Sweet Spot math roll_power() uses, so this always
+# matches what actually happens when the shot is played. ---
+static func power_odds(club: Dictionary, tier: int, lie: String) -> Dictionary:
+	var width := compute_width(club, tier, lie)
+	var bounds := sweet_spot_bounds(width)
+	var clean_count: int = bounds.y - bounds.x + 1
+	var undershoot_count: int = bounds.x - 1
+	var overshoot_count: int = DIE_SIDES - bounds.y
+	return {
+		"clean": float(clean_count) / float(DIE_SIDES),
+		"undershoot": float(undershoot_count) / float(DIE_SIDES),
+		"overshoot": float(overshoot_count) / float(DIE_SIDES),
+	}
+
+
+# --- Odds preview for Accuracy: chance the roll lands PERFECT/GOOD
+# (inside the Sweet Spot) vs OFF/MISS (outside it), same width math as
+# roll_accuracy() sans the overshoot shrink (that depends on the Power
+# roll's outcome, unknown before the dice are thrown). ---
+static func accuracy_odds(club: Dictionary, tier: int, lie: String) -> Dictionary:
+	var width := compute_width(club, tier, lie)
+	var bounds := sweet_spot_bounds(width)
+	var good_count: int = bounds.y - bounds.x + 1
+	var off_miss_count: int = DIE_SIDES - good_count
+	return {
+		"good": float(good_count) / float(DIE_SIDES),
+		"off_miss": float(off_miss_count) / float(DIE_SIDES),
+	}
