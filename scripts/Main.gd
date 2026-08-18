@@ -34,6 +34,9 @@ var club_discard: Array = []
 var green_deck: Array = []
 var green_discard: Array = []
 
+var current_hole_index: int = 1
+var round_scores: Array = []  # [{"hole": int, "par": int, "strokes": int}, ...]
+
 var hole: HoleData
 var hole_yardage: float = 380.0
 var hole_par: int = 4
@@ -294,7 +297,7 @@ func draw_from_deck(deck: Array, discard: Array) -> Dictionary:
 # HOLE FLOW
 # ---------------------------------------------------------
 func start_hole() -> void:
-	hole = HoleData.hole_1()
+	hole = HoleData.hole(current_hole_index)
 	hole_yardage = hole.yardage
 	hole_par = hole.par
 	ball_pos = hole.tee_pos
@@ -302,7 +305,7 @@ func start_hole() -> void:
 	strokes = 0
 	current_lie = "tee"
 	log_box.clear()
-	log_msg("[b]Hole 1 — Par %d — %d yards[/b]" % [hole_par, int(hole_yardage)])
+	log_msg("[b]Hole %d — Par %d — %d yards[/b]" % [current_hole_index, hole_par, int(hole_yardage)])
 	map_view.set_hole(hole)
 	map_view.set_ball(ball_pos, shot_path)
 	state = State.CLUB_SELECT
@@ -312,10 +315,50 @@ func start_hole() -> void:
 # --- Draft phase: draw 3, pick 1, permanently into hand ---
 func begin_draft_phase() -> void:
 	state = State.DRAFT
+	var owned_names := {}
+	for c in hand:
+		owned_names[c.name] = true
+
 	current_draft_options = []
 	for i in range(3):
-		current_draft_options.append(draw_from_deck(club_deck, club_discard))
+		var card := draw_unowned_club(owned_names)
+		current_draft_options.append(card)
+		# Also exclude this hole's other options from the remaining draws,
+		# so the 3 offers can't repeat a name amongst themselves either.
+		owned_names[card.name] = true
 	refresh_ui()
+
+
+# Draws a club whose name isn't in owned_names, setting aside (not
+# discarding) any duplicates it passes over along the way, then returns
+# them to the deck once a match is found or the whole pool is exhausted —
+# so a duplicate is never permanently lost and can't be re-drawn in a loop.
+# Falls back to a duplicate only if every card in deck + discard shares a
+# name with something already owned (impossible to avoid at that point).
+func draw_unowned_club(owned_names: Dictionary) -> Dictionary:
+	var set_aside: Array = []
+	var pool_size: int = club_deck.size() + club_discard.size()
+	var found: Dictionary = {}
+	var found_unowned := false
+	for i in range(max(pool_size, 1)):
+		var card := draw_from_deck(club_deck, club_discard)
+		if not owned_names.has(card.name):
+			found = card
+			found_unowned = true
+			break
+		set_aside.append(card)
+
+	if found_unowned:
+		club_deck.append_array(set_aside)
+	else:
+		# Exhausted the pool without finding an unowned club — every card
+		# left shares a name with something already owned. Put the set-aside
+		# cards back first, then just draw whatever's next (a duplicate),
+		# rather than leave current_draft_options short.
+		club_deck.append_array(set_aside)
+		found = draw_from_deck(club_deck, club_discard)
+
+	return found
 
 
 func on_draft_pick(index: int) -> void:
@@ -548,32 +591,63 @@ func on_putt_bank() -> void:
 	refresh_ui()
 
 
+func score_diff_text(diff: int) -> String:
+	if diff < 0:
+		return "%d under par" % -diff
+	elif diff > 0:
+		return "%d over par" % diff
+	return "Even par"
+
+
+func score_name(diff: int) -> String:
+	match diff:
+		-2: return "Eagle"
+		-1: return "Birdie"
+		0: return "Par"
+		1: return "Bogey"
+		2: return "Double Bogey"
+	if diff <= -3:
+		return "%d Under" % -diff
+	return "Triple Bogey+" if diff == 3 else "%d Over" % diff
+
+
 func finish_hole() -> void:
 	var diff := strokes - hole_par
-	var diff_text := "Even par"
-	if diff < 0:
-		diff_text = "%d under par" % -diff
-	elif diff > 0:
-		diff_text = "%d over par" % diff
-	log_msg("\n[b]Holed out![/b] Total strokes: %d (par %d) — %s" % [strokes, hole_par, diff_text])
+	log_msg("\n[b]Holed out![/b] Total strokes: %d (par %d) — %s" % [strokes, hole_par, score_diff_text(diff)])
+	round_scores.append({"hole": current_hole_index, "par": hole_par, "strokes": strokes})
 	log_msg("\n[b]End of hole.[/b] Draw 3, pick 1 to add to your hand permanently.")
 	begin_draft_phase()
 
 
 # Called once the end-of-hole draft pick has been resolved (with or without
-# a forced discard) — the hole is now fully over.
+# a forced discard) — the hole is now fully over. Either advances to the
+# next hole, or — after hole 18 — ends the round and shows the scorecard.
 func finish_hole_done() -> void:
+	if current_hole_index >= HoleData.HOLE_COUNT:
+		finish_round()
+	else:
+		current_hole_index += 1
+		start_hole()
+
+
+func finish_round() -> void:
 	state = State.DONE
-	var diff := strokes - hole_par
-	var diff_text := "Even par"
-	if diff < 0:
-		diff_text = "%d under par" % -diff
-	elif diff > 0:
-		diff_text = "%d over par" % diff
-	log_msg("\n[b]Demo complete.[/b] Final score: %d (%s). Hit Restart Hole to play again." % [strokes, diff_text])
+	log_box.clear()
+	log_msg("[b]Round Complete — Boogie Links[/b]\n")
+	var total_strokes := 0
+	var total_par := 0
+	for entry in round_scores:
+		total_strokes += entry.strokes
+		total_par += entry.par
+		log_msg("Hole %2d — Par %d — %d strokes — %s" % [entry.hole, entry.par, entry.strokes, score_name(entry.strokes - entry.par)])
+	var diff := total_strokes - total_par
+	log_msg("\n[b]Total: %d (%s)[/b]" % [total_strokes, score_diff_text(diff)])
+	refresh_ui()
 
 
 func _on_restart_pressed() -> void:
+	current_hole_index = 1
+	round_scores = []
 	init_game()
 	start_hole()
 
@@ -584,9 +658,26 @@ func _on_restart_pressed() -> void:
 var _animating: bool = false  # blocks refresh_ui() from clobbering an in-flight pick animation
 
 
+func running_score_diff() -> int:
+	var total_strokes := 0
+	var total_par := 0
+	for entry in round_scores:
+		total_strokes += entry.strokes
+		total_par += entry.par
+	return total_strokes - total_par
+
+
+func running_score_diff_text(diff: int) -> String:
+	if diff == 0:
+		return "E"
+	return ("+%d" % diff) if diff > 0 else ("%d" % diff)
+
+
 func refresh_ui() -> void:
 	var dist_to_pin: float = ball_pos.distance_to(hole.pin_pos) if hole else 0.0
-	status_label.text = "%d yards to pin | Lie: %s | Strokes so far: %d" % [int(dist_to_pin), current_lie, strokes]
+	status_label.text = "Hole %d of %d | %d yards to pin | Lie: %s | Strokes: %d | Round: %s" % [
+		current_hole_index, HoleData.HOLE_COUNT, int(dist_to_pin), current_lie, strokes,
+		running_score_diff_text(running_score_diff())]
 
 	if _animating:
 		return
@@ -648,15 +739,15 @@ func refresh_ui() -> void:
 			options_container.add_child(bank_btn)
 
 		State.DONE:
-			var diff := strokes - hole_par
-			var diff_text := "even par"
-			if diff < 0:
-				diff_text = "%d under par" % -diff
-			elif diff > 0:
-				diff_text = "%d over par" % diff
-			options_label.text = "Demo complete — %d strokes (%s)." % [strokes, diff_text]
+			var total_strokes := 0
+			var total_par := 0
+			for entry in round_scores:
+				total_strokes += entry.strokes
+				total_par += entry.par
+			var diff := total_strokes - total_par
+			options_label.text = "Round complete — %d strokes (%s)." % [total_strokes, score_diff_text(diff)]
 			var restart_btn := Button.new()
-			restart_btn.text = "Restart Hole"
+			restart_btn.text = "Restart Round"
 			restart_btn.custom_minimum_size = Vector2(160, 60)
 			restart_btn.pressed.connect(_on_restart_pressed)
 			options_container.add_child(restart_btn)
