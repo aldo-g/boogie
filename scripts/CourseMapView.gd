@@ -168,6 +168,9 @@ func _yard_extent() -> Rect2:
 	for pt in hole.fairway_polygon:
 		min_x = min(min_x, pt.x)
 		max_x = max(max_x, pt.x)
+	for pt in hole.green_polygon:
+		min_x = min(min_x, pt.x)
+		max_x = max(max_x, pt.x)
 	for hazard in hole.hazards:
 		for pt in hazard.polygon:
 			min_x = min(min_x, pt.x)
@@ -181,10 +184,15 @@ func _to_px(yard_pt: Vector2) -> Vector2:
 	var scale_x: float = avail.x / max(extent.size.x, 1.0)
 	var scale_y: float = avail.y / max(extent.size.y, 1.0)
 	var s: float = min(scale_x, scale_y)
-	var px_x: float = MARGIN + (yard_pt.x - extent.position.x) * s
+	# The hole is always much taller than it is wide, so one axis has slack
+	# left over after fitting the other — center the drawing in that slack
+	# rather than pinning it to the top-left corner.
+	var drawn_size: Vector2 = extent.size * s
+	var origin: Vector2 = Vector2(MARGIN, MARGIN) + (avail - drawn_size) * 0.5
+	var px_x: float = origin.x + (yard_pt.x - extent.position.x) * s
 	# Flip Y: yard-space +y (toward pin) should go UP on screen.
 	var y_from_top: float = extent.size.y - (yard_pt.y - extent.position.y)
-	var px_y: float = MARGIN + y_from_top * s
+	var px_y: float = origin.y + y_from_top * s
 	return Vector2(px_x, px_y)
 
 
@@ -453,14 +461,13 @@ func _fairway_half_width_at_y(fairway_poly: PackedVector2Array, y: float) -> flo
 		max_y = max(max_y, pt.y)
 	if y < min_y or y > max_y:
 		return 0.0
-	var max_x: float = 0.0
-	var probe_x: float = 0.0
-	while probe_x < 100.0:
-		if not Geometry2D.is_point_in_polygon(Vector2(probe_x, y), fairway_poly):
-			max_x = probe_x
-			break
+	var widest: float = 0.0
+	var probe_x: float = -120.0
+	while probe_x < 120.0:
+		if Geometry2D.is_point_in_polygon(Vector2(probe_x, y), fairway_poly):
+			widest = max(widest, abs(probe_x))
 		probe_x += 2.0
-	return max(max_x, 8.0)
+	return max(widest, 8.0)
 
 
 func _draw_tree(px: Vector2, scale_px: float, size_mult: float) -> void:

@@ -37,6 +37,14 @@ var green_discard: Array = []
 var current_hole_index: int = 1
 var round_scores: Array = []  # [{"hole": int, "par": int, "strokes": int}, ...]
 
+# Flight conditions (Section 10's weather/slope draw, once per 6-hole
+# flight). Fixed for the whole round for now — always clear skies, a
+# steady breeze — but kept as state, not constants, so a future flight
+# draw can reroll them without touching anything that reads them.
+var weather: String = "Sunny"
+var wind_mph: int = 6
+var wind_dir: String = "Onshore"
+
 var hole: HoleData
 var hole_yardage: float = 380.0
 var hole_par: int = 4
@@ -51,19 +59,22 @@ var putting_progress: int = 0
 var pending_new_card = null
 var current_draft_options: Array = []
 var pending_club: Dictionary = {}
+var pending_club_index: int = -1
 
 # --- UI node refs (built in code) ---
 var status_label: Label
 var map_view: CourseMapView
 var log_box: RichTextLabel
 var hand_label: Label
-var hand_container: HBoxContainer
 var options_label: Label
 var options_container: HBoxContainer
 var dice_panel: PanelContainer
 var power_die: DiceView
 var accuracy_die: DiceView
 var dice_result_label: Label
+var scorecard: ScorecardView
+var header_meta: HBoxContainer      # weather/wind/round/bag chip row, right of the title
+var hole_title: Label
 
 
 func _ready() -> void:
@@ -83,77 +94,103 @@ func build_ui() -> void:
 
 	var root := VBoxContainer.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.add_theme_constant_override("separation", 10)
-	root.offset_left = 16
-	root.offset_top = 16
-	root.offset_right = -16
-	root.offset_bottom = -16
+	root.add_theme_constant_override("separation", 0)
 	add_child(root)
 
-	var title := Label.new()
-	title.text = "Boogie — Single Hole Prototype"
-	title.add_theme_font_size_override("font_size", 22)
-	title.add_theme_color_override("font_color", COLOR_ACCENT)
-	root.add_child(title)
+	# --- Header: title, hole line, condition chips -------------------------
+	var header := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, true, 16))
+	header.custom_minimum_size = Vector2(0, 76)
+	root.add_child(header)
+
+	var header_row := HBoxContainer.new()
+	header_row.add_theme_constant_override("separation", 18)
+	header_row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	header.add_child(header_row)
+
+	var title_col := VBoxContainer.new()
+	title_col.add_theme_constant_override("separation", 2)
+	title_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	header_row.add_child(title_col)
+	title_col.add_child(BoogieUI.kicker("Boogie Links"))
+	var title := BoogieUI.heading("Hole 1 — Par 4", 26)
+	hole_title = title
+	title_col.add_child(title)
 
 	status_label = Label.new()
 	status_label.text = "Loading..."
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_label.add_theme_font_size_override("font_size", 13)
 	status_label.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
-	root.add_child(status_label)
+	header_row.add_child(status_label)
 
+	header_meta = HBoxContainer.new()
+	header_meta.add_theme_constant_override("separation", 8)
+	header_meta.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	header_row.add_child(header_meta)
+
+	# --- Middle: card column | plate | log column --------------------------
 	var mid_row := HBoxContainer.new()
-	mid_row.add_theme_constant_override("separation", 10)
-	mid_row.custom_minimum_size = Vector2(0, 150)
+	mid_row.add_theme_constant_override("separation", 0)
 	mid_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(mid_row)
 
-	var map_panel := PanelContainer.new()
-	map_panel.custom_minimum_size = Vector2(340, 0)
-	var map_panel_style := StyleBoxFlat.new()
-	map_panel_style.bg_color = COLOR_PANEL
-	map_panel_style.set_corner_radius_all(4)
-	map_panel_style.content_margin_left = 6
-	map_panel_style.content_margin_right = 6
-	map_panel_style.content_margin_top = 6
-	map_panel_style.content_margin_bottom = 6
-	map_panel.add_theme_stylebox_override("panel", map_panel_style)
-	mid_row.add_child(map_panel)
+	var card_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, true, false, false, 12))
+	card_panel.custom_minimum_size = Vector2(288, 0)
+	mid_row.add_child(card_panel)
+
+	scorecard = ScorecardView.new()
+	card_panel.add_child(scorecard)
+
+	var plate_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, true, false, false, 14))
+	plate_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mid_row.add_child(plate_panel)
+
+	var plate_col := VBoxContainer.new()
+	plate_col.add_theme_constant_override("separation", 8)
+	plate_panel.add_child(plate_col)
+	plate_col.add_child(BoogieUI.kicker("The hole"))
 
 	map_view = CourseMapView.new()
-	map_panel.add_child(map_view)
+	# Holes run tall and narrow (roughly 120-200 yds wide, 400-600 yds
+	# long), so the mat is capped to a sensible width and centered rather
+	# than stretched to fill the column — matted like a course-guide
+	# illustration, not a wide empty frame around a thin strip.
+	var hole_plate := BoogieUI.plate(map_view)
+	hole_plate.custom_minimum_size = Vector2(420, 0)
+	hole_plate.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	plate_col.add_child(hole_plate)
 
-	var log_panel := PanelContainer.new()
-	log_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var log_panel_style := StyleBoxFlat.new()
-	log_panel_style.bg_color = COLOR_PANEL
-	log_panel_style.set_corner_radius_all(4)
-	log_panel_style.content_margin_left = 8
-	log_panel_style.content_margin_right = 8
-	log_panel_style.content_margin_top = 8
-	log_panel_style.content_margin_bottom = 8
-	log_panel.add_theme_stylebox_override("panel", log_panel_style)
+	var log_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, false, 12))
+	log_panel.custom_minimum_size = Vector2(326, 0)
 	mid_row.add_child(log_panel)
+
+	var log_col := VBoxContainer.new()
+	log_col.add_theme_constant_override("separation", 7)
+	log_panel.add_child(log_col)
+	log_col.add_child(BoogieUI.kicker("Play-by-play"))
 
 	log_box = RichTextLabel.new()
 	log_box.bbcode_enabled = true
 	log_box.scroll_following = true
 	log_box.fit_content = false
+	log_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	log_box.add_theme_font_size_override("normal_font_size", 13)
 	log_box.add_theme_color_override("default_color", COLOR_TEXT)
-	log_panel.add_child(log_box)
+	log_col.add_child(log_box)
 
+	# Dice sit over the plate rather than in a panel that appears and
+	# vanishes from the layout — the sheet never reflows mid-shot.
 	dice_panel = PanelContainer.new()
-	dice_panel.custom_minimum_size = Vector2(190, 0)
 	dice_panel.visible = false
-	var dice_panel_style := StyleBoxFlat.new()
-	dice_panel_style.bg_color = COLOR_PANEL
-	dice_panel_style.set_corner_radius_all(4)
-	dice_panel_style.content_margin_left = 8
-	dice_panel_style.content_margin_right = 8
-	dice_panel_style.content_margin_top = 8
-	dice_panel_style.content_margin_bottom = 8
-	dice_panel.add_theme_stylebox_override("panel", dice_panel_style)
-	mid_row.add_child(dice_panel)
+	dice_panel.add_theme_stylebox_override("panel", BoogieUI.panel(COLOR_PANEL, 10))
+	dice_panel.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	dice_panel.offset_left = -95
+	dice_panel.offset_right = 95
+	dice_panel.offset_top = 24
+	dice_panel.offset_bottom = 160
+	map_view.add_child(dice_panel)
 
 	var dice_vbox := VBoxContainer.new()
 	dice_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -183,32 +220,37 @@ func build_ui() -> void:
 	dice_result_label.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
 	dice_vbox.add_child(dice_result_label)
 
-	hand_label = Label.new()
-	hand_label.text = "Your Hand:"
-	hand_label.add_theme_color_override("font_color", COLOR_TEXT)
-	root.add_child(hand_label)
+	# --- Bag strip: one row, whatever decision is in front of you right now —
+	# a label column on the left, a horizontally-scrolling row of cards or
+	# buttons on the right. Same shape whether that's your bag with a club
+	# expanding into its swing tiers, a discard pick, a draft offer, or the
+	# putting green's draw/bank pair.
+	var strip := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, true, false, 12))
+	strip.custom_minimum_size = Vector2(0, 174)
+	root.add_child(strip)
 
-	var hand_scroll := ScrollContainer.new()
-	hand_scroll.custom_minimum_size = Vector2(0, 134)
-	hand_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	root.add_child(hand_scroll)
+	var strip_row := HBoxContainer.new()
+	strip_row.add_theme_constant_override("separation", 14)
+	strip.add_child(strip_row)
 
-	hand_container = HBoxContainer.new()
-	hand_container.add_theme_constant_override("separation", 8)
-	hand_scroll.add_child(hand_container)
+	var strip_label_col := VBoxContainer.new()
+	strip_label_col.custom_minimum_size = Vector2(160, 0)
+	strip_label_col.add_theme_constant_override("separation", 5)
+	strip_row.add_child(strip_label_col)
 
-	options_label = Label.new()
-	options_label.text = ""
-	options_label.add_theme_color_override("font_color", COLOR_TEXT)
-	root.add_child(options_label)
+	hand_label = BoogieUI.kicker("Your bag")
+	strip_label_col.add_child(hand_label)
+
+	options_label = BoogieUI.body("", 12, COLOR_TEXT_SOFT)
+	strip_label_col.add_child(options_label)
 
 	var options_scroll := ScrollContainer.new()
-	options_scroll.custom_minimum_size = Vector2(0, 210)
+	options_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	options_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	root.add_child(options_scroll)
+	strip_row.add_child(options_scroll)
 
 	options_container = HBoxContainer.new()
-	options_container.add_theme_constant_override("separation", 8)
+	options_container.add_theme_constant_override("separation", 9)
 	options_scroll.add_child(options_container)
 
 
@@ -395,9 +437,9 @@ func on_discard_pick(index: int) -> void:
 
 
 # --- Club select -> tier select -> shot resolution ---
-func on_club_select(index: int, playable_indices: Array) -> void:
-	var hand_index: int = playable_indices[index]
+func on_club_select(hand_index: int) -> void:
 	pending_club = hand[hand_index]
+	pending_club_index = hand_index
 	state = State.TIER_SELECT
 	refresh_ui()
 
@@ -405,6 +447,7 @@ func on_club_select(index: int, playable_indices: Array) -> void:
 func on_tier_select(tier: int) -> void:
 	var card := pending_club
 	pending_club = {}
+	pending_club_index = -1
 	play_shot(card, tier)
 
 
@@ -437,6 +480,10 @@ func play_shot(card: Dictionary, tier: int) -> void:
 	log_msg("\n[b]Stroke %d[/b] — played %s, %s (lie: %s)" % [strokes, card.name, ShotResolver.tier_name(tier), current_lie])
 
 	_animating = true
+	# The tier tiles that led here are now stale — clear them out so a
+	# leftover click can't re-enter on_tier_select() with pending_club
+	# already emptied.
+	clear_container(options_container)
 	_play_dice_then_shot(card, power, accuracy, active_bad_card, before_pos)
 
 
@@ -675,57 +722,52 @@ func running_score_diff_text(diff: int) -> String:
 
 func refresh_ui() -> void:
 	var dist_to_pin: float = ball_pos.distance_to(hole.pin_pos) if hole else 0.0
-	status_label.text = "Hole %d of %d | %d yards to pin | Lie: %s | Strokes: %d | Round: %s" % [
-		current_hole_index, HoleData.HOLE_COUNT, int(dist_to_pin), current_lie, strokes,
-		running_score_diff_text(running_score_diff())]
+	status_label.text = "%d yards to pin · lie: %s · %d strokes" % [
+		int(dist_to_pin), current_lie, strokes]
+
+	if scorecard:
+		scorecard.set_round(round_scores, current_hole_index, strokes)
+	if hole_title and hole:
+		hole_title.text = "Hole %d — Par %d — %d yards" % [current_hole_index, hole_par, int(hole_yardage)]
+	if header_meta:
+		clear_container(header_meta)
+		header_meta.add_child(BoogieUI.chip(weather.to_upper(), COLOR_SAND))
+		header_meta.add_child(BoogieUI.chip("WIND %d MPH · %s" % [wind_mph, wind_dir.to_upper()], COLOR_WATER))
+		header_meta.add_child(BoogieUI.chip("THRU %d · %s" % [round_scores.size(), running_score_diff_text(running_score_diff())], COLOR_ACCENT))
+		header_meta.add_child(BoogieUI.chip("BAG %d/%d" % [hand.size(), HAND_CAP], COLOR_TEXT_SOFT))
 
 	if _animating:
 		return
-
-	rebuild_hand_row()
 
 	clear_container(options_container)
 
 	match state:
 		State.DRAFT:
-			options_label.text = "Draw 3, pick 1 to add to your hand:"
+			hand_label.text = "DRAW 3, PICK 1"
+			options_label.text = "Add one to your bag, permanently."
 			for i in range(current_draft_options.size()):
 				var cv := make_card_view(current_draft_options[i])
 				cv.picked.connect(_make_draft_pick_callback(i))
 				options_container.add_child(cv)
 
 		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
-			options_label.text = "Hand full — choose a card to discard:"
+			hand_label.text = "BAG FULL (%d)" % HAND_CAP
+			options_label.text = "Tap a card to drop it for %s." % pending_new_card.name
 			for i in range(hand.size()):
 				var cv := make_card_view(hand[i])
 				cv.picked.connect(_make_discard_callback(i))
 				options_container.add_child(cv)
 
-		State.CLUB_SELECT:
-			options_label.text = "Choose a club to play:"
+		State.CLUB_SELECT, State.TIER_SELECT:
+			hand_label.text = "YOUR BAG %d/%d" % [hand.size(), HAND_CAP]
+			options_label.text = "Tap a club, then a swing."
 			if current_lie == "bunker":
-				options_label.text += " (bunker — irons/wedges only)"
-			var playable_indices: Array = []
-			for i in range(hand.size()):
-				var c = hand[i]
-				if c.type == "putter" or c.type == "bad":
-					continue
-				if current_lie == "bunker" and c.type == "wood":
-					continue
-				playable_indices.append(i)
-			for j in range(playable_indices.size()):
-				var card = hand[playable_indices[j]]
-				var cv := make_card_view(card)
-				cv.picked.connect(_make_club_callback(j, playable_indices))
-				options_container.add_child(cv)
-
-		State.TIER_SELECT:
-			options_label.text = "Playing %s — choose your swing:" % pending_club.name
-			for tier in [ShotResolver.Tier.FULL, ShotResolver.Tier.MID, ShotResolver.Tier.FINESSE, ShotResolver.Tier.EXTREME_FINESSE]:
-				options_container.add_child(make_tier_button(pending_club, tier))
+				options_label.text += "\n(bunker — irons/wedges only)"
+			rebuild_bag_row()
 
 		State.PUTTING:
-			options_label.text = "Putting — push your luck (%d/%d):" % [putting_progress, putting_target]
+			hand_label.text = "PUSH YOUR LUCK"
+			options_label.text = "%d / %d — draw again, or bank it." % [putting_progress, putting_target]
 			var draw_btn := Button.new()
 			draw_btn.text = "Draw"
 			draw_btn.custom_minimum_size = Vector2(100, 60)
@@ -745,19 +787,13 @@ func refresh_ui() -> void:
 				total_strokes += entry.strokes
 				total_par += entry.par
 			var diff := total_strokes - total_par
-			options_label.text = "Round complete — %d strokes (%s)." % [total_strokes, score_diff_text(diff)]
+			hand_label.text = "ROUND COMPLETE"
+			options_label.text = "%d strokes (%s)." % [total_strokes, score_diff_text(diff)]
 			var restart_btn := Button.new()
 			restart_btn.text = "Restart Round"
 			restart_btn.custom_minimum_size = Vector2(160, 60)
 			restart_btn.pressed.connect(_on_restart_pressed)
 			options_container.add_child(restart_btn)
-
-
-func rebuild_hand_row() -> void:
-	clear_container(hand_container)
-	for card in hand:
-		var cv := make_card_view(card, false, true)
-		hand_container.add_child(cv)
 
 
 func make_card_view(card: Dictionary, interactive: bool = true, compact: bool = false) -> CardView:
@@ -766,29 +802,105 @@ func make_card_view(card: Dictionary, interactive: bool = true, compact: bool = 
 	return cv
 
 
-# Builds a swing-tier button that shows both the implied yardage and the
-# actual odds for this club/tier/lie combo, computed straight from
-# ShotResolver's Sweet Spot math — so the guidance never drifts from what
-# the dice actually do. Clean % and Good-accuracy % are the headline
-# numbers; risk of a bad miss is called out in the flag color when high.
-func make_tier_button(club: Dictionary, tier: int) -> Button:
+# Builds the bag row for CLUB_SELECT/TIER_SELECT: every card in hand, in
+# hand order, shown compact. The one you tapped (pending_club_index, only
+# set during TIER_SELECT) expands in place into its four swing tiles
+# instead of swapping to a separate row — "tap a club, its swings unfold
+# on the card itself."
+func rebuild_bag_row() -> void:
+	var playable := {}
+	for i in range(hand.size()):
+		var c = hand[i]
+		if c.type == "putter" or c.type == "bad":
+			continue
+		if current_lie == "bunker" and c.type == "wood":
+			continue
+		playable[i] = true
+
+	for i in range(hand.size()):
+		var card = hand[i]
+		if state == State.TIER_SELECT and i == pending_club_index:
+			options_container.add_child(make_expanded_club_card(card))
+		else:
+			var cv := make_card_view(card, state == State.CLUB_SELECT and playable.has(i), true)
+			if cv.interactive:
+				cv.picked.connect(_make_club_callback(i))
+			options_container.add_child(cv)
+
+
+# The expanded inline swing-tier widget: one wide card replacing the tapped
+# club's compact view, its four swings shown side by side.
+func make_expanded_club_card(club: Dictionary) -> Control:
+	var accent := CardView.type_color(club.get("type", "iron"))
+
+	var outer := PanelContainer.new()
+	outer.custom_minimum_size = Vector2(300, 138)
+	var style := StyleBoxFlat.new()
+	style.bg_color = BoogieTheme.CARD_BG
+	style.set_corner_radius_all(10)
+	style.border_color = accent
+	style.set_border_width_all(2)
+	style.content_margin_left = 10
+	style.content_margin_right = 10
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
+	outer.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 5)
+	outer.add_child(vbox)
+
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 8)
+	vbox.add_child(header)
+
+	var name_label := Label.new()
+	name_label.text = club.name
+	name_label.add_theme_font_size_override("font_size", 13)
+	name_label.add_theme_color_override("font_color", COLOR_TEXT)
+	header.add_child(name_label)
+
+	var range_label := Label.new()
+	range_label.text = "%d-%d yds" % [int(club.get("min_yard", 0)), int(club.get("max_yard", 0))]
+	range_label.add_theme_font_size_override("font_size", 11)
+	range_label.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
+	header.add_child(range_label)
+
+	var tiles := HBoxContainer.new()
+	tiles.add_theme_constant_override("separation", 5)
+	tiles.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(tiles)
+
+	for tier in [ShotResolver.Tier.FULL, ShotResolver.Tier.MID, ShotResolver.Tier.FINESSE, ShotResolver.Tier.EXTREME_FINESSE]:
+		tiles.add_child(make_tier_tile(club, tier))
+
+	return outer
+
+
+# One swing tile inside the expanded club card: tier name, its yardage
+# band, and the clean-shot / on-line odds for the current lie, computed
+# straight from ShotResolver's Sweet Spot math so the guidance never
+# drifts from what the dice actually do.
+func make_tier_tile(club: Dictionary, tier: int) -> Button:
 	var yard_range: Vector2 = ShotResolver.tier_yardage_range(club, tier)
 	var power_odds := ShotResolver.power_odds(club, tier, current_lie)
 	var acc_odds := ShotResolver.accuracy_odds(club, tier, current_lie)
 
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(196, 156)
+	b.custom_minimum_size = Vector2(64, 0)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	b.clip_text = false
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 3)
+	vbox.add_theme_constant_override("separation", 2)
 	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_bottom", 8)
+	margin.add_theme_constant_override("margin_left", 5)
+	margin.add_theme_constant_override("margin_right", 5)
+	margin.add_theme_constant_override("margin_top", 5)
+	margin.add_theme_constant_override("margin_bottom", 5)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.add_child(vbox)
@@ -796,51 +908,30 @@ func make_tier_button(club: Dictionary, tier: int) -> Button:
 
 	var title := Label.new()
 	title.text = ShotResolver.tier_name(tier)
-	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_font_size_override("font_size", 9)
 	title.add_theme_color_override("font_color", COLOR_TEXT)
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(title)
 
 	var yard_line := Label.new()
-	yard_line.text = "~%d-%d yds" % [int(yard_range.x), int(yard_range.y)]
-	yard_line.add_theme_font_size_override("font_size", 11)
+	yard_line.text = "%d-%d" % [int(yard_range.x), int(yard_range.y)]
+	yard_line.add_theme_font_size_override("font_size", 9)
 	yard_line.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
 	yard_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(yard_line)
 
-	var rule := ColorRect.new()
-	rule.color = BoogieTheme.RULE
-	rule.custom_minimum_size = Vector2(0, 1)
-	vbox.add_child(rule)
-
-	var power_label := Label.new()
-	power_label.text = "POWER"
-	power_label.add_theme_font_size_override("font_size", 9)
-	power_label.add_theme_color_override("font_color", COLOR_ACCENT)
-	power_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(power_label)
-
-	var power_line := Label.new()
-	power_line.text = "Clean %d%% · Under %d%% · Over %d%%" % [
-		int(round(power_odds.clean * 100)), int(round(power_odds.undershoot * 100)), int(round(power_odds.overshoot * 100))]
-	power_line.autowrap_mode = TextServer.AUTOWRAP_WORD
-	power_line.add_theme_font_size_override("font_size", 10)
-	power_line.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
-	power_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(power_line)
-
-	var acc_label := Label.new()
-	acc_label.text = "ACCURACY"
-	acc_label.add_theme_font_size_override("font_size", 9)
-	acc_label.add_theme_color_override("font_color", COLOR_ACCENT)
-	acc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(acc_label)
+	var clean_line := Label.new()
+	clean_line.text = "clean %d%%" % int(round(power_odds.clean * 100))
+	clean_line.autowrap_mode = TextServer.AUTOWRAP_WORD
+	clean_line.add_theme_font_size_override("font_size", 9)
+	clean_line.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
+	clean_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(clean_line)
 
 	var acc_line := Label.new()
-	acc_line.text = "On-line %d%% · Off/Miss %d%%" % [
-		int(round(acc_odds.good * 100)), int(round(acc_odds.off_miss * 100))]
+	acc_line.text = "on-line %d%%" % int(round(acc_odds.good * 100))
 	acc_line.autowrap_mode = TextServer.AUTOWRAP_WORD
-	acc_line.add_theme_font_size_override("font_size", 10)
+	acc_line.add_theme_font_size_override("font_size", 9)
 	acc_line.add_theme_color_override("font_color", COLOR_FLAG if acc_odds.off_miss > 0.5 else COLOR_TEXT_SOFT)
 	acc_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(acc_line)
@@ -849,16 +940,14 @@ func make_tier_button(club: Dictionary, tier: int) -> Button:
 	return b
 
 
-# --- Draft pick: pop, then fly the chosen card into the hand row before
-# actually mutating game state, so the pick reads as a physical action. ---
+# --- Draft pick: pop, then fade the whole offer row out before actually
+# mutating game state, so the pick still reads as a deliberate action. ---
 func _on_draft_card_picked(cv: CardView, index: int) -> void:
 	_animating = true
 	for other in options_container.get_children():
-		if other != cv:
-			other.play_fade_out()
+		other.play_fade_out()
 
-	var target_pos: Vector2 = hand_container.global_position + Vector2(hand_container.size.x, hand_container.size.y * 0.5)
-	cv.play_fly_to_hand(target_pos, func():
+	get_tree().create_timer(0.25).timeout.connect(func():
 		_animating = false
 		on_draft_pick(index)
 	)
@@ -873,8 +962,8 @@ func _make_discard_callback(i: int) -> Callable:
 	return func(_cv): on_discard_pick(i)
 
 
-func _make_club_callback(i: int, playable_indices: Array) -> Callable:
-	return func(_cv): on_club_select(i, playable_indices)
+func _make_club_callback(hand_index: int) -> Callable:
+	return func(_cv): on_club_select(hand_index)
 
 
 func _make_tier_callback(tier: int) -> Callable:
