@@ -10,9 +10,19 @@ extends Control
 # jumping between two points.
 # ---------------------------------------------------------
 
+signal aim_picked(target: Vector2)  # yard-space point where the drag was released
+
 var hole: HoleData
 var ball_pos: Vector2 = Vector2.ZERO  # yard-space
 var shot_path: Array = []             # yard-space points, tee to current ball_pos
+
+var aiming: bool = false           # true while waiting for the player's drag
+var aim_target: Vector2 = Vector2.ZERO  # yard-space, last-picked (or default) aim point
+var aim_min_range: float = 0.0     # yards — the selected club's min_yard
+var aim_max_range: float = 999.0   # yards — the selected club's max_yard
+
+var _dragging: bool = false        # true from press to release while aiming
+var _drag_current: Vector2 = Vector2.ZERO  # yard-space, live cursor position mid-drag
 
 # Aim-tool animation state (yard-space): set by play_aim_animation(), cleared after.
 var _aim_active: bool = false
@@ -59,6 +69,7 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(220, 0)
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mouse_filter = Control.MOUSE_FILTER_STOP
 
 
 func set_hole(p_hole: HoleData) -> void:
@@ -72,19 +83,68 @@ func set_ball(p_pos: Vector2, p_path: Array) -> void:
 	queue_redraw()
 
 
+# Enables/disables click-to-aim, locked to the selected club's yardage —
+# the drag's direction is free, but its distance from the ball clamps to
+# [min_range, max_range] so you can't aim somewhere the club can't reach.
+# Press-drag-release: press starts the drag, motion previews it live,
+# release commits with aim_picked. Nothing commits until the mouse
+# actually comes up, so a press that's dragged elsewhere before release
+# never locks in the wrong spot.
+func set_aiming(enabled: bool, min_range: float = 0.0, max_range: float = 999.0) -> void:
+	aiming = enabled
+	aim_min_range = max(min_range, 0.0)
+	aim_max_range = max(max_range, aim_min_range + 0.01)
+	_dragging = false
+	queue_redraw()
+
+
+func set_aim_target(p_target: Vector2) -> void:
+	aim_target = _clamp_to_range(p_target) if aiming else p_target
+	queue_redraw()
+
+
+# Keeps the drag's direction from the ball, clamping only its distance
+# into [aim_min_range, aim_max_range].
+func _clamp_to_range(p: Vector2) -> Vector2:
+	var offset := p - ball_pos
+	var dist := offset.length()
+	if dist < 0.0001:
+		return ball_pos + Vector2.UP * aim_min_range
+	var clamped_dist: float = clamp(dist, aim_min_range, aim_max_range)
+	return ball_pos + offset.normalized() * clamped_dist
+
+
+func _gui_input(event: InputEvent) -> void:
+	if not aiming:
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_dragging = true
+			_drag_current = _clamp_to_range(_px_to_yard(event.position))
+			queue_redraw()
+			accept_event()
+		elif _dragging:
+			_dragging = false
+			aim_picked.emit(_clamp_to_range(_px_to_yard(event.position)))
+			accept_event()
+	elif event is InputEventMouseMotion and _dragging:
+		_drag_current = _clamp_to_range(_px_to_yard(event.position))
+		queue_redraw()
+
+
 # Kicks off the full shot animation: the aim arm rotates to the degree
 # offset and extends to show the intended line, then the ball itself
 # flies along that same line with a little arc and a fading trail, so
 # the ball is visibly traceable across the map rather than teleporting.
-# All distances in yards; direction is computed from the current
-# ball_pos toward the hole's pin.
-func play_aim_animation(distance: float, degree: float, side: int, max_distance: float, on_done: Callable) -> void:
+# All distances in yards; base_dir is the player's chosen aim line (from
+# the click-to-aim step), not necessarily toward the pin.
+func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side: int, max_distance: float, on_done: Callable) -> void:
 	if not hole:
 		on_done.call()
 		return
 	_aim_active = true
 	_aim_origin = ball_pos
-	_aim_base_dir = (hole.pin_pos - ball_pos).normalized()
+	_aim_base_dir = base_dir.normalized()
 	if _aim_base_dir.length_squared() < 0.0001:
 		_aim_base_dir = Vector2.UP
 	_aim_max_distance = max(max_distance, distance, 1.0)
@@ -194,6 +254,22 @@ func _to_px(yard_pt: Vector2) -> Vector2:
 	var y_from_top: float = extent.size.y - (yard_pt.y - extent.position.y)
 	var px_y: float = origin.y + y_from_top * s
 	return Vector2(px_x, px_y)
+
+
+# Inverse of _to_px(): screen pixel -> yard-space, for turning a click into
+# an aim target. Mirrors _to_px()'s centering/scale math exactly.
+func _px_to_yard(px_pt: Vector2) -> Vector2:
+	var extent := _yard_extent()
+	var avail := size - Vector2(MARGIN, MARGIN) * 2.0
+	var scale_x: float = avail.x / max(extent.size.x, 1.0)
+	var scale_y: float = avail.y / max(extent.size.y, 1.0)
+	var s: float = max(min(scale_x, scale_y), 0.0001)
+	var drawn_size: Vector2 = extent.size * s
+	var origin: Vector2 = Vector2(MARGIN, MARGIN) + (avail - drawn_size) * 0.5
+	var yard_x: float = (px_pt.x - origin.x) / s + extent.position.x
+	var y_from_top: float = (px_pt.y - origin.y) / s
+	var yard_y: float = extent.position.y + extent.size.y - y_from_top
+	return Vector2(yard_x, yard_y)
 
 
 func _px_scale() -> float:
@@ -309,6 +385,32 @@ func _draw() -> void:
 	if shot_path.size() >= 2:
 		for i in range(shot_path.size() - 1):
 			_draw_dashed_line(_to_px(shot_path[i]), _to_px(shot_path[i + 1]), COLOR_TRAIL, 2.0, 6.0, 5.0)
+
+	# Waiting for the player's drag: a ring around the ball marks where the
+	# drag starts (the tee, on the first shot) so it reads as grabbable,
+	# not just a static dot. Faint rings at the selected club's min/max
+	# range show the annulus the drag is locked into.
+	if aiming:
+		var origin_px := _to_px(ball_pos)
+		draw_arc(origin_px, 9.0, 0, TAU, 20, COLOR_AIM_LINE, 2.0)
+		var scale_px := _px_scale()
+		if aim_max_range < 900.0:
+			draw_arc(origin_px, aim_max_range * scale_px, 0, TAU, 56, Color(BoogieTheme.INK, 0.16), 1.0)
+		if aim_min_range > 0.5:
+			draw_arc(origin_px, aim_min_range * scale_px, 0, TAU, 56, Color(BoogieTheme.INK, 0.16), 1.0)
+
+	if _dragging:
+		# Live preview: follows the cursor, nothing commits until release.
+		var drag_px := _to_px(_drag_current)
+		draw_line(_to_px(ball_pos), drag_px, COLOR_AIM_LINE, 2.0)
+		draw_arc(drag_px, 7.0, 0, TAU, 16, COLOR_AIM_LINE, 2.0)
+	elif not _aim_active and not _flight_active and aim_target.distance_to(ball_pos) > 0.5:
+		# Last-committed aim target, shown while browsing clubs/tiers.
+		var target_px := _to_px(aim_target)
+		_draw_dashed_line(_to_px(ball_pos), target_px, COLOR_AIM_LINE, 1.5, 5.0, 4.0)
+		draw_arc(target_px, 6.0, 0, TAU, 16, COLOR_AIM_LINE, 1.5)
+		draw_line(target_px + Vector2(-8, 0), target_px + Vector2(8, 0), COLOR_AIM_LINE, 1.5)
+		draw_line(target_px + Vector2(0, -8), target_px + Vector2(0, 8), COLOR_AIM_LINE, 1.5)
 
 	# Aim tool: pivots at the ball's position, rotates to the degree offset,
 	# extends to the rolled distance. Sign convention must match Main.gd's

@@ -9,7 +9,7 @@ extends Control
 #   -> Green Deck push-your-luck putting
 # ---------------------------------------------------------
 
-enum State { DRAFT, DISCARD_FOR_DRAFT, CLUB_SELECT, TIER_SELECT, DISCARD_FOR_HAZARD, PUTTING, DONE }
+enum State { AIM, DRAFT, DISCARD_FOR_DRAFT, CLUB_SELECT, TIER_SELECT, DISCARD_FOR_HAZARD, PUTTING, DONE }
 
 const HAND_CAP := 14
 
@@ -52,6 +52,7 @@ var ball_pos: Vector2 = Vector2.ZERO  # yard-space, (0,0) at tee, +y toward pin
 var shot_path: Array = []  # history of ball_pos points this hole, for drawing the trail
 var strokes: int = 0
 var current_lie: String = "tee"
+var aim_target: Vector2 = Vector2.ZERO  # yard-space, the player's clicked target for the next shot
 
 var putting_target: int = 0
 var putting_progress: int = 0
@@ -75,6 +76,7 @@ var dice_result_label: Label
 var scorecard: ScorecardView
 var header_meta: HBoxContainer      # weather/wind/round/bag chip row, right of the title
 var hole_title: Label
+var shot_outlook: VBoxContainer
 
 
 func _ready() -> void:
@@ -153,6 +155,7 @@ func build_ui() -> void:
 	plate_col.add_child(BoogieUI.kicker("The hole"))
 
 	map_view = CourseMapView.new()
+	map_view.aim_picked.connect(_on_aim_picked)
 	# Holes run tall and narrow (roughly 120-200 yds wide, 400-600 yds
 	# long), so the mat is capped to a sensible width and centered rather
 	# than stretched to fill the column — matted like a course-guide
@@ -169,6 +172,15 @@ func build_ui() -> void:
 	var log_col := VBoxContainer.new()
 	log_col.add_theme_constant_override("separation", 7)
 	log_panel.add_child(log_col)
+
+	# Shot outlook: the odds for the club just picked, across all four
+	# swing tiers, visible the moment you're deciding — not just buried in
+	# the tier tiles once you get there. Hidden outside AIM/TIER_SELECT.
+	shot_outlook = VBoxContainer.new()
+	shot_outlook.add_theme_constant_override("separation", 3)
+	shot_outlook.visible = false
+	log_col.add_child(shot_outlook)
+
 	log_col.add_child(BoogieUI.kicker("Play-by-play"))
 
 	log_box = RichTextLabel.new()
@@ -226,7 +238,10 @@ func build_ui() -> void:
 	# expanding into its swing tiers, a discard pick, a draft offer, or the
 	# putting green's draw/bank pair.
 	var strip := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, true, false, 12))
-	strip.custom_minimum_size = Vector2(0, 174)
+	# 194, not the wireframe's 174 — the expanded club card's PERFECT/GOOD/
+	# OFF/MISS breakdown needs a bit more room than the plain clean/on-line
+	# odds it replaced.
+	strip.custom_minimum_size = Vector2(0, 194)
 	root.add_child(strip)
 
 	var strip_row := HBoxContainer.new()
@@ -354,6 +369,29 @@ func start_hole() -> void:
 	refresh_ui()
 
 
+# Opens the click-to-aim step once a club is chosen: locks the drag's
+# distance from the ball to that club's own yardage range (so you can't
+# aim somewhere it can't reach) and defaults the target to the pin,
+# clamped into that range — a player who doesn't bother re-aiming still
+# gets a sane default.
+func begin_aim_for_shot() -> void:
+	map_view.set_aiming(true, pending_club.min_yard, pending_club.max_yard)
+	map_view.set_aim_target(hole.pin_pos)
+	aim_target = map_view.aim_target
+	state = State.AIM
+
+
+# The player released their drag on the map, setting the target line for
+# the next shot — now on to picking a swing tier for the club already chosen.
+func _on_aim_picked(target: Vector2) -> void:
+	if state != State.AIM:
+		return
+	aim_target = target
+	map_view.set_aiming(false)
+	state = State.TIER_SELECT
+	refresh_ui()
+
+
 # --- Draft phase: draw 3, pick 1, permanently into hand ---
 func begin_draft_phase() -> void:
 	state = State.DRAFT
@@ -436,11 +474,11 @@ func on_discard_pick(index: int) -> void:
 	refresh_ui()
 
 
-# --- Club select -> tier select -> shot resolution ---
+# --- Club select -> aim (drag, locked to the club's range) -> tier select -> shot resolution ---
 func on_club_select(hand_index: int) -> void:
 	pending_club = hand[hand_index]
 	pending_club_index = hand_index
-	state = State.TIER_SELECT
+	begin_aim_for_shot()
 	refresh_ui()
 
 
@@ -467,6 +505,15 @@ func play_shot(card: Dictionary, tier: int) -> void:
 	if active_bad_card.get("name", "") == "Yips":
 		accuracy_width_mod = -2
 
+	# Odds preview, printed right as the player commits — same numbers the
+	# tier tile showed, computed the same way, so nothing on screen ever
+	# disagrees with what the dice are about to do.
+	var preview_odds := ShotResolver.accuracy_band_odds(card, effective_tier, current_lie)
+	var preview_distance := ShotResolver.clean_distance(card, effective_tier, current_lie)
+	log_msg("\nPlaying %s here: %d%% PERFECT, %d%% GOOD, %d%% OFF, %d%% MISS. Distance if PERFECT: %d yds." % [
+		card.name, int(round(preview_odds.PERFECT * 100)), int(round(preview_odds.GOOD * 100)),
+		int(round(preview_odds.OFF * 100)), int(round(preview_odds.MISS * 100)), int(round(preview_distance))])
+
 	var result := ShotResolver.resolve_shot(card, effective_tier, current_lie, 0, accuracy_width_mod)
 	var power: Dictionary = result.power
 	var accuracy: Dictionary = result.accuracy
@@ -477,7 +524,7 @@ func play_shot(card: Dictionary, tier: int) -> void:
 	strokes += 1
 	var before_pos := ball_pos
 
-	log_msg("\n[b]Stroke %d[/b] — played %s, %s (lie: %s)" % [strokes, card.name, ShotResolver.tier_name(tier), current_lie])
+	log_msg("[b]Stroke %d[/b] — played %s, %s (lie: %s)" % [strokes, card.name, ShotResolver.tier_name(tier), current_lie])
 
 	_animating = true
 	# The tier tiles that led here are now stale — clear them out so a
@@ -516,20 +563,25 @@ func _play_dice_then_shot(card: Dictionary, power: Dictionary, accuracy: Diction
 
 			get_tree().create_timer(0.35).timeout.connect(func():
 				dice_panel.visible = false
-				map_view.play_aim_animation(power.distance, float(accuracy.degree), accuracy.side, card.max_yard, func():
-					_resolve_shot_landing(before_pos, power, accuracy)
+				# Aim toward the player's clicked target for this shot, not
+				# always the pin — falls back to the pin if they landed the
+				# click right on the ball (a degenerate, zero-length line).
+				var aim_dir: Vector2 = (aim_target - before_pos).normalized()
+				if aim_dir.length_squared() < 0.0001:
+					aim_dir = (hole.pin_pos - before_pos).normalized()
+				if aim_dir.length_squared() < 0.0001:
+					aim_dir = Vector2.UP
+				map_view.play_aim_animation(aim_dir, power.distance, float(accuracy.degree), accuracy.side, card.max_yard, func():
+					_resolve_shot_landing(before_pos, aim_dir, power, accuracy)
 				)
 			)
 		)
 	)
 
 
-func _resolve_shot_landing(before_pos: Vector2, power: Dictionary, accuracy: Dictionary) -> void:
+func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, power: Dictionary, accuracy: Dictionary) -> void:
 	_animating = false
 
-	var aim_dir: Vector2 = (hole.pin_pos - before_pos).normalized()
-	if aim_dir.length_squared() < 0.0001:
-		aim_dir = Vector2.UP
 	# Vector2.rotated() turns clockwise for +angle in Godot's Y-down convention,
 	# so Draw (curves left) needs a positive angle here to end up on -x.
 	var sign: float = 0.0
@@ -739,9 +791,15 @@ func refresh_ui() -> void:
 	if _animating:
 		return
 
+	rebuild_shot_outlook()
 	clear_container(options_container)
 
 	match state:
+		State.AIM:
+			hand_label.text = "AIMING WITH %s" % pending_club.name.to_upper()
+			options_label.text = "Drag on the hole to set your line — locked to %d-%d yds." % [
+				int(pending_club.min_yard), int(pending_club.max_yard)]
+
 		State.DRAFT:
 			hand_label.text = "DRAW 3, PICK 1"
 			options_label.text = "Add one to your bag, permanently."
@@ -802,6 +860,40 @@ func make_card_view(card: Dictionary, interactive: bool = true, compact: bool = 
 	return cv
 
 
+# Shot outlook, shown in the log column while a club is chosen (AIM and
+# TIER_SELECT): every swing tier's Sweet Spot, its PERFECT/GOOD/OFF/MISS
+# odds, and the yardage a PERFECT swing flies — computed straight from
+# ShotResolver so it never drifts from what the dice actually do, and
+# visible the moment you're deciding, not just once you reach the tiles.
+func rebuild_shot_outlook() -> void:
+	clear_container(shot_outlook)
+	var show_it: bool = (state == State.AIM or state == State.TIER_SELECT) and not pending_club.is_empty()
+	shot_outlook.visible = show_it
+	if not show_it:
+		return
+
+	shot_outlook.add_child(BoogieUI.kicker("Shot outlook", COLOR_SAND))
+	shot_outlook.add_child(BoogieUI.body("%s — %d-%d yds" % [
+		pending_club.name, int(pending_club.min_yard), int(pending_club.max_yard)], 12, COLOR_TEXT))
+
+	for tier in [ShotResolver.Tier.FULL, ShotResolver.Tier.MID, ShotResolver.Tier.FINESSE, ShotResolver.Tier.EXTREME_FINESSE]:
+		var distance := ShotResolver.clean_distance(pending_club, tier, current_lie)
+		var width := ShotResolver.compute_width(pending_club, tier, current_lie)
+		var bounds := ShotResolver.sweet_spot_bounds(width)
+		var odds := ShotResolver.accuracy_band_odds(pending_club, tier, current_lie)
+
+		shot_outlook.add_child(BoogieUI.body("%s — %d yds if PERFECT · Sweet Spot %d-%d" % [
+			ShotResolver.tier_name(tier), int(round(distance)), bounds.x, bounds.y], 11, COLOR_TEXT))
+
+		var warn: bool = odds.MISS > 0.3
+		shot_outlook.add_child(BoogieUI.body("PERFECT %d%% · GOOD %d%% · OFF %d%% · MISS %d%%" % [
+			int(round(odds.PERFECT * 100)), int(round(odds.GOOD * 100)),
+			int(round(odds.OFF * 100)), int(round(odds.MISS * 100))],
+			10, COLOR_FLAG if warn else COLOR_TEXT_SOFT))
+
+	shot_outlook.add_child(BoogieUI.hairline(0.14))
+
+
 # Builds the bag row for CLUB_SELECT/TIER_SELECT: every card in hand, in
 # hand order, shown compact. The one you tapped (pending_club_index, only
 # set during TIER_SELECT) expands in place into its four swing tiles
@@ -834,7 +926,7 @@ func make_expanded_club_card(club: Dictionary) -> Control:
 	var accent := CardView.type_color(club.get("type", "iron"))
 
 	var outer := PanelContainer.new()
-	outer.custom_minimum_size = Vector2(300, 138)
+	outer.custom_minimum_size = Vector2(320, 168)
 	var style := StyleBoxFlat.new()
 	style.bg_color = BoogieTheme.CARD_BG
 	style.set_corner_radius_all(10)
@@ -877,23 +969,22 @@ func make_expanded_club_card(club: Dictionary) -> Control:
 	return outer
 
 
-# One swing tile inside the expanded club card: tier name, its yardage
-# band, and the clean-shot / on-line odds for the current lie, computed
-# straight from ShotResolver's Sweet Spot math so the guidance never
-# drifts from what the dice actually do.
+# One swing tile inside the expanded club card: tier name, the distance a
+# PERFECT shot would fly, and the PERFECT/GOOD/OFF/MISS odds for the
+# current lie — computed straight from ShotResolver's Sweet Spot math so
+# the guidance never drifts from what the dice actually do.
 func make_tier_tile(club: Dictionary, tier: int) -> Button:
-	var yard_range: Vector2 = ShotResolver.tier_yardage_range(club, tier)
-	var power_odds := ShotResolver.power_odds(club, tier, current_lie)
-	var acc_odds := ShotResolver.accuracy_odds(club, tier, current_lie)
+	var distance := ShotResolver.clean_distance(club, tier, current_lie)
+	var band_odds := ShotResolver.accuracy_band_odds(club, tier, current_lie)
 
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(64, 0)
+	b.custom_minimum_size = Vector2(78, 0)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	b.clip_text = false
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 2)
+	vbox.add_theme_constant_override("separation", 1)
 	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	var margin := MarginContainer.new()
@@ -913,28 +1004,26 @@ func make_tier_tile(club: Dictionary, tier: int) -> Button:
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(title)
 
-	var yard_line := Label.new()
-	yard_line.text = "%d-%d" % [int(yard_range.x), int(yard_range.y)]
-	yard_line.add_theme_font_size_override("font_size", 9)
-	yard_line.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
-	yard_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(yard_line)
+	var dist_line := Label.new()
+	dist_line.text = "%d if PERFECT" % int(round(distance))
+	dist_line.autowrap_mode = TextServer.AUTOWRAP_WORD
+	dist_line.add_theme_font_size_override("font_size", 9)
+	dist_line.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
+	dist_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(dist_line)
 
-	var clean_line := Label.new()
-	clean_line.text = "clean %d%%" % int(round(power_odds.clean * 100))
-	clean_line.autowrap_mode = TextServer.AUTOWRAP_WORD
-	clean_line.add_theme_font_size_override("font_size", 9)
-	clean_line.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
-	clean_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(clean_line)
+	vbox.add_child(BoogieUI.hairline(0.14))
 
-	var acc_line := Label.new()
-	acc_line.text = "on-line %d%%" % int(round(acc_odds.good * 100))
-	acc_line.autowrap_mode = TextServer.AUTOWRAP_WORD
-	acc_line.add_theme_font_size_override("font_size", 9)
-	acc_line.add_theme_color_override("font_color", COLOR_FLAG if acc_odds.off_miss > 0.5 else COLOR_TEXT_SOFT)
-	acc_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(acc_line)
+	for band_name in ["PERFECT", "GOOD", "OFF", "MISS"]:
+		var pct: int = int(round(band_odds[band_name] * 100))
+		var line := Label.new()
+		line.text = "%s %d%%" % [band_name, pct]
+		line.autowrap_mode = TextServer.AUTOWRAP_WORD
+		line.add_theme_font_size_override("font_size", 9)
+		var warn: bool = band_name == "MISS" and band_odds[band_name] > 0.3
+		line.add_theme_color_override("font_color", COLOR_FLAG if warn else COLOR_TEXT_SOFT)
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		vbox.add_child(line)
 
 	b.pressed.connect(_make_tier_callback(tier))
 	return b

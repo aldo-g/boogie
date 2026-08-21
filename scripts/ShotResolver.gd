@@ -118,8 +118,7 @@ static func roll_power(club: Dictionary, tier: int, lie: String, extra_width_mod
 	var roll := randi_range(1, DIE_SIDES)
 
 	var tier_range := tier_yardage_range(club, tier)
-	var terrain: Dictionary = TERRAIN.get(lie, TERRAIN.fairway)
-	var capped_max: float = tier_range.y * terrain.distance_cap_ratio
+	var capped_max: float = clean_distance(club, tier, lie)
 
 	var outcome: String
 	var distance: float
@@ -144,24 +143,11 @@ static func roll_power(club: Dictionary, tier: int, lie: String, extra_width_mod
 	}
 
 
-# --- Accuracy roll: d20 vs Sweet Spot -> degree offset + side ---
-# A roll landing inside the Sweet Spot's bounds is PERFECT/GOOD (scaled by
-# proximity to true center); a roll outside it is OFF/MISS (scaled by how
-# far past the edge it landed, relative to how much of the die is "outside"
-# for this width). A wide Sweet Spot (forgiving club) both lands inside more
-# often AND softens how bad an outside roll reads — a narrow one (Driver)
-# does the opposite, so the same die is far less forgiving on a Driver.
-static func roll_accuracy(club: Dictionary, tier: int, lie: String, overshoot: bool, extra_width_mod: int = 0, extra_tier_shift: int = 0) -> Dictionary:
-	var width := compute_width(club, tier, lie) + extra_width_mod
-	if overshoot:
-		width -= 2  # overshooting the Power roll shrinks the Accuracy Sweet Spot further
-	width = max(width, 1)
-	var bounds := sweet_spot_bounds(width)
-	var roll := randi_range(1, DIE_SIDES)
-
-	var terrain: Dictionary = TERRAIN.get(lie, TERRAIN.fairway)
-	var tier_shift: int = terrain.accuracy_tier_shift + extra_tier_shift
-
+# Shared core: given a roll and Sweet Spot bounds, works out the degree
+# offset and side (DRAW/FADE/STRAIGHT). Used by both roll_accuracy() (the
+# actual shot) and accuracy_band_odds() (the pre-shot preview), so the two
+# can never drift apart.
+static func _accuracy_degree_and_side(roll: int, bounds: Vector2i) -> Dictionary:
 	var side: int = Side.STRAIGHT
 	var degree: float
 	if roll >= bounds.x and roll <= bounds.y:
@@ -199,8 +185,29 @@ static func roll_accuracy(club: Dictionary, tier: int, lie: String, overshoot: b
 		else:
 			var miss_frac: float = (dist_past_edge - off_span) / max(side_span - off_span, 0.01)
 			degree = DEGREE_BANDS[2].max_deg + miss_frac * (miss_max - DEGREE_BANDS[2].max_deg)
+	return {"degree": degree, "side": side}
 
-	var degree_i: int = int(round(clamp(degree, 0.0, 40.0)))
+
+# --- Accuracy roll: d20 vs Sweet Spot -> degree offset + side ---
+# A roll landing inside the Sweet Spot's bounds is PERFECT/GOOD (scaled by
+# proximity to true center); a roll outside it is OFF/MISS (scaled by how
+# far past the edge it landed, relative to how much of the die is "outside"
+# for this width). A wide Sweet Spot (forgiving club) both lands inside more
+# often AND softens how bad an outside roll reads — a narrow one (Driver)
+# does the opposite, so the same die is far less forgiving on a Driver.
+static func roll_accuracy(club: Dictionary, tier: int, lie: String, overshoot: bool, extra_width_mod: int = 0, extra_tier_shift: int = 0) -> Dictionary:
+	var width := compute_width(club, tier, lie) + extra_width_mod
+	if overshoot:
+		width -= 2  # overshooting the Power roll shrinks the Accuracy Sweet Spot further
+	width = max(width, 1)
+	var bounds := sweet_spot_bounds(width)
+	var roll := randi_range(1, DIE_SIDES)
+
+	var terrain: Dictionary = TERRAIN.get(lie, TERRAIN.fairway)
+	var tier_shift: int = terrain.accuracy_tier_shift + extra_tier_shift
+
+	var ds := _accuracy_degree_and_side(roll, bounds)
+	var degree_i: int = int(round(clamp(ds.degree, 0.0, 40.0)))
 	var band_index: int = band_index_for_degree(degree_i)
 	band_index = min(band_index + tier_shift, DEGREE_BANDS.size() - 1)
 	var band: Dictionary = DEGREE_BANDS[band_index]
@@ -210,7 +217,7 @@ static func roll_accuracy(club: Dictionary, tier: int, lie: String, overshoot: b
 		"roll": roll,
 		"bounds": bounds,
 		"width": width,
-		"side": side,
+		"side": ds.side,
 		"band": band.name,
 		"degree": degree_i,
 	}
@@ -241,33 +248,36 @@ static func side_label(side: int) -> String:
 	return "Straight"
 
 
-# --- Odds preview for UI: given a club+tier+lie, what are the chances of
-# each Power outcome (before any card/hazard modifiers)? Pure d20-counting
-# against the same Sweet Spot math roll_power() uses, so this always
-# matches what actually happens when the shot is played. ---
-static func power_odds(club: Dictionary, tier: int, lie: String) -> Dictionary:
+# --- Odds preview for all four Accuracy bands (PERFECT/GOOD/OFF/MISS) —
+# counts, for each of the 20 die faces, which band roll_accuracy() would
+# read it as (same _accuracy_degree_and_side() core, sans the overshoot
+# shrink, same as accuracy_odds() above). This is what the tier tiles show
+# so the odds on screen always match what the dice actually do. ---
+static func accuracy_band_odds(club: Dictionary, tier: int, lie: String) -> Dictionary:
 	var width := compute_width(club, tier, lie)
 	var bounds := sweet_spot_bounds(width)
-	var clean_count: int = bounds.y - bounds.x + 1
-	var undershoot_count: int = bounds.x - 1
-	var overshoot_count: int = DIE_SIDES - bounds.y
-	return {
-		"clean": float(clean_count) / float(DIE_SIDES),
-		"undershoot": float(undershoot_count) / float(DIE_SIDES),
-		"overshoot": float(overshoot_count) / float(DIE_SIDES),
-	}
+	var terrain: Dictionary = TERRAIN.get(lie, TERRAIN.fairway)
+	var tier_shift: int = terrain.accuracy_tier_shift
+
+	var counts := {}
+	for band in DEGREE_BANDS:
+		counts[band.name] = 0
+
+	for roll in range(1, DIE_SIDES + 1):
+		var degree_i: int = int(round(clamp(_accuracy_degree_and_side(roll, bounds).degree, 0.0, 40.0)))
+		var band_index: int = band_index_for_degree(degree_i)
+		band_index = min(band_index + tier_shift, DEGREE_BANDS.size() - 1)
+		counts[DEGREE_BANDS[band_index].name] += 1
+
+	var odds := {}
+	for band in DEGREE_BANDS:
+		odds[band.name] = float(counts[band.name]) / float(DIE_SIDES)
+	return odds
 
 
-# --- Odds preview for Accuracy: chance the roll lands PERFECT/GOOD
-# (inside the Sweet Spot) vs OFF/MISS (outside it), same width math as
-# roll_accuracy() sans the overshoot shrink (that depends on the Power
-# roll's outcome, unknown before the dice are thrown). ---
-static func accuracy_odds(club: Dictionary, tier: int, lie: String) -> Dictionary:
-	var width := compute_width(club, tier, lie)
-	var bounds := sweet_spot_bounds(width)
-	var good_count: int = bounds.y - bounds.x + 1
-	var off_miss_count: int = DIE_SIDES - good_count
-	return {
-		"good": float(good_count) / float(DIE_SIDES),
-		"off_miss": float(off_miss_count) / float(DIE_SIDES),
-	}
+# The distance a clean/PERFECT shot actually flies for this club+tier+lie —
+# the same "capped_max" figure roll_power() uses for its "clean" outcome.
+static func clean_distance(club: Dictionary, tier: int, lie: String) -> float:
+	var tier_range := tier_yardage_range(club, tier)
+	var terrain: Dictionary = TERRAIN.get(lie, TERRAIN.fairway)
+	return tier_range.y * terrain.distance_cap_ratio
