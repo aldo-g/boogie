@@ -43,16 +43,14 @@ var club_discard: Array = []
 
 var form_deck: FormDeck
 
+# Section 3B — the run's live brands. Only 4 of the 6 draftable brands are
+# in the club deck each round; the other two are absent entirely, not
+# rarer. This is where run-to-run variance lives, since the course itself
+# is fixed and knowable. Revealed to the player before hole 1.
+var live_brands: Array = []
+
 var current_hole_index: int = 1
 var round_scores: Array = []  # [{"hole": int, "par": int, "strokes": int}, ...]
-
-# Flight conditions (Section 6's weather draw, once per 6-hole flight).
-# Fixed for the whole round for now — always clear skies, a steady breeze —
-# but kept as state, not constants, so a future flight draw can reroll them
-# without touching anything that reads them.
-var weather: String = "Sunny"
-var wind_mph: int = 6
-var wind_dir: String = "Onshore"
 
 var hole: HoleData
 var hole_yardage: float = 380.0
@@ -84,7 +82,7 @@ var hand_label: Label
 var options_label: Label
 var options_container: HBoxContainer
 var scorecard: ScorecardView
-var header_meta: HBoxContainer      # weather/wind/round/bag chip row, right of the title
+var header_meta: HBoxContainer      # live-brand/round/bag chip row, right of the title
 var hole_title: Label
 var shot_outlook: VBoxContainer
 var form_deck_popup: PopupPanel
@@ -324,12 +322,14 @@ func clear_container(c: Container) -> void:
 # ---------------------------------------------------------
 # CARD HELPERS
 # ---------------------------------------------------------
-func make_club(cname: String, min_y: float, max_y: float, ctype: String, limited: bool = false, ability: String = "") -> Dictionary:
+func make_club(cname: String, min_y: float, max_y: float, ctype: String,
+		brand: String = Brands.NONE, limited: bool = false, ability: String = "") -> Dictionary:
 	return {
 		"name": cname,
 		"min_yard": min_y,
 		"max_yard": max_y,
 		"type": ctype,          # "wood" / "iron" / "wedge" / "putter"
+		"brand": brand,         # Brands.NONE for standards — see Brands.gd
 		"limited": limited,
 		"ability": ability
 	}
@@ -339,12 +339,18 @@ func make_club(cname: String, min_y: float, max_y: float, ctype: String, limited
 # SETUP
 # ---------------------------------------------------------
 func init_game() -> void:
+	# The starting set is Bogey-Mart (Section 3A): a cheap supermarket
+	# three-piece, deliberately the worst gear in the game. Shorter bands,
+	# and — the sharper penalty — NARROWER ones, which drops you into the
+	# 2-card Form draw far more often than a real club would. Escaping this
+	# set is the run's first goal.
 	hand = [
-		make_club("Driver", 200, 260, "wood"),
-		make_club("7-Iron", 100, 150, "iron"),
-		make_club("Putter", 0, 0, "putter")
+		make_club("Bogey-Mart Driver", 190, 235, "wood", Brands.STARTER),
+		make_club("Bogey-Mart 7-Iron", 95, 140, "iron", Brands.STARTER),
+		make_club("Bogey-Mart Putter", 0, 0, "putter", Brands.STARTER)
 	]
 
+	live_brands = roll_live_brands()
 	club_deck = build_club_pool()
 	club_deck.shuffle()
 	club_discard = []
@@ -352,9 +358,39 @@ func init_game() -> void:
 	form_deck = FormDeck.new()
 
 
+# Section 3B — picks this run's 4 live brands, under the pairing rule:
+# at least two distinct axes must be represented. Four brands all
+# attacking the same axis would collapse the run into a single strategy,
+# so the constraint guarantees every run offers two real directions to
+# commit to. Retries rather than repairs — the pool is tiny and a valid
+# draw is overwhelmingly likely, so a simple reroll is clearer than
+# patching a bad set.
+func roll_live_brands() -> Array:
+	var all: Array = Brands.DRAFTABLE.duplicate()
+	for attempt in range(32):
+		all.shuffle()
+		var pick: Array = all.slice(0, 4)
+		var axes := {}
+		for b in pick:
+			axes[Brands.AXIS.get(b, "")] = true
+		if axes.size() >= 2:
+			return pick
+	# Unreachable in practice (any 4 of these 6 already span 2+ axes), but
+	# return something valid rather than an empty pool if it ever is.
+	return all.slice(0, 4)
+
+
+# The shared club deck (Section 3C). Standards are brandless and always
+# present, so the deck always covers every yardage gap and is never
+# unplayable. Branded clubs sit on top of that base and are the draft's
+# real content — but only the run's live brands are included (Section 3B).
+#
+# Yardage lives here, on individual cards, where it's a local stat the
+# player reads. Set bonuses never touch yardage — see Brands.gd.
 func build_club_pool() -> Array:
 	var pool: Array = []
-	# Standard clubs, a few copies each so the deck has some depth
+
+	# --- Standards: brandless, always in the pool, 3 copies each ---
 	for i in range(3):
 		pool.append(make_club("Driver", 200, 260, "wood"))
 		pool.append(make_club("3-Wood", 180, 220, "wood"))
@@ -363,21 +399,129 @@ func build_club_pool() -> Array:
 		pool.append(make_club("9-Iron", 80, 110, "iron"))
 		pool.append(make_club("Pitching Wedge", 50, 90, "wedge"))
 		pool.append(make_club("Sand Wedge", 20, 60, "wedge"))
+		pool.append(make_club("Putter", 0, 0, "putter"))
 
-	# Limited editions — same club families, better stats or a Created-card ability
-	pool.append(make_club("Tour Driver X", 210, 270, "wood", true, "Create a Big Strike card from rough/bunker"))
-	pool.append(make_club("Gold Cleek", 145, 185, "iron", true, "Once per hole, create a Pure Strike card"))
-	pool.append(make_club("Old Tom's Niblick", 30, 70, "wedge", true, "Creates a Flop Shot card from bunkers"))
+	# --- Branded: only this run's live brands (Section 3B) ---
+	for brand in live_brands:
+		pool.append_array(branded_clubs(brand))
+
+	# --- Limited editions: rare, one copy each, live brands only ---
+	for card in limited_clubs():
+		if card.brand == Brands.NONE or live_brands.has(card.brand):
+			pool.append(card)
 
 	return pool
 
 
+# Section 3C limited editions: one copy each, a Created-card ability, and
+# a pair rider that keys off a specific partner in the Bag rather than a
+# count. These are the draft's "I need one more thing" hooks.
+func limited_clubs() -> Array:
+	return [
+		make_club("Gold Cleek", 145, 185, "iron", "titanist", true,
+			"Once per hole, create a Pure Strike. With a Titanist Wood in bag: twice per hole"),
+		make_club("The Bulger", 210, 270, "wood", "slazinger", true,
+			"Create a Big Strike from rough/bunker. With any Wedge in bag: no lie requirement"),
+		make_club("Old Tom's Niblick", 30, 70, "wedge", "macgregorian", true,
+			"Creates a Flop Shot on landing in a bunker. With a MacGregorian Wood: also Bump and Run on fairway"),
+		make_club("The Rutter", 35, 80, "wedge", "callowell", true,
+			"Purges a bad Form card on each hazard. With a Callowell Iron in bag: purges two"),
+		make_club("Old Reliable Putter", 0, 0, "putter", "pingwell", true,
+			"Once per round, create Steady Hands. With another Ping-Well club: once every six holes"),
+		make_club("Persimmon Spoon", 175, 225, "wood", "macgregorian", true,
+			"Playable from rough with no penalty. With a 2nd MacGregorian: playable from any lie"),
+		make_club("The Equaliser", 120, 170, "iron", "nimbus", true,
+			"With 3+ distinct brands in your bag, counts as EVERY brand for set purposes"),
+	]
+
+
+# Every club belonging to one brand. Each brand spans enough categories
+# and enough cards to actually reach a 7-set, and each carries riders that
+# express its axis locally — the set bonus expresses the same idea as a
+# rule (Brands.gd).
+func branded_clubs(brand: String) -> Array:
+	match brand:
+		"titanist":
+			# Tour precision: tight bands, strong buffering, unforgiving.
+			return [
+				make_club("Titanist Pro Driver", 205, 250, "wood", brand, false, "Buffers deviation 20% better; -30% distance from rough"),
+				make_club("Titanist 4-Iron", 155, 190, "iron", brand, false, "Buffers deviation 25% better"),
+				make_club("Titanist 6-Iron", 125, 160, "iron", brand, false, "Buffers deviation 25% better"),
+				make_club("Titanist 8-Iron", 90, 125, "iron", brand, false, "Buffers deviation 25% better"),
+				make_club("Titanist Tour Wedge", 45, 85, "wedge", brand, false, "Buffers deviation 25% better"),
+				make_club("Titanist Blade Putter", 0, 0, "putter", brand, false, "Once per round, a second putt attempt"),
+				make_club("Titanist Fairway 5", 165, 205, "wood", brand, false, "Buffers deviation 20% better"),
+			]
+		"callowell":
+			# Forgiveness: wide bands, blunts bad cards, low ceiling.
+			return [
+				make_club("Callowell Big Deal Driver", 195, 255, "wood", brand, false, "Chunk and Top hit at half severity"),
+				make_club("Callowell 6-Iron", 115, 175, "iron", brand, false, "The widest iron in the game"),
+				make_club("Callowell Rescue", 130, 185, "iron", brand, false, "Playable from rough with no distance penalty"),
+				make_club("Callowell 9-Iron", 75, 120, "iron", brand, false, "Wide band"),
+				make_club("Callowell Gap Wedge", 40, 85, "wedge", brand, false, "Shank cannot downgrade your lie"),
+				make_club("Callowell Sand Wedge", 20, 65, "wedge", brand, false, "Wide band"),
+				make_club("Callowell Mallet Putter", 0, 0, "putter", brand, false, "Forgiving on long putts"),
+			]
+		"pingwell":
+			# Fitted feel: rewards playing a club at its comfortable middle.
+			return [
+				make_club("Ping-Well i-Series 3", 165, 210, "iron", brand, false, "Widened Mid tier"),
+				make_club("Ping-Well i-Series 5", 135, 185, "iron", brand, false, "Widened Mid tier"),
+				make_club("Ping-Well i-Series 8", 85, 130, "iron", brand, false, "Widened Mid tier"),
+				make_club("Ping-Well Driver", 198, 248, "wood", brand, false, "Widened Mid tier"),
+				make_club("Ping-Well Lob Wedge", 15, 55, "wedge", brand, false, "Creates Flop Shot on any hazard lie"),
+				make_club("Ping-Well Gap Wedge", 45, 90, "wedge", brand, false, "Widened Mid tier"),
+				make_club("Ping-Well Mallet Putter", 0, 0, "putter", brand, false, "Steady Hands widens the sunk band twice as much"),
+			]
+		"macgregorian":
+			# Heritage: low running ball, built for scrappy lies.
+			return [
+				make_club("MacGregorian Persimmon Driver", 185, 245, "wood", brand, false, "The only Wood playable from a bunker"),
+				make_club("MacGregorian Brassie", 170, 215, "wood", brand, false, "Bump and Run gains +20 yds roll"),
+				make_club("MacGregorian Spoon", 150, 195, "wood", brand, false, "Ignores the rough's distance penalty"),
+				make_club("MacGregorian Mashie", 120, 165, "iron", brand, false, "Ignores the rough's distance penalty"),
+				make_club("MacGregorian Mid-Mashie", 140, 185, "iron", brand, false, "Ignores the rough's distance penalty"),
+				make_club("MacGregorian Niblick", 45, 95, "wedge", brand, false, "Landing in a hazard adds no bad card to the Form deck"),
+				make_club("MacGregorian Jigger", 0, 0, "putter", brand, false, "Putts from the fringe as though on the green"),
+			]
+		"slazinger":
+			# Distance at a price: long, and worse at buffering.
+			return [
+				make_club("Slazinger Cannon Driver", 215, 285, "wood", brand, false, "Longest in the game; buffers deviation 30% worse"),
+				make_club("Slazinger Launch Wood", 190, 240, "wood", brand, false, "Big Strike grants max band +10"),
+				make_club("Slazinger Power Iron", 150, 200, "iron", brand, false, "Long for an iron; buffers 20% worse"),
+				make_club("Slazinger Deep Iron", 125, 175, "iron", brand, false, "Buffers 20% worse"),
+				make_club("Slazinger Blast Wedge", 35, 90, "wedge", brand, false, "Extra distance out of bunkers"),
+				make_club("Slazinger Long Iron", 175, 225, "iron", brand, false, "Buffers 20% worse"),
+				make_club("Slazinger Heavy Putter", 0, 0, "putter", brand, false, "Strong on long putts, wild on short ones"),
+			]
+		"nimbus":
+			# Hybrid tech: covers gaps, no strong opinion.
+			return [
+				make_club("Nimbus Hybrid 3", 160, 215, "iron", brand, false, "Counts as both Wood and Iron"),
+				make_club("Nimbus Hybrid 5", 130, 180, "iron", brand, false, "Counts as both Wood and Iron"),
+				make_club("Nimbus Hybrid 7", 105, 155, "iron", brand, false, "Counts as both Wood and Iron"),
+				make_club("Nimbus All-Rounder", 105, 165, "iron", brand, false, "Wide band, no rider"),
+				make_club("Nimbus Driver", 195, 250, "wood", brand, false, "Counts as both Wood and Iron"),
+				make_club("Nimbus Utility Wedge", 30, 80, "wedge", brand, false, "Once per hole, playable from any lie with no penalty"),
+				make_club("Nimbus Putter", 0, 0, "putter", brand, false, "No rider — pure flexible filler"),
+			]
+	return []
+
+
+# Draws the top card, reshuffling the discard pile back in when the deck
+# runs dry. Returns an empty Dictionary if both are exhausted — callers must
+# check with is_empty() rather than assuming a card came back, since
+# pop_back() on an empty Array returns null and would fail this signature.
 func draw_from_deck(deck: Array, discard: Array) -> Dictionary:
-	if deck.is_empty():
+	if deck.is_empty() and not discard.is_empty():
 		log_msg("[i]Deck empty — reshuffling discard pile back in.[/i]")
 		deck.append_array(discard)
 		discard.clear()
 		deck.shuffle()
+	if deck.is_empty():
+		return {}
 	return deck.pop_back()
 
 
@@ -451,22 +595,50 @@ func swing_tier_for_shot() -> int:
 	if lo <= 0.0 and hi <= 0.0:
 		return ShotResolver.Tier.MID
 	if dist < lo:
-		return ShotResolver.Tier.EXTREME_FINESSE
+		return upgrade_tier(ShotResolver.Tier.EXTREME_FINESSE)
 	var span := hi - lo
 	if span <= 0.0:
 		return ShotResolver.Tier.MID
+	# Ping-Well 2 widens the Mid band from the middle third to the middle
+	# half, so more shots land on the comfortable 3-card draw.
+	var mid_span: float = Brands.mid_tier_span(hand)
+	var mid_lo: float = 0.5 - mid_span / 2.0
+	var mid_hi: float = 0.5 + mid_span / 2.0
+
 	var frac: float = (dist - lo) / span
-	if frac >= 2.0 / 3.0:
-		return ShotResolver.Tier.FULL
-	elif frac >= 1.0 / 3.0:
-		return ShotResolver.Tier.MID
-	return ShotResolver.Tier.FINESSE
+	var tier: int = ShotResolver.Tier.MID
+	if frac >= mid_hi:
+		tier = ShotResolver.Tier.FULL
+	elif frac < mid_lo:
+		tier = ShotResolver.Tier.FINESSE
+	return upgrade_tier(tier)
+
+
+# Ping-Well 4 plays every club one tier better than its distance implies;
+# Ping-Well 7 abolishes Extreme Finesse outright. Both are applied here so
+# every caller (draw count, UI text, outlook panel) sees the same tier.
+func upgrade_tier(tier: int) -> int:
+	if tier == ShotResolver.Tier.EXTREME_FINESSE and Brands.abolishes_extreme_finesse(hand):
+		return ShotResolver.Tier.FINESSE
+	if Brands.tier_upgrade_steps(hand) <= 0:
+		return tier
+	# "One tier better" means toward MID, the most repeatable swing —
+	# never past it, since MID is already the best draw in the game.
+	match tier:
+		ShotResolver.Tier.EXTREME_FINESSE:
+			return ShotResolver.Tier.FINESSE
+		ShotResolver.Tier.FINESSE, ShotResolver.Tier.FULL:
+			return ShotResolver.Tier.MID
+	return tier
 
 
 func begin_form_draw() -> void:
 	var tier := swing_tier_for_shot()
-	var force_extreme := current_lie == "bunker"
-	var result := form_deck.draw_for_shot(tier, force_extreme)
+	# MacGregorian 4 plays you OUT of rough/bunker as though you were on the
+	# fairway, which removes the bunker's forced-card treatment entirely.
+	var force_extreme: bool = current_lie == "bunker" and not Brands.plays_as_fairway(hand)
+	var result := form_deck.draw_for_shot(tier, force_extreme,
+		Brands.bonus_draw_cards(hand), Brands.drops_worst_draw(hand))
 	current_form_options = result.cards
 	current_form_forced = result.forced
 
@@ -492,10 +664,22 @@ func begin_draft_phase() -> void:
 	current_draft_options = []
 	for i in range(3):
 		var card := draw_unowned_club(owned_names)
+		if card.is_empty():
+			# The shared club deck is genuinely exhausted (every card is
+			# either in a bag or already offered this hole). Offer a shorter
+			# draft rather than a phantom card.
+			break
 		current_draft_options.append(card)
 		# Also exclude this hole's other options from the remaining draws,
 		# so the 3 offers can't repeat a name amongst themselves either.
 		owned_names[card.name] = true
+
+	if current_draft_options.is_empty():
+		# Nothing left to offer at all — skip the draft and move on, so the
+		# round can still finish instead of stalling on an empty pick.
+		log_msg("[i]The club deck is exhausted — no draft this hole.[/i]")
+		finish_hole_done()
+		return
 	refresh_ui()
 
 
@@ -512,20 +696,25 @@ func draw_unowned_club(owned_names: Dictionary) -> Dictionary:
 	var found_unowned := false
 	for i in range(max(pool_size, 1)):
 		var card := draw_from_deck(club_deck, club_discard)
+		if card.is_empty():
+			# Deck and discard are both exhausted — everything left is held
+			# in set_aside. Stop here and let the fallback below put those
+			# cards back and draw a duplicate from them.
+			break
 		if not owned_names.has(card.name):
 			found = card
 			found_unowned = true
 			break
 		set_aside.append(card)
 
-	if found_unowned:
-		club_deck.append_array(set_aside)
-	else:
+	# The set-aside cards always go back, on every path — they're the only
+	# copy of those clubs, so dropping them would shrink the pool for good.
+	club_deck.append_array(set_aside)
+
+	if not found_unowned:
 		# Exhausted the pool without finding an unowned club — every card
-		# left shares a name with something already owned. Put the set-aside
-		# cards back first, then just draw whatever's next (a duplicate),
-		# rather than leave current_draft_options short.
-		club_deck.append_array(set_aside)
+		# left shares a name with something already owned. Draw whatever's
+		# next (a duplicate) rather than leave the draft short.
 		found = draw_from_deck(club_deck, club_discard)
 
 	return found
@@ -587,11 +776,18 @@ func on_form_pick(index: int) -> void:
 
 func play_shot(club: Dictionary, card: FormCard) -> void:
 	if card.is_yips:
-		log_msg("[color=#%s]Yips! Taints your next putt if you're forced to play it near the green.[/color]" % COLOR_FLAG.to_html(false))
-		yips_pending = true
+		# Callowell 7 also stops a bad card tainting a putt.
+		if Brands.blocks_yips(hand):
+			log_msg("[color=#%s]Yips — shrugged off (Callowell).[/color]" % COLOR_TEXT_SOFT.to_html(false))
+		else:
+			log_msg("[color=#%s]Yips! Taints your next putt if you're forced to play it near the green.[/color]" % COLOR_FLAG.to_html(false))
+			yips_pending = true
 
 	var aimed_distance: float = ball_pos.distance_to(aim_target)
-	var result := ShotResolver.resolve_shot(club, aimed_distance, current_lie, card)
+	var result := ShotResolver.resolve_shot(club, aimed_distance, current_lie, card,
+		Brands.ignores_terrain_penalty(hand) or Brands.plays_as_fairway(hand),
+		Brands.deviation_mult(hand, current_lie, card),
+		Brands.severity_mult(hand))
 
 	strokes += 1
 	var before_pos := ball_pos
@@ -654,7 +850,8 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 		ball_pos = landing_pos
 		current_lie = "fairway"
 
-	if result.downgrades_lie and current_lie != "green":
+	# Callowell 7: bad cards can no longer downgrade your lie.
+	if result.downgrades_lie and current_lie != "green" and not Brands.blocks_lie_downgrade(hand):
 		current_lie = ShotResolver.lie_downgrade(current_lie)
 		log_msg("[color=#%s]Shank — lie downgraded to %s.[/color]" % [COLOR_FLAG.to_html(false), current_lie])
 		hazard_hit = true
@@ -676,6 +873,10 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 # a chance of adding a bad Form card into the shared Form deck (not the
 # Bag) — degrading future draws for the rest of the round.
 func maybe_add_bad_card_to_form_deck(lie_result: String) -> void:
+	# MacGregorian 2: hazards stop feeding bad cards into the Form deck, so
+	# a rough patch no longer compounds for the rest of the round.
+	if Brands.blocks_form_decay(hand):
+		return
 	if randf() < (1.0 / 3.0):
 		var card := form_deck.add_bad_card_to_deck()
 		log_msg("[color=#%s](The %s left a %s card in your Form deck.)[/color]" % [
@@ -903,6 +1104,22 @@ func running_score_diff_text(diff: int) -> String:
 	return ("+%d" % diff) if diff > 0 else ("%d" % diff)
 
 
+# Brands in the Bag that haven't reached a tier yet, or have reached one
+# and are climbing toward the next — "CALLOWELL 3/4". Only brands the
+# player actually holds appear, so the row stays short.
+func brand_progress_chips() -> Array:
+	var out: Array = []
+	var counts := Brands.counts(hand)
+	for brand in counts:
+		var n: int = int(counts[brand])
+		var next: int = Brands.next_tier(n)
+		if next == 0:
+			continue  # top tier reached; the active-bonus chip says it all
+		out.append("%s %d/%d" % [Brands.display_name(brand).to_upper(), n, next])
+	out.sort()
+	return out
+
+
 func refresh_ui() -> void:
 	var dist_to_pin: float = ball_pos.distance_to(hole.pin_pos) if hole else 0.0
 	# On the green a putt is better read in feet, matching the putt meter's
@@ -919,10 +1136,21 @@ func refresh_ui() -> void:
 		hole_title.text = "Hole %d — Par %d — %d yards" % [current_hole_index, hole_par, int(hole_yardage)]
 	if header_meta:
 		clear_container(header_meta)
-		header_meta.add_child(BoogieUI.chip(weather.to_upper(), COLOR_SAND))
-		header_meta.add_child(BoogieUI.chip("WIND %d MPH · %s" % [wind_mph, wind_dir.to_upper()], COLOR_WATER))
+		# Section 3B: the run's live brands, shown from the start — the
+		# player plans around a known pool rather than guessing at it.
+		for b in live_brands:
+			header_meta.add_child(BoogieUI.chip(Brands.display_name(b).to_upper(), COLOR_SAND))
 		header_meta.add_child(BoogieUI.chip("THRU %d · %s" % [round_scores.size(), running_score_diff_text(running_score_diff())], COLOR_ACCENT))
 		header_meta.add_child(BoogieUI.chip("BAG %d/%d" % [hand.size(), HAND_CAP], COLOR_TEXT_SOFT))
+		# Section 3A: the live set-bonus counter. Active bonuses read as
+		# "TITANIST 4" in the accent colour; brands still short of their
+		# next tier show progress ("CALLOWELL 3/4") so the player can always
+		# see how close a set is.
+		for bonus in Brands.active_bonuses(hand):
+			header_meta.add_child(BoogieUI.chip("%s %d" % [
+				bonus.name.to_upper(), bonus.tier], COLOR_ACCENT))
+		for progress in brand_progress_chips():
+			header_meta.add_child(BoogieUI.chip(progress, COLOR_TEXT_SOFT))
 		if form_deck:
 			header_meta.add_child(make_form_deck_chip_button())
 
@@ -951,7 +1179,8 @@ func refresh_ui() -> void:
 				options_container.add_child(fv)
 
 		State.DRAFT:
-			hand_label.text = "DRAW 3, PICK 1"
+			# Normally 3, but a nearly-exhausted club deck can offer fewer.
+			hand_label.text = "DRAW %d, PICK 1" % current_draft_options.size()
 			options_label.text = "Add one to your bag, permanently."
 			for i in range(current_draft_options.size()):
 				var cv := make_card_view(current_draft_options[i])

@@ -77,18 +77,40 @@ static func buffer_for_club(club: Dictionary) -> float:
 # abstract tier ceiling — terrain then applies its own ratio on top (e.g.
 # rough saps 20% off whatever distance you were going for), and the Form
 # card's own multiplier/flat bonuses apply last.
-static func resolve_shot(club: Dictionary, aimed_distance: float, lie: String, card: FormCard) -> Dictionary:
+# Brand set bonuses (Section 3A) reach the math through the last three
+# arguments, all defaulted so callers that don't care are unaffected:
+#   ignore_terrain — Callowell 4 / MacGregorian 4: terrain takes no cut
+#   deviation_mult — Callowell 2/7: a bad card's deviation is blunted
+#   severity_mult  — Slazinger 2/4: bad cards hit HARDER, the price paid
+#                    for those brands' extra Form draws
+# severity applies to deviation and to distance loss alike, so Slazinger's
+# extra cards are never free.
+static func resolve_shot(club: Dictionary, aimed_distance: float, lie: String, card: FormCard,
+		ignore_terrain: bool = false, deviation_mult: float = 1.0,
+		severity_mult: float = 1.0) -> Dictionary:
 	var cap_ratio: float = TERRAIN_DISTANCE_CAP.get(lie, 1.0)
+	if ignore_terrain:
+		cap_ratio = 1.0
 	var base_distance: float = aimed_distance * cap_ratio
 	if card.ignores_hazard_penalty:
 		# Flop Shot: ignores the terrain's distance penalty entirely.
 		base_distance = aimed_distance
-	var distance: float = base_distance * card.distance_mult
+
+	# Slazinger deepens a bad card's distance loss; a good card is left
+	# alone, so the drawback only ever bites on the cards you'd rather not
+	# have played.
+	var dist_mult: float = card.distance_mult
+	if not card.good and severity_mult > 1.0 and dist_mult < 1.0:
+		dist_mult = max(0.0, 1.0 - (1.0 - dist_mult) * severity_mult)
+
+	var distance: float = base_distance * dist_mult
 	distance += card.extra_roll
 	distance = max(distance, 0.0)
 
 	var buffer := buffer_for_club(club)
-	var effective_degrees: float = card.degrees * buffer
+	var effective_degrees: float = card.degrees * buffer * deviation_mult
+	if not card.good:
+		effective_degrees *= severity_mult
 
 	var side: int = Side.STRAIGHT
 	if card.side < 0:
