@@ -10,9 +10,20 @@ extends Control
 # jumping between two points.
 # ---------------------------------------------------------
 
+signal aim_picked(target: Vector2)  # yard-space point where the player pressed Confirm
+signal aim_changed(target: Vector2)  # yard-space point the crosshair is now sitting on
+
 var hole: HoleData
 var ball_pos: Vector2 = Vector2.ZERO  # yard-space
 var shot_path: Array = []             # yard-space points, tee to current ball_pos
+
+var aiming: bool = false           # true while the player can move/set the aim crosshair
+var aim_target: Vector2 = Vector2.ZERO  # yard-space, current crosshair position
+var aim_min_range: float = 0.0     # yards — the selected club's min_yard
+var aim_max_range: float = 999.0   # yards — the selected club's max_yard
+var aim_club: Dictionary = {}      # the selected club dict, for drawing per-tier bands
+
+var _hovering: bool = false        # true once the mouse has moved over the map while aiming
 
 # Aim-tool animation state (yard-space): set by play_aim_animation(), cleared after.
 var _aim_active: bool = false
@@ -48,17 +59,35 @@ const COLOR_TRAIL := Color(0.169, 0.227, 0.184, 0.55)
 const COLOR_FLIGHT_TRAIL := Color(0.98, 0.98, 0.97, 0.9)
 const COLOR_PIN := Color(0.753, 0.278, 0.227)
 const COLOR_AIM_LINE := Color(0.753, 0.278, 0.227, 0.55)
+const COLOR_AIM_WARNING := Color(0.827, 0.514, 0.106)  # amber — outside the club's sweet-spot band
 const COLOR_TREE_CANOPY := Color(0.325, 0.443, 0.271)
 const COLOR_TREE_CANOPY_DARK := Color(0.267, 0.373, 0.220)
 const COLOR_TREE_SHADOW := Color(0.106, 0.129, 0.110, 0.16)
 const COLOR_GREEN_FRINGE := Color(0.639, 0.780, 0.529)
 const COLOR_MARKER := Color(0.169, 0.227, 0.184, 0.4)
 
+# Swing-tier reference bands drawn around the ball while aiming — a bell
+# curve centered on MID (green, the most repeatable swing and best odds),
+# with BOTH Finesse and Full swing colored as risky (amber) since swinging
+# all-out is just as mishit-prone as a delicate touch shot, and Extreme
+# Finesse worst of all (red, guaranteed bad). Matches the shot outlook
+# panel's own warning color for the risky tiers (Main.gd's COLOR_FLAG).
+const TIER_BAND_COLOR_EXTREME_FINESSE := Color(0.753, 0.278, 0.227, 0.30)  # red — guaranteed bad card
+const TIER_BAND_COLOR_FINESSE := Color(0.827, 0.514, 0.106, 0.26)         # amber — worse odds (touch-shot mishit risk)
+const TIER_BAND_COLOR_MID := Color(0.306, 0.431, 0.251, 0.28)             # fairway green — best odds, most repeatable
+const TIER_BAND_COLOR_FULL := Color(0.827, 0.514, 0.106, 0.26)            # amber — worse odds (all-out mishit risk)
+
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(220, 0)
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	# Hard-clips every _draw() call (course art, swing-tier bands, aim
+	# crosshair) to this Control's own rect — the hole plate is the
+	# course's viewport, so nothing drawn here should ever bleed past it
+	# into neighboring panels.
+	clip_contents = true
 
 
 func set_hole(p_hole: HoleData) -> void:
@@ -72,19 +101,92 @@ func set_ball(p_pos: Vector2, p_path: Array) -> void:
 	queue_redraw()
 
 
+# Enables/disables click-to-aim, locked to the selected club's max yardage —
+# the crosshair's direction is free, and its distance from the ball is
+# capped at max_range (you can't aim somewhere the club can't reach), but
+# NOT floored at min_range: aiming inside a club's normal band is legal
+# and is exactly what Section 4's "Extreme Finesse" tier is — a heavily
+# bad-card-biased Form draw, not a blocked shot. min_range is kept only
+# for the faint reference ring drawn in _draw() and the tier math in
+# Main.gd, never as a movement floor.
+# While aiming, moving the mouse over the map live-previews the crosshair
+# (no button needs to be held) and fires aim_changed each time so the shot
+# outlook panel can warn about tier odds before anything commits. A
+# left-click commits immediately at the cursor's spot via aim_picked —
+# there's no separate confirm step, so the preview is the only chance to
+# see the risk before playing. club is the full club dict (needed to draw
+# the four swing-tier bands via ShotResolver.tier_yardage_range()).
+func set_aiming(enabled: bool, min_range: float = 0.0, max_range: float = 999.0, club: Dictionary = {}) -> void:
+	aiming = enabled
+	aim_min_range = max(min_range, 0.0)
+	aim_max_range = max(max_range, 0.01)
+	aim_club = club
+	_hovering = false
+	queue_redraw()
+
+
+func set_aim_target(p_target: Vector2) -> void:
+	aim_target = _clamp_to_range(p_target) if aiming else p_target
+	queue_redraw()
+
+
+# Keeps the aim direction from the ball, capping its distance at
+# aim_max_range (a club simply cannot reach further than that — aiming
+# closer than aim_min_range is always allowed, that's Extreme Finesse),
+# then pulls the point back inside the hole's own drawn extent so the
+# crosshair, its line, and the range rings can never reach out into the
+# dead space beyond the mapped course art.
+func _clamp_to_range(p: Vector2) -> Vector2:
+	var offset := p - ball_pos
+	var dist := offset.length()
+	if dist < 0.0001:
+		return ball_pos
+	var clamped_dist: float = min(dist, aim_max_range)
+	var target := ball_pos + offset.normalized() * clamped_dist
+	return _clamp_to_extent(target)
+
+
+# Clamps a yard-space point to stay within the rectangle _yard_extent()
+# actually draws terrain in, so the aim crosshair can never sit visibly
+# off the course.
+func _clamp_to_extent(p: Vector2) -> Vector2:
+	var extent := _yard_extent()
+	return Vector2(
+		clamp(p.x, extent.position.x, extent.position.x + extent.size.x),
+		clamp(p.y, extent.position.y, extent.position.y + extent.size.y)
+	)
+
+
+func _gui_input(event: InputEvent) -> void:
+	if not aiming:
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		aim_target = _clamp_to_range(_px_to_yard(event.position))
+		aiming = false
+		_hovering = false
+		aim_picked.emit(aim_target)
+		queue_redraw()
+		accept_event()
+	elif event is InputEventMouseMotion:
+		_hovering = true
+		aim_target = _clamp_to_range(_px_to_yard(event.position))
+		aim_changed.emit(aim_target)
+		queue_redraw()
+
+
 # Kicks off the full shot animation: the aim arm rotates to the degree
 # offset and extends to show the intended line, then the ball itself
 # flies along that same line with a little arc and a fading trail, so
 # the ball is visibly traceable across the map rather than teleporting.
-# All distances in yards; direction is computed from the current
-# ball_pos toward the hole's pin.
-func play_aim_animation(distance: float, degree: float, side: int, max_distance: float, on_done: Callable) -> void:
+# All distances in yards; base_dir is the player's chosen aim line (from
+# the click-to-aim step), not necessarily toward the pin.
+func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side: int, max_distance: float, on_done: Callable) -> void:
 	if not hole:
 		on_done.call()
 		return
 	_aim_active = true
 	_aim_origin = ball_pos
-	_aim_base_dir = (hole.pin_pos - ball_pos).normalized()
+	_aim_base_dir = base_dir.normalized()
 	if _aim_base_dir.length_squared() < 0.0001:
 		_aim_base_dir = Vector2.UP
 	_aim_max_distance = max(max_distance, distance, 1.0)
@@ -168,6 +270,9 @@ func _yard_extent() -> Rect2:
 	for pt in hole.fairway_polygon:
 		min_x = min(min_x, pt.x)
 		max_x = max(max_x, pt.x)
+	for pt in hole.green_polygon:
+		min_x = min(min_x, pt.x)
+		max_x = max(max_x, pt.x)
 	for hazard in hole.hazards:
 		for pt in hazard.polygon:
 			min_x = min(min_x, pt.x)
@@ -181,11 +286,32 @@ func _to_px(yard_pt: Vector2) -> Vector2:
 	var scale_x: float = avail.x / max(extent.size.x, 1.0)
 	var scale_y: float = avail.y / max(extent.size.y, 1.0)
 	var s: float = min(scale_x, scale_y)
-	var px_x: float = MARGIN + (yard_pt.x - extent.position.x) * s
+	# The hole is always much taller than it is wide, so one axis has slack
+	# left over after fitting the other — center the drawing in that slack
+	# rather than pinning it to the top-left corner.
+	var drawn_size: Vector2 = extent.size * s
+	var origin: Vector2 = Vector2(MARGIN, MARGIN) + (avail - drawn_size) * 0.5
+	var px_x: float = origin.x + (yard_pt.x - extent.position.x) * s
 	# Flip Y: yard-space +y (toward pin) should go UP on screen.
 	var y_from_top: float = extent.size.y - (yard_pt.y - extent.position.y)
-	var px_y: float = MARGIN + y_from_top * s
+	var px_y: float = origin.y + y_from_top * s
 	return Vector2(px_x, px_y)
+
+
+# Inverse of _to_px(): screen pixel -> yard-space, for turning a click into
+# an aim target. Mirrors _to_px()'s centering/scale math exactly.
+func _px_to_yard(px_pt: Vector2) -> Vector2:
+	var extent := _yard_extent()
+	var avail := size - Vector2(MARGIN, MARGIN) * 2.0
+	var scale_x: float = avail.x / max(extent.size.x, 1.0)
+	var scale_y: float = avail.y / max(extent.size.y, 1.0)
+	var s: float = max(min(scale_x, scale_y), 0.0001)
+	var drawn_size: Vector2 = extent.size * s
+	var origin: Vector2 = Vector2(MARGIN, MARGIN) + (avail - drawn_size) * 0.5
+	var yard_x: float = (px_pt.x - origin.x) / s + extent.position.x
+	var y_from_top: float = (px_pt.y - origin.y) / s
+	var yard_y: float = extent.position.y + extent.size.y - y_from_top
+	return Vector2(yard_x, yard_y)
 
 
 func _px_scale() -> float:
@@ -301,6 +427,65 @@ func _draw() -> void:
 	if shot_path.size() >= 2:
 		for i in range(shot_path.size() - 1):
 			_draw_dashed_line(_to_px(shot_path[i]), _to_px(shot_path[i + 1]), COLOR_TRAIL, 2.0, 6.0, 5.0)
+
+	# Waiting for the player's aim: a ring around the ball marks the origin
+	# so it reads as the pivot point, not just a static dot, plus four
+	# concentric bands showing exactly where each swing tier falls —
+	# Extreme Finesse (below the club's own minimum, worst odds), Finesse,
+	# Mid-range, and Full swing (best odds) — read straight from
+	# ShotResolver.tier_yardage_range() so the picture never drifts from
+	# what the Form draw actually does. Capped to the hole's own extent so
+	# a long club's outer band can't bulge into the dead space beyond the
+	# mapped course art.
+	if aiming:
+		var origin_px := _to_px(ball_pos)
+		var scale_px := _px_scale()
+		# Bands are drawn at their real radius, uncapped by the map's drawn
+		# extent — the crosshair itself is what's clamped inside the course
+		# (see _clamp_to_extent()), so a band reaching toward/past the pin is
+		# expected and simply gets naturally clipped by the Control's own
+		# rect when Godot rasterizes past its bounds.
+		if not aim_club.is_empty() and aim_club.get("min_yard", 0.0) > 0.0:
+			var tiers := [ShotResolver.Tier.EXTREME_FINESSE, ShotResolver.Tier.FINESSE, ShotResolver.Tier.MID, ShotResolver.Tier.FULL]
+			var tier_colors := [TIER_BAND_COLOR_EXTREME_FINESSE, TIER_BAND_COLOR_FINESSE, TIER_BAND_COLOR_MID, TIER_BAND_COLOR_FULL]
+			for i in range(tiers.size()):
+				var band := ShotResolver.tier_yardage_range(aim_club, tiers[i])
+				var lo: float = band.x
+				var hi: float = band.y
+				if hi <= lo:
+					continue
+				var mid_r: float = ((lo + hi) * 0.5) * scale_px
+				var band_width_px: float = (hi - lo) * scale_px
+				draw_arc(origin_px, mid_r, 0, TAU, 72, tier_colors[i], max(band_width_px, 1.5))
+		else:
+			# Putter or a degenerate 0-0 club: just the max-range ring.
+			if aim_max_range < 900.0:
+				var r: float = aim_max_range * scale_px
+				draw_arc(origin_px, r, 0, TAU, 56, Color(BoogieTheme.INK, 0.16), 1.0)
+
+		draw_arc(origin_px, 9.0, 0, TAU, 20, COLOR_AIM_LINE, 2.0)
+
+	if aiming and _hovering:
+		# Live crosshair: follows the cursor continuously; a click commits
+		# immediately at this spot. Turns warning-red when the current
+		# distance falls outside the club's own yardage band — Finesse/
+		# Extreme Finesse territory, where the Form draw skews bad — so the
+		# risk is visible right where you're aiming, not just in the side panel.
+		var dist_now: float = ball_pos.distance_to(aim_target)
+		var out_of_band: bool = dist_now < aim_min_range
+		var crosshair_col := COLOR_AIM_WARNING if out_of_band else COLOR_AIM_LINE
+		var target_px := _to_px(aim_target)
+		draw_line(_to_px(ball_pos), target_px, crosshair_col, 2.0)
+		draw_arc(target_px, 7.0, 0, TAU, 16, crosshair_col, 2.0)
+		draw_line(target_px + Vector2(-8, 0), target_px + Vector2(8, 0), crosshair_col, 1.5)
+		draw_line(target_px + Vector2(0, -8), target_px + Vector2(0, 8), crosshair_col, 1.5)
+	elif not aiming and not _aim_active and not _flight_active and aim_target.distance_to(ball_pos) > 0.5:
+		# Last-committed aim target, shown while browsing clubs/tiers.
+		var target_px := _to_px(aim_target)
+		_draw_dashed_line(_to_px(ball_pos), target_px, COLOR_AIM_LINE, 1.5, 5.0, 4.0)
+		draw_arc(target_px, 6.0, 0, TAU, 16, COLOR_AIM_LINE, 1.5)
+		draw_line(target_px + Vector2(-8, 0), target_px + Vector2(8, 0), COLOR_AIM_LINE, 1.5)
+		draw_line(target_px + Vector2(0, -8), target_px + Vector2(0, 8), COLOR_AIM_LINE, 1.5)
 
 	# Aim tool: pivots at the ball's position, rotates to the degree offset,
 	# extends to the rolled distance. Sign convention must match Main.gd's
@@ -453,14 +638,13 @@ func _fairway_half_width_at_y(fairway_poly: PackedVector2Array, y: float) -> flo
 		max_y = max(max_y, pt.y)
 	if y < min_y or y > max_y:
 		return 0.0
-	var max_x: float = 0.0
-	var probe_x: float = 0.0
-	while probe_x < 100.0:
-		if not Geometry2D.is_point_in_polygon(Vector2(probe_x, y), fairway_poly):
-			max_x = probe_x
-			break
+	var widest: float = 0.0
+	var probe_x: float = -120.0
+	while probe_x < 120.0:
+		if Geometry2D.is_point_in_polygon(Vector2(probe_x, y), fairway_poly):
+			widest = max(widest, abs(probe_x))
 		probe_x += 2.0
-	return max(max_x, 8.0)
+	return max(widest, 8.0)
 
 
 func _draw_tree(px: Vector2, scale_px: float, size_mult: float) -> void:

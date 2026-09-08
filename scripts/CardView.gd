@@ -33,7 +33,6 @@ static func type_color(ctype: String) -> Color:
 		"iron": return BoogieTheme.WATER_DEEP
 		"wedge": return BoogieTheme.SAND_DEEP
 		"putter": return BoogieTheme.INK_SOFT
-		"bad": return BoogieTheme.FLAG
 	return BoogieTheme.INK_SOFT
 
 
@@ -76,7 +75,7 @@ func _build() -> void:
 	style.content_margin_top = margin
 	style.content_margin_bottom = margin
 	_panel.add_theme_stylebox_override("panel", style)
-	_panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_panel)
 
 	var vbox := VBoxContainer.new()
@@ -151,8 +150,6 @@ func _build() -> void:
 
 func _stats_text() -> String:
 	var ctype: String = card.get("type", "")
-	if ctype == "bad":
-		return "Triggers on your next shot,\nthen discards itself."
 	if ctype == "putter":
 		return "Green only —\nswitches to the putting green."
 	return "%d-%d yds\nSweet Spot base: %s" % [
@@ -169,8 +166,6 @@ func _base_width_label(ctype: String) -> String:
 
 func _compact_stats_text() -> String:
 	var ctype: String = card.get("type", "")
-	if ctype == "bad":
-		return "self-consuming"
 	if ctype == "putter":
 		return "green only"
 	return "%d-%d yds" % [int(card.get("min_yard", 0)), int(card.get("max_yard", 0))]
@@ -207,11 +202,6 @@ func _draw_icon(icon: Control) -> void:
 		"putter":
 			icon.draw_line(Vector2(cx, h * 0.15), Vector2(cx, h * 0.7), accent, 3.0)
 			icon.draw_rect(Rect2(cx - w * 0.18, h * 0.68, w * 0.36, h * 0.18), accent)
-		"bad":
-			# A cracked/warning mark for bad cards.
-			icon.draw_circle(Vector2(cx, h * 0.5), h * 0.32, accent)
-			icon.draw_string(ThemeDB.fallback_font, Vector2(cx - 5, h * 0.62), "!",
-				HORIZONTAL_ALIGNMENT_CENTER, -1, 22, BoogieTheme.CARD_BG)
 		_:
 			icon.draw_circle(Vector2(cx, h * 0.5), h * 0.25, accent)
 
