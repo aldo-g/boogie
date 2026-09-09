@@ -12,7 +12,7 @@ extends Control
 
 signal picked(card_view: FormCardView)
 
-const CARD_SIZE := Vector2(158, 190)
+const CARD_SIZE := Vector2(186, 184)
 
 var form_card: FormCard
 var interactive: bool = true
@@ -68,15 +68,16 @@ func _build() -> void:
 	vbox.add_theme_constant_override("separation", 5)
 	_panel.add_child(vbox)
 
-	var kind_label := Label.new()
-	kind_label.text = "GOOD FORM" if form_card.good else "BAD FORM"
-	kind_label.add_theme_font_size_override("font_size", 9)
-	kind_label.add_theme_color_override("font_color", accent)
-	vbox.add_child(kind_label)
+	# Filled pill rather than a bare caption — good/bad is the first thing
+	# to register on a Form card, and a tag carries further than 9px text.
+	vbox.add_child(BoogieUI.tag(
+		"Good form" if form_card.good else "Bad form",
+		BoogieTheme.OLIVE_200 if form_card.good else BoogieTheme.ACCENT_200,
+		BoogieTheme.OLIVE_800 if form_card.good else BoogieTheme.ACCENT_800))
 
 	var name_label := Label.new()
 	name_label.text = form_card.name
-	name_label.add_theme_font_size_override("font_size", 15)
+	name_label.add_theme_font_size_override("font_size", 18)
 	name_label.add_theme_color_override("font_color", BoogieTheme.INK)
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	vbox.add_child(name_label)
@@ -85,8 +86,8 @@ func _build() -> void:
 
 	var effect_label := Label.new()
 	effect_label.text = form_card.effect_text()
-	effect_label.add_theme_font_size_override("font_size", 11)
-	effect_label.add_theme_color_override("font_color", BoogieTheme.INK_SOFT)
+	effect_label.add_theme_font_size_override("font_size", 13)
+	effect_label.add_theme_color_override("font_color", BoogieTheme.NEUTRAL_700)
 	effect_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	effect_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(effect_label)

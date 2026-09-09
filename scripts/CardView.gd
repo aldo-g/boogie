@@ -11,7 +11,7 @@ extends Control
 signal picked(card_view: CardView)
 
 const CARD_SIZE := Vector2(150, 190)
-const COMPACT_SIZE := Vector2(96, 122)
+const COMPACT_SIZE := Vector2(132, 168)
 
 var card: Dictionary = {}
 var interactive: bool = true
@@ -90,16 +90,40 @@ func _build() -> void:
 	vbox.add_child(_header)
 
 	if compact:
+		# Bag card, redesigned: brand line, then the club name, then a
+		# category tag and the yardage band. Brand is the read the draft
+		# turns on (Section 3A), so it leads rather than hiding in the
+		# stats line.
+		_header.add_theme_font_size_override("font_size", 17)
+
+		var brand_id: String = card.get("brand", "")
+		if brand_id != "":
+			var brand_label := Label.new()
+			brand_label.text = Brands.display_name(brand_id).to_upper()
+			brand_label.add_theme_font_size_override("font_size", 10)
+			brand_label.add_theme_color_override("font_color", BoogieTheme.NEUTRAL_600)
+			vbox.add_child(brand_label)
+			vbox.move_child(brand_label, 0)
+
 		_icon = Control.new()
-		_icon.custom_minimum_size = Vector2(0, 30)
+		_icon.custom_minimum_size = Vector2(0, 34)
 		_icon.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_icon.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		_icon.draw.connect(_draw_icon.bind(_icon))
 		vbox.add_child(_icon)
 
+		var cat_text: String = card.get("type", "").capitalize()
+		if card.get("limited", false):
+			cat_text = "Limited · " + cat_text
+		vbox.add_child(BoogieUI.tag(
+			cat_text,
+			BoogieTheme.ACCENT_200 if card.get("limited", false) else BoogieTheme.OLIVE_200,
+			BoogieTheme.ACCENT_800 if card.get("limited", false) else BoogieTheme.OLIVE_800))
+
 		_stats = Label.new()
 		_stats.text = _compact_stats_text()
-		_stats.add_theme_font_size_override("font_size", 9)
-		_stats.add_theme_color_override("font_color", BoogieTheme.INK_SOFT)
+		_stats.add_theme_font_size_override("font_size", 13)
+		_stats.add_theme_color_override("font_color", BoogieTheme.NEUTRAL_700)
 		_stats.autowrap_mode = TextServer.AUTOWRAP_WORD
 		vbox.add_child(_stats)
 

@@ -100,11 +100,17 @@ static func display_name(brand: String) -> String:
 # How many of each brand the Bag holds. Brandless standards and the
 # Bogey-Mart starter set are counted too (so the UI can show "3 unbranded"),
 # but neither has a bonus table, so neither ever grants anything.
+# Set-relevant brand counts. Bogey-Mart is excluded along with brandless
+# clubs: it's the cheap starting set every run opens with, and it has no
+# set bonus at any tier. Filtering it here rather than at each call site
+# means no downstream effect — has(), active_bonuses(), or any mechanic
+# built on them — can accidentally award the starter brand a bonus for the
+# three clubs you were given for free.
 static func counts(bag: Array) -> Dictionary:
 	var out := {}
 	for club in bag:
 		var b: String = club.get("brand", NONE)
-		if b == NONE:
+		if b == NONE or b == STARTER:
 			continue
 		out[b] = int(out.get(b, 0)) + 1
 	return out

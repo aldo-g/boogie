@@ -77,12 +77,25 @@ var current_form_forced: bool = false  # true when there's no choice: a single c
 # --- UI node refs (built in code) ---
 var status_label: Label
 var map_view: CourseMapView
-var log_box: RichTextLabel
 var hand_label: Label
 var options_label: Label
 var options_container: HBoxContainer
+
+# Redesign additions: the header's step pill, the map caption, the
+# per-stroke log cards, and the Form half of the bottom strip.
+var step_holder: HBoxContainer
+var map_caption: Label
+var log_container: VBoxContainer
+var form_label: Label
+var form_hint: Label
+var form_container: HBoxContainer
+
+# Play-by-play is now a list of built cards rather than one bbcode blob,
+# so entries are kept as {tag, ink, head, body} dictionaries and rebuilt
+# on refresh. Newest first.
+var log_entries: Array = []
 var scorecard: ScorecardView
-var header_meta: HBoxContainer      # live-brand/round/bag chip row, right of the title
+var header_meta: HFlowContainer     # live-brand/round/bag chip row, right of the title
 var hole_title: Label
 var shot_outlook: VBoxContainer
 var form_deck_popup: PopupPanel
@@ -109,60 +122,91 @@ func build_ui() -> void:
 	root.add_theme_constant_override("separation", 0)
 	add_child(root)
 
-	# --- Header: title, hole line, condition chips -------------------------
-	var header := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, true, 16))
-	header.custom_minimum_size = Vector2(0, 76)
+	# --- Header: hole identity, step hint, running figures ----------------
+	# The redesign splits the header into three jobs: who/where you are on
+	# the left, what to do next in the middle, and the running numbers on
+	# the right. The step pill is the important addition — the old header
+	# left "what now?" to a line of small grey text in the log column.
+	var header := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, true, 20))
+	header.custom_minimum_size = Vector2(0, 92)
 	root.add_child(header)
 
 	var header_row := HBoxContainer.new()
-	header_row.add_theme_constant_override("separation", 18)
-	header_row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	header_row.add_theme_constant_override("separation", 24)
 	header.add_child(header_row)
 
 	var title_col := VBoxContainer.new()
 	title_col.add_theme_constant_override("separation", 2)
 	title_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	title_col.custom_minimum_size = Vector2(190, 0)
 	header_row.add_child(title_col)
-	title_col.add_child(BoogieUI.kicker("Boogie Links"))
-	var title := BoogieUI.heading("Hole 1 — Par 4", 26)
-	hole_title = title
-	title_col.add_child(title)
+	title_col.add_child(BoogieUI.heading("Boogie", 24))
+	title_col.add_child(BoogieUI.kicker("Boogie Links", BoogieTheme.ACCENT_700))
 
-	status_label = Label.new()
-	status_label.text = "Loading..."
-	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	status_label.add_theme_font_size_override("font_size", 13)
-	status_label.add_theme_color_override("font_color", COLOR_TEXT_SOFT)
-	header_row.add_child(status_label)
+	var hole_col := VBoxContainer.new()
+	hole_col.add_theme_constant_override("separation", 2)
+	hole_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	header_row.add_child(hole_col)
 
-	header_meta = HBoxContainer.new()
-	header_meta.add_theme_constant_override("separation", 8)
+	hole_title = BoogieUI.heading("Hole 1 — Par 4", 28)
+	hole_col.add_child(hole_title)
+
+	status_label = BoogieUI.body("Loading...", 14, BoogieTheme.NEUTRAL_700)
+	hole_col.add_child(status_label)
+
+	# The step pill sits centered between the hole line and the figures.
+	step_holder = HBoxContainer.new()
+	step_holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	step_holder.alignment = BoxContainer.ALIGNMENT_CENTER
+	header_row.add_child(step_holder)
+
+	# The chip row's length varies with the run (live brands, set bonuses,
+	# progress counters), so it flows onto a second line rather than
+	# running off the right edge of the header.
+	header_meta = HFlowContainer.new()
+	header_meta.add_theme_constant_override("h_separation", 10)
+	header_meta.add_theme_constant_override("v_separation", 6)
+	header_meta.alignment = FlowContainer.ALIGNMENT_END
 	header_meta.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	header_meta.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header_row.add_child(header_meta)
 
-	# --- Middle: card column | plate | log column --------------------------
+	# --- Middle: scorecard | hole plate | shot panel ----------------------
 	var mid_row := HBoxContainer.new()
 	mid_row.add_theme_constant_override("separation", 0)
 	mid_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(mid_row)
 
-	var card_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, true, false, false, 12))
-	card_panel.custom_minimum_size = Vector2(288, 0)
+	var card_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, true, false, false, 18))
+	card_panel.custom_minimum_size = Vector2(300, 0)
 	mid_row.add_child(card_panel)
 
-	scorecard = ScorecardView.new()
-	card_panel.add_child(scorecard)
+	var card_col := VBoxContainer.new()
+	card_col.add_theme_constant_override("separation", 10)
+	card_panel.add_child(card_col)
+	# ScorecardView draws its own "SCORECARD" kicker — don't add a second.
 
-	var plate_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, true, false, false, 14))
+	scorecard = ScorecardView.new()
+	scorecard.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	card_col.add_child(scorecard)
+
+	var plate_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, true, false, false, 20))
 	plate_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mid_row.add_child(plate_panel)
 
 	var plate_col := VBoxContainer.new()
-	plate_col.add_theme_constant_override("separation", 8)
+	plate_col.add_theme_constant_override("separation", 10)
 	plate_panel.add_child(plate_col)
-	plate_col.add_child(BoogieUI.kicker("The hole"))
+
+	var plate_head := HBoxContainer.new()
+	plate_col.add_child(plate_head)
+	plate_head.add_child(BoogieUI.kicker("The hole · tee to green", BoogieTheme.ACCENT_700))
+	var plate_spacer := Control.new()
+	plate_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	plate_head.add_child(plate_spacer)
+	map_caption = BoogieUI.body("", 13, BoogieTheme.NEUTRAL_700)
+	map_caption.autowrap_mode = TextServer.AUTOWRAP_OFF
+	plate_head.add_child(map_caption)
 
 	map_view = CourseMapView.new()
 	map_view.aim_picked.connect(_on_aim_picked)
@@ -172,69 +216,121 @@ func build_ui() -> void:
 	# than stretched to fill the column — matted like a course-guide
 	# illustration, not a wide empty frame around a thin strip.
 	var hole_plate := BoogieUI.plate(map_view)
-	hole_plate.custom_minimum_size = Vector2(420, 0)
+	hole_plate.custom_minimum_size = Vector2(360, 0)
 	hole_plate.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	plate_col.add_child(hole_plate)
 
-	var log_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, false, 12))
-	log_panel.custom_minimum_size = Vector2(326, 0)
-	mid_row.add_child(log_panel)
+	# --- Shot panel: the numbers for the shot in front of you -------------
+	var shot_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(true, false, false, false, 0))
+	shot_panel.custom_minimum_size = Vector2(380, 0)
+	mid_row.add_child(shot_panel)
+
+	var shot_col := VBoxContainer.new()
+	shot_col.add_theme_constant_override("separation", 0)
+	shot_panel.add_child(shot_col)
+
+	var this_shot := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, true, 20))
+	shot_col.add_child(this_shot)
+
+	shot_outlook = VBoxContainer.new()
+	shot_outlook.add_theme_constant_override("separation", 12)
+	this_shot.add_child(shot_outlook)
+
+	var log_wrap := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, false, 20))
+	log_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	shot_col.add_child(log_wrap)
 
 	var log_col := VBoxContainer.new()
-	log_col.add_theme_constant_override("separation", 7)
-	log_panel.add_child(log_col)
+	log_col.add_theme_constant_override("separation", 10)
+	log_wrap.add_child(log_col)
+	log_col.add_child(BoogieUI.kicker("Play-by-play", BoogieTheme.ACCENT_700))
 
-	# Shot outlook: the club just chosen and its yardage band, visible the
-	# moment you're aiming — not just buried once Form cards are drawn.
-	# Hidden outside AIM/FORM_DRAW.
-	shot_outlook = VBoxContainer.new()
-	shot_outlook.add_theme_constant_override("separation", 3)
-	shot_outlook.visible = false
-	log_col.add_child(shot_outlook)
+	# Each stroke is now its own card rather than a line in one scrolling
+	# block, so a glance finds the stroke you want.
+	var log_scroll := ScrollContainer.new()
+	log_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	log_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	log_col.add_child(log_scroll)
 
-	log_col.add_child(BoogieUI.kicker("Play-by-play"))
+	log_container = VBoxContainer.new()
+	log_container.add_theme_constant_override("separation", 10)
+	log_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	log_scroll.add_child(log_container)
 
-	log_box = RichTextLabel.new()
-	log_box.bbcode_enabled = true
-	log_box.scroll_following = true
-	log_box.fit_content = false
-	log_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	log_box.add_theme_font_size_override("normal_font_size", 13)
-	log_box.add_theme_color_override("default_color", COLOR_TEXT)
-	log_col.add_child(log_box)
-
-	# --- Bag strip: one row, whatever decision is in front of you right now —
-	# a label column on the left, a horizontally-scrolling row of cards or
-	# buttons on the right. Same shape whether that's your bag, a discard
-	# pick, a club draft offer, the 3 drawn Form cards, or the putting
-	# green's draw/bank pair.
-	var strip := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, true, false, 12))
-	strip.custom_minimum_size = Vector2(0, 210)
+	# --- Bottom: your bag on the left, the Form hand on the right --------
+	# Split, not swapped: the bag is what you own, the Form hand is what
+	# this swing dealt you, and seeing both at once is the whole read of
+	# the game. The Form side shows face-down placeholders until a draw
+	# happens, and both sides double as the surface for the draft,
+	# discard, and putting decisions.
+	var strip := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, true, false, 0))
+	# Tall enough for the taller of the two card faces (Form, 184) plus the
+	# kicker row and the panel's own padding — the bag's 168 fits inside it.
+	strip.custom_minimum_size = Vector2(0, 286)
 	root.add_child(strip)
 
 	var strip_row := HBoxContainer.new()
-	strip_row.add_theme_constant_override("separation", 14)
+	strip_row.add_theme_constant_override("separation", 0)
 	strip.add_child(strip_row)
 
-	var strip_label_col := VBoxContainer.new()
-	strip_label_col.custom_minimum_size = Vector2(160, 0)
-	strip_label_col.add_theme_constant_override("separation", 5)
-	strip_row.add_child(strip_label_col)
+	var bag_wrap := BoogieUI.make_panel(BoogieUI.panel(BoogieTheme.NEUTRAL_100, 20, 0))
+	bag_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	strip_row.add_child(bag_wrap)
 
-	hand_label = BoogieUI.kicker("Your bag")
-	strip_label_col.add_child(hand_label)
+	var bag_col := VBoxContainer.new()
+	bag_col.add_theme_constant_override("separation", 10)
+	bag_wrap.add_child(bag_col)
 
-	options_label = BoogieUI.body("", 12, COLOR_TEXT_SOFT)
-	strip_label_col.add_child(options_label)
+	var bag_head := HBoxContainer.new()
+	bag_head.add_theme_constant_override("separation", 14)
+	bag_col.add_child(bag_head)
+	hand_label = BoogieUI.kicker("Your bag", BoogieTheme.ACCENT_700)
+	hand_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bag_head.add_child(hand_label)
+	options_label = BoogieUI.body("", 13, BoogieTheme.NEUTRAL_600)
+	options_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# A one-line caption beside the kicker: let it take the rest of the row
+	# and ellipsize rather than autowrap into a one-word-per-line column.
+	options_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	options_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	options_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	bag_head.add_child(options_label)
 
 	var options_scroll := ScrollContainer.new()
 	options_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	options_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	options_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	strip_row.add_child(options_scroll)
+	bag_col.add_child(options_scroll)
 
 	options_container = HBoxContainer.new()
-	options_container.add_theme_constant_override("separation", 9)
+	options_container.add_theme_constant_override("separation", 12)
 	options_scroll.add_child(options_container)
+
+	var form_wrap := BoogieUI.make_panel(BoogieUI.ruled_panel(true, false, false, false, 20))
+	form_wrap.custom_minimum_size = Vector2(620, 0)
+	strip_row.add_child(form_wrap)
+
+	var form_col := VBoxContainer.new()
+	form_col.add_theme_constant_override("separation", 10)
+	form_wrap.add_child(form_col)
+
+	var form_head := HBoxContainer.new()
+	form_head.add_theme_constant_override("separation", 14)
+	form_col.add_child(form_head)
+	form_label = BoogieUI.kicker("Form hand", BoogieTheme.ACCENT_700)
+	form_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	form_head.add_child(form_label)
+	form_hint = BoogieUI.body("", 13, BoogieTheme.NEUTRAL_600)
+	form_hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	form_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	form_hint.autowrap_mode = TextServer.AUTOWRAP_OFF
+	form_hint.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	form_head.add_child(form_hint)
+
+	form_container = HBoxContainer.new()
+	form_container.add_theme_constant_override("separation", 12)
+	form_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	form_col.add_child(form_container)
 
 	build_form_deck_popup()
 
@@ -310,8 +406,68 @@ func _on_form_deck_chip_pressed() -> void:
 	form_deck_popup.popup_centered()
 
 
+# Play-by-play entries. Callers still pass the same bbcode-ish strings
+# they always did; this strips the markup and files each one as a card so
+# the column reads as a list of strokes rather than a wall of text. A
+# leading "[b]...[/b]" run becomes the card's headline, and a "Stroke N"
+# opener becomes its tag.
 func log_msg(text: String) -> void:
-	log_box.append_text(text + "\n")
+	var clean := strip_markup(text)
+	if clean.strip_edges() == "":
+		return
+
+	var tag := ""
+	var ink := BoogieTheme.NEUTRAL_600
+	var head := ""
+	var body := clean
+
+	# "Stroke 3 — played Hook with Driver (lie: fairway)" splits into a
+	# "STROKE 3" tag and the rest as the headline.
+	if clean.begins_with("Stroke "):
+		var dash := clean.find(" — ")
+		if dash > 0:
+			tag = clean.substr(0, dash)
+			head = clean.substr(dash + 3)
+			body = ""
+			ink = BoogieTheme.ACCENT_700
+	elif text.begins_with("[b]"):
+		var close := text.find("[/b]")
+		if close > 0:
+			head = strip_markup(text.substr(3, close - 3))
+			body = strip_markup(text.substr(close + 4)).strip_edges()
+			tag = "Hole"
+			ink = BoogieTheme.OLIVE_700
+
+	if tag == "":
+		tag = "Note"
+
+	log_entries.push_front({"tag": tag, "ink": ink, "head": head, "body": body})
+	rebuild_log()
+
+
+# Drops bbcode tags so the same strings can feed plain Labels.
+func strip_markup(text: String) -> String:
+	var out := ""
+	var depth := 0
+	for i in text.length():
+		var ch := text[i]
+		if ch == "[":
+			depth += 1
+		elif ch == "]":
+			if depth > 0:
+				depth -= 1
+		elif depth == 0:
+			out += ch
+	return out
+
+
+func rebuild_log() -> void:
+	if log_container == null:
+		return
+	clear_container(log_container)
+	for entry in log_entries:
+		log_container.add_child(BoogieUI.log_entry(
+			entry.tag, entry.ink, entry.head, entry.body))
 
 
 func clear_container(c: Container) -> void:
@@ -537,7 +693,8 @@ func start_hole() -> void:
 	strokes = 0
 	current_lie = "tee"
 	yips_pending = false
-	log_box.clear()
+	log_entries.clear()
+	rebuild_log()
 	log_msg("[b]Hole %d — Par %d — %d yards[/b]" % [current_hole_index, hole_par, int(hole_yardage)])
 	map_view.set_hole(hole)
 	map_view.set_ball(ball_pos, shot_path)
@@ -1063,7 +1220,8 @@ func finish_hole_done() -> void:
 
 func finish_round() -> void:
 	state = State.DONE
-	log_box.clear()
+	log_entries.clear()
+	rebuild_log()
 	log_msg("[b]Round Complete — Boogie Links[/b]\n")
 	var total_strokes := 0
 	var total_par := 0
@@ -1111,6 +1269,8 @@ func brand_progress_chips() -> Array:
 	var out: Array = []
 	var counts := Brands.counts(hand)
 	for brand in counts:
+		if brand == Brands.STARTER:
+			continue  # Bogey-Mart has no set bonus — nothing to progress toward
 		var n: int = int(counts[brand])
 		var next: int = Brands.next_tier(n)
 		if next == 0:
@@ -1134,23 +1294,31 @@ func refresh_ui() -> void:
 		scorecard.set_round(round_scores, current_hole_index, strokes)
 	if hole_title and hole:
 		hole_title.text = "Hole %d — Par %d — %d yards" % [current_hole_index, hole_par, int(hole_yardage)]
+	if map_caption and hole:
+		map_caption.text = "%d yards · par %d" % [int(hole_yardage), hole_par]
+
 	if header_meta:
 		clear_container(header_meta)
 		# Section 3B: the run's live brands, shown from the start — the
 		# player plans around a known pool rather than guessing at it.
 		for b in live_brands:
-			header_meta.add_child(BoogieUI.chip(Brands.display_name(b).to_upper(), COLOR_SAND))
-		header_meta.add_child(BoogieUI.chip("THRU %d · %s" % [round_scores.size(), running_score_diff_text(running_score_diff())], COLOR_ACCENT))
-		header_meta.add_child(BoogieUI.chip("BAG %d/%d" % [hand.size(), HAND_CAP], COLOR_TEXT_SOFT))
+			header_meta.add_child(BoogieUI.chip(Brands.display_name(b).to_upper(), BoogieTheme.ACCENT_700))
+		header_meta.add_child(BoogieUI.meta_stat(
+			"Thru %d" % round_scores.size(),
+			running_score_diff_text(running_score_diff()),
+			BoogieTheme.OLIVE_200, BoogieTheme.OLIVE_900))
+		header_meta.add_child(BoogieUI.meta_stat(
+			"Bag", "%d/%d" % [hand.size(), HAND_CAP],
+			BoogieTheme.NEUTRAL_200, BoogieTheme.NEUTRAL_800))
 		# Section 3A: the live set-bonus counter. Active bonuses read as
 		# "TITANIST 4" in the accent colour; brands still short of their
 		# next tier show progress ("CALLOWELL 3/4") so the player can always
 		# see how close a set is.
 		for bonus in Brands.active_bonuses(hand):
 			header_meta.add_child(BoogieUI.chip("%s %d" % [
-				bonus.name.to_upper(), bonus.tier], COLOR_ACCENT))
+				bonus.name.to_upper(), bonus.tier], BoogieTheme.ACCENT_700))
 		for progress in brand_progress_chips():
-			header_meta.add_child(BoogieUI.chip(progress, COLOR_TEXT_SOFT))
+			header_meta.add_child(BoogieUI.chip(progress, BoogieTheme.NEUTRAL_600))
 		if form_deck:
 			header_meta.add_child(make_form_deck_chip_button())
 
@@ -1159,26 +1327,44 @@ func refresh_ui() -> void:
 
 	rebuild_shot_outlook()
 	clear_container(options_container)
+	clear_container(form_container)
+
+	# The step pill: which numbered beat of the shot flow you're on, and
+	# the one instruction that goes with it.
+	var step_num := "1"
+	var step_hint := ""
 
 	match state:
 		State.AIM:
+			step_num = "2"
+			step_hint = "Move over the hole and click to commit your aim"
 			hand_label.text = "AIMING WITH %s" % pending_club.name.to_upper()
-			options_label.text = "Move the mouse over the hole, then click to play — locked to %d-%d yds." % [
+			options_label.text = "Locked to %d-%d yds — tap another club to switch." % [
 				int(pending_club.min_yard), int(pending_club.max_yard)]
+			rebuild_bag_row()
+			build_form_placeholders("Drawn the moment you commit your aim")
 
 		State.FORM_DRAW:
+			step_num = "3"
 			if current_form_forced:
-				hand_label.text = "FORCED"
-				options_label.text = "No choice — this card was created for you. Tap it to play."
+				step_hint = "No choice — play the card the club created"
+				form_label.text = "FORCED"
+				form_hint.text = "This card was created for you. Tap it to play."
 			else:
-				hand_label.text = "DRAW %d, PICK 1" % current_form_options.size()
-				options_label.text = "Read each card's known effect, then pick one to play."
+				step_hint = "Read all %d, then keep one" % current_form_options.size()
+				form_label.text = "DRAW %d, PICK 1" % current_form_options.size()
+				form_hint.text = "Read each card's known effect, then pick one to play."
+			hand_label.text = "YOUR BAG %d/%d" % [hand.size(), HAND_CAP]
+			options_label.text = "Locked in: %s." % pending_club.name
+			rebuild_bag_row()
 			for i in range(current_form_options.size()):
 				var fv := make_form_card_view(current_form_options[i])
 				fv.picked.connect(_make_form_pick_callback(i))
-				options_container.add_child(fv)
+				form_container.add_child(fv)
 
 		State.DRAFT:
+			step_num = "·"
+			step_hint = "End of hole — add one club to your bag"
 			# Normally 3, but a nearly-exhausted club deck can offer fewer.
 			hand_label.text = "DRAW %d, PICK 1" % current_draft_options.size()
 			options_label.text = "Add one to your bag, permanently."
@@ -1186,26 +1372,36 @@ func refresh_ui() -> void:
 				var cv := make_card_view(current_draft_options[i])
 				cv.picked.connect(_make_draft_pick_callback(i))
 				options_container.add_child(cv)
+			build_form_placeholders("No Form draw between holes")
 
 		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
+			step_num = "·"
+			step_hint = "Bag is full — something has to go"
 			hand_label.text = "BAG FULL (%d)" % HAND_CAP
 			options_label.text = "Tap a card to drop it for %s." % pending_new_card.name
 			for i in range(hand.size()):
 				var cv := make_card_view(hand[i])
 				cv.picked.connect(_make_discard_callback(i))
 				options_container.add_child(cv)
+			build_form_placeholders("No Form draw while you're cutting the bag")
 
 		State.CLUB_SELECT:
+			step_num = "1"
+			step_hint = "Pick a club from your bag"
 			hand_label.text = "YOUR BAG %d/%d" % [hand.size(), HAND_CAP]
 			options_label.text = "Tap a club, then aim on the hole."
 			if current_lie == "bunker":
-				options_label.text += "\n(bunker — irons/wedges only)"
+				options_label.text += "  (bunker — irons/wedges only)"
 			rebuild_bag_row()
+			build_form_placeholders("Drawn fresh for every single shot")
 
 		State.PUTTING:
+			step_num = "·"
+			step_hint = "On the green — stop the marker in the band"
 			hand_label.text = "PUTTING — %s" % putt_distance_text().to_upper()
-			options_label.text = "Stop the marker in the green band. The further out you are, the tighter it gets."
+			options_label.text = "The further out you are, the tighter the band gets."
 			build_putt_controls()
+			build_form_placeholders("No Form draw on the green — putting is a timing check")
 
 		State.DONE:
 			var total_strokes := 0
@@ -1214,13 +1410,67 @@ func refresh_ui() -> void:
 				total_strokes += entry.strokes
 				total_par += entry.par
 			var diff := total_strokes - total_par
+			step_num = "·"
+			step_hint = "Round complete"
 			hand_label.text = "ROUND COMPLETE"
 			options_label.text = "%d strokes (%s)." % [total_strokes, score_diff_text(diff)]
 			var restart_btn := Button.new()
 			restart_btn.text = "Restart Round"
-			restart_btn.custom_minimum_size = Vector2(160, 60)
+			restart_btn.custom_minimum_size = Vector2(180, 60)
 			restart_btn.pressed.connect(_on_restart_pressed)
 			options_container.add_child(restart_btn)
+			build_form_placeholders("")
+
+	if step_holder:
+		clear_container(step_holder)
+		if step_hint != "":
+			step_holder.add_child(BoogieUI.step_pill(step_num, step_hint))
+
+
+# Face-down Form slots. The Form half of the strip is always present, so
+# outside a draw it shows how many cards the current swing would earn
+# rather than collapsing to nothing — the count itself is information.
+func build_form_placeholders(note: String) -> void:
+	form_label.text = "FORM HAND"
+	form_hint.text = note
+
+	var count := 3
+	if state == State.AIM and not pending_club.is_empty():
+		var tier := swing_tier_for_shot()
+		if current_lie == "bunker" or tier == ShotResolver.Tier.EXTREME_FINESSE:
+			count = 1
+		else:
+			count = FormDeck.TIER_DRAW_COUNT.get(tier, 3)
+		form_hint.text = "This swing draws %d" % count
+	elif state != State.CLUB_SELECT:
+		count = 0
+
+	for i in count:
+		form_container.add_child(make_form_placeholder())
+
+
+# A dashed, muted card the same size as a real Form card, so the row
+# doesn't jump when the draw lands.
+func make_form_placeholder() -> PanelContainer:
+	var s := StyleBoxFlat.new()
+	s.bg_color = BoogieTheme.NEUTRAL_200
+	s.set_corner_radius_all(12)
+	s.border_color = BoogieTheme.NEUTRAL_400
+	s.set_border_width_all(2)
+	s.content_margin_left = 14
+	s.content_margin_right = 14
+	s.content_margin_top = 14
+	s.content_margin_bottom = 14
+	var p := BoogieUI.make_panel(s)
+	p.custom_minimum_size = Vector2(180, 0)
+	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	p.add_child(col)
+	col.add_child(BoogieUI.tag("Awaiting draw", BoogieTheme.NEUTRAL_300, BoogieTheme.NEUTRAL_700))
+	col.add_child(BoogieUI.body("Face down", 17, BoogieTheme.NEUTRAL_600))
+	return p
 
 
 func make_card_view(card: Dictionary, interactive: bool = true, compact: bool = false) -> CardView:
@@ -1265,42 +1515,90 @@ func make_form_deck_chip_button() -> Button:
 # FORM_DRAW): the club, its yardage band, and the swing tier this aim
 # implies — visible the moment you're deciding, not just once cards
 # are drawn.
+# The shot panel. Where the old outlook only appeared while aiming, this
+# is always on: distance to the pin, your lie, strokes played, and what
+# the lie is doing to you. When a club is in hand it also shows the swing
+# tier and its draw consequence, which is the read the game turns on.
 func rebuild_shot_outlook() -> void:
 	clear_container(shot_outlook)
-	var show_it: bool = (state == State.AIM or state == State.FORM_DRAW) and not pending_club.is_empty()
-	shot_outlook.visible = show_it
-	if not show_it:
-		return
+	shot_outlook.visible = true
 
-	shot_outlook.add_child(BoogieUI.kicker("Shot outlook", COLOR_SAND))
-	shot_outlook.add_child(BoogieUI.body("%s — %d-%d yds" % [
-		pending_club.name, int(pending_club.min_yard), int(pending_club.max_yard)], 12, COLOR_TEXT))
+	shot_outlook.add_child(BoogieUI.kicker("This shot", BoogieTheme.ACCENT_700))
 
-	var tier := swing_tier_for_shot()
-	var dist: float = ball_pos.distance_to(aim_target)
-	shot_outlook.add_child(BoogieUI.body("%s — aiming %d yds" % [
-		ShotResolver.tier_name(tier), int(round(dist))], 11, COLOR_TEXT))
+	var dist_to_pin: float = ball_pos.distance_to(hole.pin_pos) if hole else 0.0
+	var on_green := current_lie == "green"
+	var big := BoogieUI.big_stat(
+		str(maxi(1, int(round(dist_to_pin * 3.0)))) if (on_green and dist_to_pin < 4.0) else str(int(round(dist_to_pin))),
+		"ft to pin" if (on_green and dist_to_pin < 4.0) else "yds to pin")
+	shot_outlook.add_child(big[0])
 
-	var tier_hint := ""
-	var tier_is_risky := false
-	match tier:
-		ShotResolver.Tier.FULL:
-			tier_hint = "⚠ Swinging all-out — draws only 2 Form cards, less room to dodge a bad one."
-			tier_is_risky = true
-		ShotResolver.Tier.MID:
-			tier_hint = "Comfortable, repeatable swing — draws 3 Form cards, best choice."
-		ShotResolver.Tier.FINESSE:
-			tier_hint = "⚠ Delicate touch — draws only 2 Form cards, less room to dodge a bad one."
-			tier_is_risky = true
-		ShotResolver.Tier.EXTREME_FINESSE:
-			tier_hint = "⚠ Below this club's range — no draw at all, a bad Form card is created and you must play it."
-			tier_is_risky = true
-	shot_outlook.add_child(BoogieUI.body(tier_hint, 10, COLOR_FLAG if tier_is_risky else COLOR_TEXT_SOFT))
+	var stats := HBoxContainer.new()
+	stats.add_theme_constant_override("separation", 8)
+	shot_outlook.add_child(stats)
+	stats.add_child(BoogieUI.stat_block("Lie", current_lie.capitalize()))
+	stats.add_child(BoogieUI.stat_block("Strokes", str(strokes)))
+	stats.add_child(BoogieUI.stat_block("Par", str(hole_par) if hole else "—"))
 
-	if current_lie == "bunker" and tier != ShotResolver.Tier.EXTREME_FINESSE:
-		shot_outlook.add_child(BoogieUI.body("⚠ Playing from the sand — forces the same treatment as Extreme Finesse: no draw, a bad Form card is created and you must play it.", 10, COLOR_FLAG))
+	# What this lie costs you — Section 5's terrain modifiers, said plainly
+	# rather than left for the player to remember.
+	var lie_note := ""
+	match current_lie:
+		"tee":
+			lie_note = "Tee — full aimed distance, every club playable."
+		"fairway":
+			lie_note = "Fairway — full aimed distance, every club playable, no draw penalty."
+		"rough":
+			lie_note = "Rough — whatever distance you aim for flies at 80%. A Flop Shot ignores it entirely."
+		"bunker":
+			lie_note = "Bunker — 50% distance, woods unplayable, and the club forces one fresh bad Form card on you."
+		"green":
+			lie_note = "On the green — putting switches to the timing meter, and the sunk band narrows with distance."
+	if lie_note != "":
+		var risky := current_lie == "rough" or current_lie == "bunker"
+		shot_outlook.add_child(BoogieUI.note_box(
+			lie_note,
+			BoogieTheme.ACCENT_100 if risky else BoogieTheme.OLIVE_100,
+			BoogieTheme.ACCENT_300 if risky else BoogieTheme.OLIVE_300,
+			BoogieTheme.ACCENT_900 if risky else BoogieTheme.OLIVE_900))
 
-	shot_outlook.add_child(BoogieUI.hairline(0.14))
+	# Club-specific read, only once a club is actually in hand.
+	if (state == State.AIM or state == State.FORM_DRAW) and not pending_club.is_empty():
+		shot_outlook.add_child(BoogieUI.hairline(0.14))
+
+		var club_row := VBoxContainer.new()
+		club_row.add_theme_constant_override("separation", 2)
+		shot_outlook.add_child(club_row)
+		club_row.add_child(BoogieUI.kicker("Club in hand", BoogieTheme.NEUTRAL_600))
+		club_row.add_child(BoogieUI.body("%s — %d-%d yds" % [
+			pending_club.name, int(pending_club.min_yard), int(pending_club.max_yard)],
+			15, BoogieTheme.INK))
+
+		var tier := swing_tier_for_shot()
+		var aim_dist: float = ball_pos.distance_to(aim_target)
+		club_row.add_child(BoogieUI.body("%s — aiming %d yds" % [
+			ShotResolver.tier_name(tier), int(round(aim_dist))], 13, BoogieTheme.NEUTRAL_700))
+
+		var tier_hint := ""
+		var tier_is_risky := false
+		match tier:
+			ShotResolver.Tier.FULL:
+				tier_hint = "⚠ Swinging all-out — draws only 2 Form cards, less room to dodge a bad one."
+				tier_is_risky = true
+			ShotResolver.Tier.MID:
+				tier_hint = "Comfortable, repeatable swing — draws 3 Form cards, best choice."
+			ShotResolver.Tier.FINESSE:
+				tier_hint = "⚠ Delicate touch — draws only 2 Form cards, less room to dodge a bad one."
+				tier_is_risky = true
+			ShotResolver.Tier.EXTREME_FINESSE:
+				tier_hint = "⚠ Below this club's range — no draw at all, a bad Form card is created and you must play it."
+				tier_is_risky = true
+		shot_outlook.add_child(BoogieUI.body(
+			tier_hint, 12, BoogieTheme.ACCENT_700 if tier_is_risky else BoogieTheme.NEUTRAL_600))
+
+		if current_lie == "bunker" and tier != ShotResolver.Tier.EXTREME_FINESSE:
+			shot_outlook.add_child(BoogieUI.body(
+				"⚠ Playing from the sand — forces the same treatment as Extreme Finesse: no draw, a bad Form card is created and you must play it.",
+				12, BoogieTheme.ACCENT_700))
 
 
 # Builds the bag row for CLUB_SELECT: every card in hand, in hand order.
