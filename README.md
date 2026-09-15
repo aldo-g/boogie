@@ -1,8 +1,8 @@
-# Boogie
+# Bogey
 
 A golf-themed card/dice board game — currently being prototyped digitally in
 Godot 4 to test whether the core mechanics are fun before committing to
-physical production. Working title "Boogie."
+physical production. Working title "Bogey."
 
 ## Concept
 
@@ -55,7 +55,7 @@ Solo mode plays against par; multiplayer plays head-to-head.
 ## Repo layout
 
 ```
-Boogie/
+Bogey/
 ├── project.godot     Godot project config
 ├── assets/
 │   └── maps/

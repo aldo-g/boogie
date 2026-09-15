@@ -25,6 +25,31 @@ var aim_club: Dictionary = {}      # the selected club dict, for drawing per-tie
 
 var _hovering: bool = false        # true once the mouse has moved over the map while aiming
 
+# Club-reach preview (bag hover). Set while the cursor rests on a bag
+# card, cleared when it leaves. Draws exactly what committing to the club
+# would draw — the same tier bands, via _draw_tier_bands() — so the
+# preview is a true rehearsal of the shot rather than a second, different
+# picture the player has to learn separately.
+var preview_club: Dictionary = {}
+
+# Form-card landing preview. Set while the cursor rests on a Form card
+# during the draw, cleared when it leaves. Because every Form card is
+# fully deterministic (Section 4 — no hidden numbers), the landing spot
+# can be shown exactly rather than as a probability cloud: this is the
+# shot you will get if you play this card.
+var preview_landing_active: bool = false
+var preview_landing_pos: Vector2 = Vector2.ZERO   # yard-space
+var preview_landing_from: Vector2 = Vector2.ZERO  # yard-space
+var preview_landing_good: bool = true
+var preview_landing_out: bool = false   # lands off the course — stroke and distance
+var preview_landing_holed: bool = false # on the cup — earns the d20 roll
+
+# True while the live aim crosshair sits on a line that would earn the
+# hole-out roll. Set by Main.gd on every aim change (it owns the club, lie
+# and hand the resolution depends on) rather than computed here, so the
+# map never has to duplicate shot math it doesn't own.
+var aim_can_hole_out: bool = false
+
 # Aim-tool animation state (yard-space): set by play_aim_animation(), cleared after.
 var _aim_active: bool = false
 var _aim_origin: Vector2 = Vector2.ZERO
@@ -60,6 +85,16 @@ const COLOR_FLIGHT_TRAIL := Color(0.98, 0.98, 0.97, 0.9)
 const COLOR_PIN := Color(0.753, 0.278, 0.227)
 const COLOR_AIM_LINE := Color(0.753, 0.278, 0.227, 0.55)
 const COLOR_AIM_WARNING := Color(0.827, 0.514, 0.106)  # amber — outside the club's sweet-spot band
+# Yellow — this line finishes on the cup and earns the d20 hole-out roll.
+# Deliberately brighter and more saturated than the amber warning above so
+# the two never read as the same signal: amber is "this is risky", yellow
+# is "this gets a shot at the hole". Yellow is a chance, not a promise —
+# only a natural 20 actually drops.
+const COLOR_AIM_HOLE_OUT := Color(0.984, 0.839, 0.141)
+# Form-card landing preview: green for a good card, red for a bad one, so
+# the cost of a bad draw is legible on the map before it is played.
+const COLOR_PREVIEW_GOOD := Color(0.306, 0.431, 0.251)
+const COLOR_PREVIEW_BAD := Color(0.753, 0.278, 0.227)
 const COLOR_TREE_CANOPY := Color(0.325, 0.443, 0.271)
 const COLOR_TREE_CANOPY_DARK := Color(0.267, 0.373, 0.220)
 const COLOR_TREE_SHADOW := Color(0.106, 0.129, 0.110, 0.16)
@@ -116,17 +151,109 @@ func set_ball(p_pos: Vector2, p_path: Array) -> void:
 # there's no separate confirm step, so the preview is the only chance to
 # see the risk before playing. club is the full club dict (needed to draw
 # the four swing-tier bands via ShotResolver.tier_yardage_range()).
+# Called by the bag row as the cursor enters/leaves a club card. Pass an
+# empty dictionary to clear. Suppressed while aiming: once a club is
+# chosen the map is already showing that club's full tier breakdown, and
+# a second ring over the top would be noise.
+# The four swing-tier bands for one club, centred on `origin_px`.
+#
+# Shared deliberately by both the live aim and the bag-hover preview: the
+# preview's whole job is to show what committing to this club would look
+# like, so it must be the same picture, from the same
+# ShotResolver.tier_yardage_range() numbers. Two copies would be free to
+# drift apart, which is exactly the bug a preview cannot afford.
+#
+# `fallback_max` covers the putter and any degenerate 0-0 club, which have
+# no meaningful tier split — those get a single plain reach ring instead.
+func _draw_tier_bands(club: Dictionary, origin_px: Vector2, scale_px: float,
+		fallback_max: float = 0.0) -> void:
+	if club.is_empty():
+		return
+
+	if club.get("min_yard", 0.0) > 0.0:
+		var tiers := [ShotResolver.Tier.EXTREME_FINESSE, ShotResolver.Tier.FINESSE, ShotResolver.Tier.MID, ShotResolver.Tier.FULL]
+		var tier_colors := [TIER_BAND_COLOR_EXTREME_FINESSE, TIER_BAND_COLOR_FINESSE, TIER_BAND_COLOR_MID, TIER_BAND_COLOR_FULL]
+		for i in range(tiers.size()):
+			var band := ShotResolver.tier_yardage_range(club, tiers[i])
+			var lo: float = band.x
+			var hi: float = band.y
+			if hi <= lo:
+				continue
+			var mid_r: float = ((lo + hi) * 0.5) * scale_px
+			var band_width_px: float = (hi - lo) * scale_px
+			draw_arc(origin_px, mid_r, 0, TAU, 72, tier_colors[i], max(band_width_px, 1.5))
+		return
+
+	# A club whose band starts at 0 — the putter — gets a single reach ring
+	# rather than the four tier bands. Its Extreme Finesse band is
+	# necessarily empty (you cannot aim below zero) and it buffers
+	# deviation to nothing, so the only thing worth drawing is how far it
+	# actually gets. The aim path passes its own aim_max_range; the hover
+	# preview falls back to the club's own max.
+	var reach: float = fallback_max
+	if reach <= 0.0:
+		reach = float(club.get("max_yard", 0.0))
+	if reach > 0.0 and reach < 900.0:
+		draw_arc(origin_px, reach * scale_px, 0, TAU, 56, Color(BogeyTheme.INK, 0.16), 1.0)
+
+
+# Called as the cursor enters/leaves a Form card during the draw. Pass
+# active=false to clear.
+# `holed` says this card's landing spot finishes on the cup — Main.gd
+# computes it from the same ShotResolver.earns_hole_out_roll() the played
+# shot uses, so the yellow marks exactly the cards that earn the d20.
+func set_preview_landing(active: bool, from_pos: Vector2 = Vector2.ZERO,
+		landing: Vector2 = Vector2.ZERO, good: bool = true,
+		holed: bool = false) -> void:
+	if preview_landing_active == active \
+			and preview_landing_pos == landing \
+			and preview_landing_from == from_pos \
+			and preview_landing_holed == holed:
+		return
+	preview_landing_active = active
+	preview_landing_from = from_pos
+	preview_landing_pos = landing
+	preview_landing_good = good
+	preview_landing_out = active and hole != null and hole.is_out_of_bounds(landing)
+	preview_landing_holed = holed and not preview_landing_out
+	queue_redraw()
+
+
+func set_preview_club(club: Dictionary) -> void:
+	if preview_club == club:
+		return
+	preview_club = club
+	queue_redraw()
+
+
 func set_aiming(enabled: bool, min_range: float = 0.0, max_range: float = 999.0, club: Dictionary = {}) -> void:
+	# A live aim supersedes any hover preview: the card that was hovered is
+	# usually the one just picked, and its mouse_exited never fires once the
+	# bag row is rebuilt out from under the cursor.
+	if enabled:
+		preview_club = {}
 	aiming = enabled
 	aim_min_range = max(min_range, 0.0)
 	aim_max_range = max(max_range, 0.01)
 	aim_club = club
 	_hovering = false
+	if not enabled:
+		# Leaving the aim step drops the yellow with it — a stale hole-out
+		# highlight next to a ball that has already been played is a lie.
+		aim_can_hole_out = false
 	queue_redraw()
 
 
 func set_aim_target(p_target: Vector2) -> void:
 	aim_target = _clamp_to_range(p_target) if aiming else p_target
+	queue_redraw()
+
+
+# Main.gd tells the map whether the current aim line is a hole-out line.
+func set_aim_can_hole_out(p_can: bool) -> void:
+	if aim_can_hole_out == p_can:
+		return
+	aim_can_hole_out = p_can
 	queue_redraw()
 
 
@@ -184,6 +311,11 @@ func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side:
 	if not hole:
 		on_done.call()
 		return
+	# The card that was hovered is the one just played, and its
+	# mouse_exited never fires because the Form row is cleared out from
+	# under the cursor — so the preview has to be dropped here or it would
+	# hang over the shot it was predicting.
+	preview_landing_active = false
 	_aim_active = true
 	_aim_origin = ball_pos
 	_aim_base_dir = base_dir.normalized()
@@ -263,21 +395,10 @@ func _set_aim_distance(d: float) -> void:
 func _yard_extent() -> Rect2:
 	if not hole:
 		return Rect2(-50, -20, 100, 440)
-	var min_x: float = -60.0
-	var max_x: float = 60.0
-	var min_y: float = -20.0
-	var max_y: float = hole.yardage + 30.0
-	for pt in hole.fairway_polygon:
-		min_x = min(min_x, pt.x)
-		max_x = max(max_x, pt.x)
-	for pt in hole.green_polygon:
-		min_x = min(min_x, pt.x)
-		max_x = max(max_x, pt.x)
-	for hazard in hole.hazards:
-		for pt in hazard.polygon:
-			min_x = min(min_x, pt.x)
-			max_x = max(max_x, pt.x)
-	return Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
+	# The drawn extent IS the playable extent: the rough rect painted from
+	# this rectangle is the ground that counts as in bounds, so the picture
+	# and the rule are the same number rather than two that happen to agree.
+	return hole.bounds
 
 
 func _to_px(yard_pt: Vector2) -> Vector2:
@@ -409,8 +530,8 @@ func _draw() -> void:
 
 	# Tee marker: a small pair of tee-box pegs.
 	var tee_px := _to_px(hole.tee_pos)
-	draw_circle(tee_px + Vector2(-3, 0), 2.2, BoogieTheme.INK_SOFT)
-	draw_circle(tee_px + Vector2(3, 0), 2.2, BoogieTheme.INK_SOFT)
+	draw_circle(tee_px + Vector2(-3, 0), 2.2, BogeyTheme.INK_SOFT)
+	draw_circle(tee_px + Vector2(3, 0), 2.2, BogeyTheme.INK_SOFT)
 
 	# Pin/flag with a soft ground shadow so it feels planted on the green.
 	var pin_px := _to_px(hole.pin_pos)
@@ -419,7 +540,7 @@ func _draw() -> void:
 	var flag_pts := PackedVector2Array([
 		pin_px + Vector2(0, -18), pin_px + Vector2(10, -14), pin_px + Vector2(0, -10)])
 	draw_colored_polygon(flag_pts, COLOR_PIN)
-	draw_circle(pin_px, 2.5, BoogieTheme.INK)
+	draw_circle(pin_px, 2.5, BogeyTheme.INK)
 
 	# Shot trail: tee -> each prior landing spot -> current ball position,
 	# drawn as short dashes so it reads as a path etched into the grass
@@ -437,6 +558,17 @@ func _draw() -> void:
 	# what the Form draw actually does. Capped to the hole's own extent so
 	# a long club's outer band can't bulge into the dead space beyond the
 	# mapped course art.
+	# --- Club reach preview (hovering a bag card, before committing) -----
+	# Exactly the picture the shot itself shows, just previewed: the same
+	# tier bands, drawn by the same function, so hovering a club and
+	# committing to it can never disagree about where its tiers fall.
+	if not aiming and not preview_club.is_empty() and not _flight_active:
+		var prev_origin := _to_px(ball_pos)
+		_draw_tier_bands(preview_club, prev_origin, _px_scale())
+		# The same origin ring the live aim draws, so the ball reads as the
+		# pivot the bands radiate from in both views.
+		draw_arc(prev_origin, 9.0, 0, TAU, 20, COLOR_AIM_LINE, 2.0)
+
 	if aiming:
 		var origin_px := _to_px(ball_pos)
 		var scale_px := _px_scale()
@@ -445,25 +577,62 @@ func _draw() -> void:
 		# (see _clamp_to_extent()), so a band reaching toward/past the pin is
 		# expected and simply gets naturally clipped by the Control's own
 		# rect when Godot rasterizes past its bounds.
-		if not aim_club.is_empty() and aim_club.get("min_yard", 0.0) > 0.0:
-			var tiers := [ShotResolver.Tier.EXTREME_FINESSE, ShotResolver.Tier.FINESSE, ShotResolver.Tier.MID, ShotResolver.Tier.FULL]
-			var tier_colors := [TIER_BAND_COLOR_EXTREME_FINESSE, TIER_BAND_COLOR_FINESSE, TIER_BAND_COLOR_MID, TIER_BAND_COLOR_FULL]
-			for i in range(tiers.size()):
-				var band := ShotResolver.tier_yardage_range(aim_club, tiers[i])
-				var lo: float = band.x
-				var hi: float = band.y
-				if hi <= lo:
-					continue
-				var mid_r: float = ((lo + hi) * 0.5) * scale_px
-				var band_width_px: float = (hi - lo) * scale_px
-				draw_arc(origin_px, mid_r, 0, TAU, 72, tier_colors[i], max(band_width_px, 1.5))
-		else:
-			# Putter or a degenerate 0-0 club: just the max-range ring.
-			if aim_max_range < 900.0:
-				var r: float = aim_max_range * scale_px
-				draw_arc(origin_px, r, 0, TAU, 56, Color(BoogieTheme.INK, 0.16), 1.0)
+		_draw_tier_bands(aim_club, origin_px, scale_px, aim_max_range)
 
 		draw_arc(origin_px, 9.0, 0, TAU, 20, COLOR_AIM_LINE, 2.0)
+
+	# --- Form-card landing preview (hovering a card in the Form hand) ----
+	# The exact spot this card puts the ball, drawn over the aim bands: a
+	# dashed flight line out to a ringed marker. Every Form card is fully
+	# deterministic, so this is a promise, not an estimate.
+	if preview_landing_active:
+		var from_px := _to_px(preview_landing_from)
+		var land_px := _to_px(preview_landing_pos)
+		# Out of bounds outranks good/bad: a "good" card that still puts you
+		# off the course costs a stroke, and that is the headline.
+		var col: Color = COLOR_PREVIEW_GOOD if preview_landing_good else COLOR_PREVIEW_BAD
+		if preview_landing_out:
+			col = COLOR_PREVIEW_BAD
+		elif preview_landing_holed:
+			# Yellow regardless of whether the card itself is "good": a bad
+			# card that happens to put the ball on the cup still buys the
+			# roll, which is the best outcome on the table.
+			col = COLOR_AIM_HOLE_OUT
+
+		# Dashed so it reads as a projection rather than the solid trail
+		# used for shots already played.
+		var seg := land_px - from_px
+		var seg_len := seg.length()
+		if seg_len > 1.0:
+			var dir := seg / seg_len
+			var dash := 9.0
+			var gap := 6.0
+			var t := 0.0
+			while t < seg_len:
+				var t2: float = min(t + dash, seg_len)
+				draw_line(from_px + dir * t, from_px + dir * t2,
+					Color(col, 0.75), 2.0)
+				t = t2 + gap
+
+		# Landing marker: a filled dot inside a ring, so it stays readable
+		# over both light fairway and dark rough.
+		draw_circle(land_px, 6.5, Color(col, 0.28))
+		draw_arc(land_px, 6.5, 0, TAU, 24, col, 2.0)
+		draw_circle(land_px, 2.0, col)
+
+		# Off the course: an X through the marker, so an OB landing is not
+		# just "a red dot slightly further out" but visibly a different
+		# outcome from a bad-but-playable one.
+		if preview_landing_holed:
+			# A halo ring around the cup marker, echoing the live aim's
+			# wider ring so both yellow states read as the same signal.
+			draw_arc(land_px, 12.0, 0, TAU, 26, Color(col, 0.6), 2.0)
+
+		if preview_landing_out:
+			var d := 9.0
+			draw_line(land_px + Vector2(-d, -d), land_px + Vector2(d, d), col, 2.0)
+			draw_line(land_px + Vector2(-d, d), land_px + Vector2(d, -d), col, 2.0)
+			draw_arc(land_px, 13.0, 0, TAU, 28, Color(col, 0.55), 1.5)
 
 	if aiming and _hovering:
 		# Live crosshair: follows the cursor continuously; a click commits
@@ -474,9 +643,18 @@ func _draw() -> void:
 		var dist_now: float = ball_pos.distance_to(aim_target)
 		var out_of_band: bool = dist_now < aim_min_range
 		var crosshair_col := COLOR_AIM_WARNING if out_of_band else COLOR_AIM_LINE
+		# A hole-out line outranks the out-of-band warning: the shot being
+		# an awkward tier stops mattering the moment it buys a roll at the
+		# hole.
+		if aim_can_hole_out:
+			crosshair_col = COLOR_AIM_HOLE_OUT
 		var target_px := _to_px(aim_target)
 		draw_line(_to_px(ball_pos), target_px, crosshair_col, 2.0)
 		draw_arc(target_px, 7.0, 0, TAU, 16, crosshair_col, 2.0)
+		# A second, wider ring so the yellow state is unmistakable at a
+		# glance — the line alone is thin enough to miss mid-aim.
+		if aim_can_hole_out:
+			draw_arc(target_px, 12.0, 0, TAU, 24, Color(crosshair_col, 0.6), 2.0)
 		draw_line(target_px + Vector2(-8, 0), target_px + Vector2(8, 0), crosshair_col, 1.5)
 		draw_line(target_px + Vector2(0, -8), target_px + Vector2(0, 8), crosshair_col, 1.5)
 	elif not aiming and not _aim_active and not _flight_active and aim_target.distance_to(ball_pos) > 0.5:

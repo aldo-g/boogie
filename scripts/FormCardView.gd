@@ -11,8 +11,12 @@ extends Control
 # ---------------------------------------------------------
 
 signal picked(card_view: FormCardView)
+# Emitted as the cursor enters/leaves the card, so the hole map can preview
+# where this card would put the ball.
+signal hover_started(card_view: FormCardView)
+signal hover_ended(card_view: FormCardView)
 
-const CARD_SIZE := Vector2(158, 190)
+const CARD_SIZE := Vector2(186, 184)
 
 var form_card: FormCard
 var interactive: bool = true
@@ -22,7 +26,7 @@ var _hover_tween: Tween
 
 
 static func accent_color(card: FormCard) -> Color:
-	return BoogieTheme.FAIRWAY_DEEP if card.good else BoogieTheme.FLAG
+	return BogeyTheme.FAIRWAY_DEEP if card.good else BogeyTheme.FLAG
 
 
 func setup(p_card: FormCard, p_interactive: bool = true) -> void:
@@ -51,7 +55,7 @@ func _build() -> void:
 	_panel.position = Vector2.ZERO
 	_panel.size = CARD_SIZE
 	var style := StyleBoxFlat.new()
-	style.bg_color = BoogieTheme.CARD_BG
+	style.bg_color = BogeyTheme.CARD_BG
 	style.set_corner_radius_all(10)
 	style.border_color = accent
 	style.set_border_width_all(2)
@@ -68,25 +72,26 @@ func _build() -> void:
 	vbox.add_theme_constant_override("separation", 5)
 	_panel.add_child(vbox)
 
-	var kind_label := Label.new()
-	kind_label.text = "GOOD FORM" if form_card.good else "BAD FORM"
-	kind_label.add_theme_font_size_override("font_size", 9)
-	kind_label.add_theme_color_override("font_color", accent)
-	vbox.add_child(kind_label)
+	# Filled pill rather than a bare caption — good/bad is the first thing
+	# to register on a Form card, and a tag carries further than 9px text.
+	vbox.add_child(BogeyUI.tag(
+		"Good form" if form_card.good else "Bad form",
+		BogeyTheme.OLIVE_200 if form_card.good else BogeyTheme.ACCENT_200,
+		BogeyTheme.OLIVE_800 if form_card.good else BogeyTheme.ACCENT_800))
 
 	var name_label := Label.new()
 	name_label.text = form_card.name
-	name_label.add_theme_font_size_override("font_size", 15)
-	name_label.add_theme_color_override("font_color", BoogieTheme.INK)
+	name_label.add_theme_font_size_override("font_size", 18)
+	name_label.add_theme_color_override("font_color", BogeyTheme.INK)
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	vbox.add_child(name_label)
 
-	vbox.add_child(BoogieUI.hairline(0.14))
+	vbox.add_child(BogeyUI.hairline(0.14))
 
 	var effect_label := Label.new()
 	effect_label.text = form_card.effect_text()
-	effect_label.add_theme_font_size_override("font_size", 11)
-	effect_label.add_theme_color_override("font_color", BoogieTheme.INK_SOFT)
+	effect_label.add_theme_font_size_override("font_size", 13)
+	effect_label.add_theme_color_override("font_color", BogeyTheme.NEUTRAL_700)
 	effect_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	effect_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(effect_label)
@@ -102,6 +107,7 @@ func _on_hover_start() -> void:
 		return
 	_animate_scale(Vector2(1.06, 1.06), 0.12)
 	z_index = 5
+	hover_started.emit(self)
 
 
 func _on_hover_end() -> void:
@@ -109,6 +115,7 @@ func _on_hover_end() -> void:
 		return
 	_animate_scale(Vector2.ONE, 0.12)
 	z_index = 0
+	hover_ended.emit(self)
 
 
 func _on_panel_input(event: InputEvent) -> void:

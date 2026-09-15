@@ -84,15 +84,49 @@ func create_forced_bad_card(card_name: String = "") -> FormCard:
 # draw from the shared deck. Otherwise draws TIER_DRAW_COUNT[tier] cards,
 # plainly and without bias, for the caller to pick 1 from:
 # {"forced": false, "cards": [...]}.
-func draw_for_shot(tier: int, force_extreme: bool = false) -> Dictionary:
+# bonus_cards: Section 3A brand set bonuses (Titanist 4, Slazinger 2/4)
+# add cards to every draw. drop_worst (Titanist 2) then discards the worst
+# card of the draw before the player picks — they still choose from the
+# same number of cards, but never from the very worst option available.
+func draw_for_shot(tier: int, force_extreme: bool = false,
+		bonus_cards: int = 0, drop_worst: bool = false) -> Dictionary:
 	if force_extreme or tier == Tier.EXTREME_FINESSE:
 		return {"forced": true, "cards": [create_forced_bad_card()]}
 
-	var count: int = TIER_DRAW_COUNT.get(tier, 3)
+	var count: int = TIER_DRAW_COUNT.get(tier, 3) + max(bonus_cards, 0)
+	# Titanist 2 draws one extra and bins the worst, so the player still
+	# picks from the tier's normal count.
+	if drop_worst:
+		count += 1
+
 	var drawn: Array = []
 	for i in range(count):
 		drawn.append(_draw_one())
+
+	if drop_worst and drawn.size() > 1:
+		var worst_index := 0
+		for i in range(1, drawn.size()):
+			if _card_rank(drawn[i]) < _card_rank(drawn[worst_index]):
+				worst_index = i
+		discard.append(drawn[worst_index])
+		drawn.remove_at(worst_index)
+
 	return {"forced": false, "cards": drawn}
+
+
+# Rough desirability score, only ever used to decide which card Titanist's
+# 2-set bins. Good cards always outrank bad ones; within each group, less
+# deviation and less distance loss rank higher. Deliberately simple — it
+# picks the card to throw away, not the card to play.
+func _card_rank(card: FormCard) -> float:
+	var score: float = 100.0 if card.good else 0.0
+	score -= card.degrees
+	score += card.distance_mult * 20.0
+	if card.downgrades_lie:
+		score -= 30.0
+	if card.is_yips:
+		score -= 25.0
+	return score
 
 
 func return_unpicked(cards: Array, picked_index: int) -> void:
