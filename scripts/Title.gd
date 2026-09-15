@@ -1,7 +1,7 @@
 extends Control
 
 # ---------------------------------------------------------
-# BOOGIE TITLE SCREEN
+# BOGEY TITLE SCREEN
 # Course map fills the entire background. Title wordmark sits on
 # top of it in the open space.
 # Click/press to continue into the single-hole prototype (scenes/Main.tscn).
@@ -9,7 +9,7 @@ extends Control
 
 const COURSE_MAP := preload("res://assets/maps/llanfair-course.jpeg")
 const TITLE_FONT := preload("res://assets/fonts/AlexBrush-Regular.ttf")
-const Palette := preload("res://scripts/BoogieTheme.gd")
+const Palette := preload("res://scripts/BogeyTheme.gd")
 const MAIN_SCENE := "res://scenes/Main.tscn"
 
 const COLOR_DARK_GREEN := Palette.FAIRWAY_DEEP
@@ -37,7 +37,7 @@ func build_ui() -> void:
 	add_child(vbox)
 
 	var title := Label.new()
-	title.text = "Boogie!"
+	title.text = "Bogey!"
 	title.add_theme_font_override("font", TITLE_FONT)
 	title.add_theme_font_size_override("font_size", 72)
 	title.add_theme_color_override("font_color", COLOR_DARK_GREEN)

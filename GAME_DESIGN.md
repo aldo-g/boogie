@@ -1,4 +1,4 @@
-# Boogie — Game Design Document (Working Title)
+# Bogey — Game Design Document (Working Title)
 
 *A mid-weight golf deckbuilder. 60-90 min per round. Solo vs. par or head-to-head. Video game (Steam target), built as a card-resolution deckbuilder in the spirit of Slay the Spire — no dice, and no timing checks anywhere in the tee-to-green game. Putting is the deliberate exception: it's a timing meter whose difficulty scales with distance (Section 6).*
 

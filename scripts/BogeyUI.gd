@@ -1,16 +1,16 @@
-class_name BoogieUI
+class_name BogeyUI
 extends RefCounted
 
 # ---------------------------------------------------------
 # Shared styling helpers for the sheet layout — panels, hairlines, kickers
-# and chips, all on BoogieTheme's palette. Keeps build_ui() readable and
+# and chips, all on BogeyTheme's palette. Keeps build_ui() readable and
 # stops every screen inventing its own StyleBoxFlat.
 # ---------------------------------------------------------
 
 const PAD := 14
 
 
-static func panel(bg: Color = BoogieTheme.PARCHMENT, pad: int = PAD, radius: int = 4) -> StyleBoxFlat:
+static func panel(bg: Color = BogeyTheme.PARCHMENT, pad: int = PAD, radius: int = 4) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	s.bg_color = bg
 	s.set_corner_radius_all(radius)
@@ -24,8 +24,8 @@ static func panel(bg: Color = BoogieTheme.PARCHMENT, pad: int = PAD, radius: int
 # A panel with hairline edges on the named sides — the sheet is parted by
 # rules, not by filled blocks.
 static func ruled_panel(left: bool = false, right: bool = false, top: bool = false, bottom: bool = false, pad: int = PAD) -> StyleBoxFlat:
-	var s := panel(BoogieTheme.PARCHMENT, pad)
-	s.border_color = Color(BoogieTheme.INK, 0.22)
+	var s := panel(BogeyTheme.PARCHMENT, pad)
+	s.border_color = Color(BogeyTheme.INK, 0.22)
 	s.border_width_left = 1 if left else 0
 	s.border_width_right = 1 if right else 0
 	s.border_width_top = 1 if top else 0
@@ -40,7 +40,7 @@ static func make_panel(style: StyleBoxFlat) -> PanelContainer:
 
 
 # Small letter-spaced section label — "SCORECARD", "PLAY-BY-PLAY".
-static func kicker(text: String, color: Color = BoogieTheme.SAND_DEEP) -> Label:
+static func kicker(text: String, color: Color = BogeyTheme.SAND_DEEP) -> Label:
 	var l := Label.new()
 	var spaced := ""
 	for i in text.to_upper().length():
@@ -57,11 +57,11 @@ static func heading(text: String, size: int = 26) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", BoogieTheme.INK)
+	l.add_theme_color_override("font_color", BogeyTheme.INK)
 	return l
 
 
-static func body(text: String, size: int = 13, color: Color = BoogieTheme.INK_SOFT) -> Label:
+static func body(text: String, size: int = 13, color: Color = BogeyTheme.INK_SOFT) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
@@ -72,13 +72,13 @@ static func body(text: String, size: int = 13, color: Color = BoogieTheme.INK_SO
 
 static func hairline(alpha: float = 0.2) -> ColorRect:
 	var r := ColorRect.new()
-	r.color = Color(BoogieTheme.INK, alpha)
+	r.color = Color(BogeyTheme.INK, alpha)
 	r.custom_minimum_size = Vector2(0, 1)
 	return r
 
 
 # Outlined pill — used for flight conditions, bag count, running score.
-static func chip(text: String, accent: Color = BoogieTheme.INK_SOFT, filled: bool = false) -> PanelContainer:
+static func chip(text: String, accent: Color = BogeyTheme.INK_SOFT, filled: bool = false) -> PanelContainer:
 	var s := StyleBoxFlat.new()
 	s.bg_color = accent if filled else Color(0, 0, 0, 0)
 	s.set_corner_radius_all(99)
@@ -92,7 +92,7 @@ static func chip(text: String, accent: Color = BoogieTheme.INK_SOFT, filled: boo
 	var l := Label.new()
 	l.text = text.to_upper()
 	l.add_theme_font_size_override("font_size", 10)
-	l.add_theme_color_override("font_color", BoogieTheme.PARCHMENT if filled else accent)
+	l.add_theme_color_override("font_color", BogeyTheme.PARCHMENT if filled else accent)
 	p.add_child(l)
 	return p
 
@@ -100,10 +100,10 @@ static func chip(text: String, accent: Color = BoogieTheme.INK_SOFT, filled: boo
 # The plate: a photograph-style mat around the hole map, so the board reads
 # as an illustration tipped into the sheet rather than a viewport.
 static func plate(content: Control, mat: int = 10) -> PanelContainer:
-	var outer := make_panel(panel(BoogieTheme.PARCHMENT_RAISED, mat, 2))
+	var outer := make_panel(panel(BogeyTheme.PARCHMENT_RAISED, mat, 2))
 	outer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var inner := make_panel(panel(BoogieTheme.CARD_BG, 1, 0))
+	var inner := make_panel(panel(BogeyTheme.CARD_BG, 1, 0))
 	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	inner.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -140,7 +140,7 @@ static func tag(text: String, bg: Color, ink: Color) -> PanelContainer:
 
 # A labelled figure on a tonal ground — "LIE / Fairway", "STROKES / 2".
 # Three of these sit in a row under the big yards-to-pin number.
-static func stat_block(label_text: String, value_text: String, bg: Color = BoogieTheme.NEUTRAL_200) -> PanelContainer:
+static func stat_block(label_text: String, value_text: String, bg: Color = BogeyTheme.NEUTRAL_200) -> PanelContainer:
 	var s := StyleBoxFlat.new()
 	s.bg_color = bg
 	s.set_corner_radius_all(8)
@@ -158,13 +158,13 @@ static func stat_block(label_text: String, value_text: String, bg: Color = Boogi
 	var cap := Label.new()
 	cap.text = label_text.to_upper()
 	cap.add_theme_font_size_override("font_size", 10)
-	cap.add_theme_color_override("font_color", BoogieTheme.NEUTRAL_700)
+	cap.add_theme_color_override("font_color", BogeyTheme.NEUTRAL_700)
 	col.add_child(cap)
 
 	var val := Label.new()
 	val.text = value_text
 	val.add_theme_font_size_override("font_size", 16)
-	val.add_theme_color_override("font_color", BoogieTheme.INK)
+	val.add_theme_color_override("font_color", BogeyTheme.INK)
 	col.add_child(val)
 	return p
 
@@ -179,14 +179,14 @@ static func big_stat(value_text: String, unit_text: String) -> Array:
 	var val := Label.new()
 	val.text = value_text
 	val.add_theme_font_size_override("font_size", 54)
-	val.add_theme_color_override("font_color", BoogieTheme.INK)
+	val.add_theme_color_override("font_color", BogeyTheme.INK)
 	val.size_flags_vertical = Control.SIZE_SHRINK_END
 	row.add_child(val)
 
 	var unit := Label.new()
 	unit.text = unit_text.to_upper()
 	unit.add_theme_font_size_override("font_size", 12)
-	unit.add_theme_color_override("font_color", BoogieTheme.NEUTRAL_600)
+	unit.add_theme_color_override("font_color", BogeyTheme.NEUTRAL_600)
 	unit.size_flags_vertical = Control.SIZE_SHRINK_END
 	row.add_child(unit)
 	return [row, val]
@@ -218,9 +218,9 @@ static func note_box(text: String, bg: Color, border: Color, ink: Color) -> Pane
 # card and the eye can find "Stroke 3" without re-reading the wall.
 static func log_entry(tag_text: String, tag_ink: Color, head_text: String, body_text: String) -> PanelContainer:
 	var s := StyleBoxFlat.new()
-	s.bg_color = BoogieTheme.NEUTRAL_100
+	s.bg_color = BogeyTheme.NEUTRAL_100
 	s.set_corner_radius_all(12)
-	s.border_color = BoogieTheme.RULE
+	s.border_color = BogeyTheme.RULE
 	s.set_border_width_all(1)
 	s.content_margin_left = 14
 	s.content_margin_right = 14
@@ -247,7 +247,7 @@ static func log_entry(tag_text: String, tag_ink: Color, head_text: String, body_
 		var head := Label.new()
 		head.text = head_text
 		head.add_theme_font_size_override("font_size", 14)
-		head.add_theme_color_override("font_color", BoogieTheme.INK)
+		head.add_theme_color_override("font_color", BogeyTheme.INK)
 		head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		head.autowrap_mode = TextServer.AUTOWRAP_WORD
 		head_row.add_child(head)
@@ -257,7 +257,7 @@ static func log_entry(tag_text: String, tag_ink: Color, head_text: String, body_
 		body_label.text = body_text
 		body_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 		body_label.add_theme_font_size_override("font_size", 13)
-		body_label.add_theme_color_override("font_color", BoogieTheme.NEUTRAL_700)
+		body_label.add_theme_color_override("font_color", BogeyTheme.NEUTRAL_700)
 		col.add_child(body_label)
 	return p
 
@@ -266,9 +266,9 @@ static func log_entry(tag_text: String, tag_ink: Color, head_text: String, body_
 # instruction, so "what do I do now" is one glance, not a hunt.
 static func step_pill(step_text: String, hint_text: String) -> PanelContainer:
 	var s := StyleBoxFlat.new()
-	s.bg_color = BoogieTheme.ACCENT_100
+	s.bg_color = BogeyTheme.ACCENT_100
 	s.set_corner_radius_all(99)
-	s.border_color = BoogieTheme.ACCENT_300
+	s.border_color = BogeyTheme.ACCENT_300
 	s.set_border_width_all(1)
 	s.content_margin_left = 14
 	s.content_margin_right = 20
@@ -283,7 +283,7 @@ static func step_pill(step_text: String, hint_text: String) -> PanelContainer:
 	p.add_child(row)
 
 	var dot_style := StyleBoxFlat.new()
-	dot_style.bg_color = BoogieTheme.SAND
+	dot_style.bg_color = BogeyTheme.SAND
 	dot_style.set_corner_radius_all(99)
 	dot_style.content_margin_left = 8
 	dot_style.content_margin_right = 8
@@ -294,7 +294,7 @@ static func step_pill(step_text: String, hint_text: String) -> PanelContainer:
 	var dot_label := Label.new()
 	dot_label.text = step_text
 	dot_label.add_theme_font_size_override("font_size", 13)
-	dot_label.add_theme_color_override("font_color", BoogieTheme.PARCHMENT)
+	dot_label.add_theme_color_override("font_color", BogeyTheme.PARCHMENT)
 	dot_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	dot.add_child(dot_label)
 	row.add_child(dot)
@@ -302,7 +302,7 @@ static func step_pill(step_text: String, hint_text: String) -> PanelContainer:
 	var hint := Label.new()
 	hint.text = hint_text
 	hint.add_theme_font_size_override("font_size", 14)
-	hint.add_theme_color_override("font_color", BoogieTheme.ACCENT_800)
+	hint.add_theme_color_override("font_color", BogeyTheme.ACCENT_800)
 	hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(hint)
 	return p

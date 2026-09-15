@@ -1,4 +1,4 @@
-class_name BoogieTheme
+class_name BogeyTheme
 extends RefCounted
 
 # ---------------------------------------------------------

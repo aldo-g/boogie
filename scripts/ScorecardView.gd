@@ -25,11 +25,11 @@ func _ready() -> void:
 
 
 func _build() -> void:
-	add_child(BoogieUI.kicker("Scorecard"))
+	add_child(BogeyUI.kicker("Scorecard"))
 
 	var head := _make_row("H", "PAR", "YDS", "SCR", true)
 	add_child(head)
-	add_child(BoogieUI.hairline(0.4))
+	add_child(BogeyUI.hairline(0.4))
 
 	for n in range(1, HoleData.HOLE_COUNT + 1):
 		var d: Dictionary = HoleData.HOLES[n]
@@ -37,18 +37,18 @@ func _build() -> void:
 		add_child(row)
 		_rows.append(row.get_meta("cells"))
 		if n == 6 or n == 12:
-			add_child(BoogieUI.hairline(0.3))
+			add_child(BogeyUI.hairline(0.3))
 		elif n < HoleData.HOLE_COUNT:
-			add_child(BoogieUI.hairline(0.08))
+			add_child(BogeyUI.hairline(0.08))
 
-	add_child(BoogieUI.hairline(0.4))
+	add_child(BogeyUI.hairline(0.4))
 
 	var foot := HBoxContainer.new()
 	foot.add_theme_constant_override("separation", 6)
-	_thru_label = BoogieUI.body("Thru 0", 12, BoogieTheme.INK_SOFT)
+	_thru_label = BogeyUI.body("Thru 0", 12, BogeyTheme.INK_SOFT)
 	_thru_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	foot.add_child(_thru_label)
-	_total_label = BoogieUI.body("E", 14, BoogieTheme.INK)
+	_total_label = BogeyUI.body("E", 14, BogeyTheme.INK)
 	foot.add_child(_total_label)
 	add_child(foot)
 
@@ -69,7 +69,7 @@ func _make_row(hole: String, par: String, yds: String, score: String, is_head: b
 	wrap.add_child(row)
 
 	var size := 10 if is_head else 13
-	var color := BoogieTheme.INK_SOFT if is_head else BoogieTheme.INK
+	var color := BogeyTheme.INK_SOFT if is_head else BogeyTheme.INK
 
 	var cells := {}
 	var specs := [["hole", hole, 34], ["par", par, 40], ["yds", yds, 52], ["score", score, 0]]
@@ -77,7 +77,7 @@ func _make_row(hole: String, par: String, yds: String, score: String, is_head: b
 		var l := Label.new()
 		l.text = spec[1]
 		l.add_theme_font_size_override("font_size", size)
-		l.add_theme_color_override("font_color", color if spec[0] != "yds" else BoogieTheme.INK_SOFT)
+		l.add_theme_color_override("font_color", color if spec[0] != "yds" else BogeyTheme.INK_SOFT)
 		if spec[2] > 0:
 			l.custom_minimum_size = Vector2(spec[2], 0)
 		else:
@@ -112,16 +112,16 @@ func set_round(scores: Array, current_hole: int, strokes: int) -> void:
 			total_par += e.par
 		elif is_current:
 			cells.score.text = str(strokes) if strokes > 0 else "·"
-			cells.score.add_theme_color_override("font_color", BoogieTheme.INK)
+			cells.score.add_theme_color_override("font_color", BogeyTheme.INK)
 		else:
 			cells.score.text = "—"
-			cells.score.add_theme_color_override("font_color", Color(BoogieTheme.INK_SOFT, 0.45))
+			cells.score.add_theme_color_override("font_color", Color(BogeyTheme.INK_SOFT, 0.45))
 
-		style.bg_color = Color(BoogieTheme.FAIRWAY, 0.16) if is_current else Color(0, 0, 0, 0)
+		style.bg_color = Color(BogeyTheme.FAIRWAY, 0.16) if is_current else Color(0, 0, 0, 0)
 		var dim: float = 1.0 if (played or is_current) else 0.5
-		cells.hole.add_theme_color_override("font_color", Color(BoogieTheme.INK, dim))
-		cells.par.add_theme_color_override("font_color", Color(BoogieTheme.INK, dim))
-		cells.yds.add_theme_color_override("font_color", Color(BoogieTheme.INK_SOFT, dim))
+		cells.hole.add_theme_color_override("font_color", Color(BogeyTheme.INK, dim))
+		cells.par.add_theme_color_override("font_color", Color(BogeyTheme.INK, dim))
+		cells.yds.add_theme_color_override("font_color", Color(BogeyTheme.INK_SOFT, dim))
 
 	_thru_label.text = "Thru %d" % scores.size()
 	var diff := total_strokes - total_par
@@ -131,7 +131,7 @@ func set_round(scores: Array, current_hole: int, strokes: int) -> void:
 
 func _score_color(diff: int) -> Color:
 	if diff < 0:
-		return BoogieTheme.FAIRWAY_DEEP
+		return BogeyTheme.FAIRWAY_DEEP
 	elif diff > 0:
-		return BoogieTheme.FLAG
-	return BoogieTheme.INK
+		return BogeyTheme.FLAG
+	return BogeyTheme.INK

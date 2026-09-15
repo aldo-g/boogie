@@ -27,6 +27,7 @@ var fairway_polygon: PackedVector2Array
 var green_polygon: PackedVector2Array
 var green_fringe_polygon: PackedVector2Array  # collar, for drawing only
 var hazards: Array  # [{ "type": "bunker"/"water", "polygon": PackedVector2Array }, ...]
+var bounds: Rect2   # playable extent in yards; outside it is out of bounds
 
 
 func _init(p_par: int, p_yardage: float, p_tee: Vector2, p_pin: Vector2,
@@ -40,11 +41,48 @@ func _init(p_par: int, p_yardage: float, p_tee: Vector2, p_pin: Vector2,
 	green_polygon = p_green
 	hazards = p_hazards
 	green_fringe_polygon = p_fringe
+	bounds = _compute_bounds()
+
+
+# The playable extent of the hole, in yards. Anything outside is out of
+# bounds (Rule 18 — stroke and distance).
+#
+# Computed from the hole's own geometry rather than from the map view's
+# _yard_extent(), which depends on the size of the Control it is drawn
+# into: where the ball is out of play is a rule, and must not change when
+# the window is resized. The two are deliberately kept in agreement — the
+# view uses the same -60/+60 x floor and the same tee/pin margins — so the
+# green painted on screen is exactly the ground that counts as in play.
+func _compute_bounds() -> Rect2:
+	var min_x: float = -60.0
+	var max_x: float = 60.0
+	for pt in fairway_polygon:
+		min_x = min(min_x, pt.x)
+		max_x = max(max_x, pt.x)
+	for pt in green_polygon:
+		min_x = min(min_x, pt.x)
+		max_x = max(max_x, pt.x)
+	for hazard in hazards:
+		for pt in hazard.polygon:
+			min_x = min(min_x, pt.x)
+			max_x = max(max_x, pt.x)
+	var min_y: float = -20.0
+	var max_y: float = yardage + 30.0
+	return Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
+
+
+# True when a point lies outside the hole's playable extent.
+func is_out_of_bounds(point: Vector2) -> bool:
+	return not bounds.has_point(point)
 
 
 # Which terrain a point falls in. Priority: green > hazards > fairway >
 # rough. The fringe is cosmetic and plays as fairway.
 func terrain_at(point: Vector2) -> String:
+	# Checked first: a point off the course is out of bounds even if it
+	# would otherwise fall inside a polygon that extends past the edge.
+	if is_out_of_bounds(point):
+		return "out"
 	if Geometry2D.is_point_in_polygon(point, green_polygon):
 		return "green"
 	for hazard in hazards:

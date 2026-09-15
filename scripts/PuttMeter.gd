@@ -122,31 +122,31 @@ func _draw() -> void:
 	var bar := Rect2(0, top, w, BAR_HEIGHT)
 
 	# Miss ground — the whole bar, then the friendlier bands painted over it.
-	draw_rect(bar, Color(BoogieTheme.INK, 0.10))
+	draw_rect(bar, Color(BogeyTheme.INK, 0.10))
 
 	var close_w: float = _close_half * 2.0 * w
 	draw_rect(Rect2(w * 0.5 - close_w * 0.5, top, close_w, BAR_HEIGHT),
-		Color(BoogieTheme.SAND, 0.55))
+		Color(BogeyTheme.SAND, 0.55))
 
 	var sunk_w: float = maxf(_sunk_half * 2.0 * w, 2.0)
 	draw_rect(Rect2(w * 0.5 - sunk_w * 0.5, top, sunk_w, BAR_HEIGHT),
-		Color(BoogieTheme.FAIRWAY, 0.95))
+		Color(BogeyTheme.FAIRWAY, 0.95))
 
 	# Hairline frame, matching the sheet's ruled panels.
-	draw_rect(bar, Color(BoogieTheme.INK, 0.35), false, 1.0)
+	draw_rect(bar, Color(BogeyTheme.INK, 0.35), false, 1.0)
 
 	# Centre tick above the bar, so the target reads even when the sunk
 	# band is only a couple of pixels wide on a long putt.
 	draw_line(Vector2(w * 0.5, top - 6), Vector2(w * 0.5, top - 1),
-		Color(BoogieTheme.INK, 0.5), 1.0)
+		Color(BogeyTheme.INK, 0.5), 1.0)
 
 	# The marker.
 	var mx: float = _pos * w
-	var marker_col: Color = BoogieTheme.INK
+	var marker_col: Color = BogeyTheme.INK
 	if not active and _flash > 0.0:
 		match _result:
-			"sunk": marker_col = BoogieTheme.FAIRWAY_DEEP
-			"close": marker_col = BoogieTheme.SAND_DEEP
-			_: marker_col = BoogieTheme.FLAG
+			"sunk": marker_col = BogeyTheme.FAIRWAY_DEEP
+			"close": marker_col = BogeyTheme.SAND_DEEP
+			_: marker_col = BogeyTheme.FLAG
 	draw_rect(Rect2(mx - MARKER_WIDTH * 0.5, top - 4, MARKER_WIDTH, BAR_HEIGHT + 8),
 		marker_col)

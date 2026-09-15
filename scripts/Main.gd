@@ -1,7 +1,7 @@
 extends Control
 
 # ---------------------------------------------------------
-# BOOGIE PROTOTYPE
+# BOGEY PROTOTYPE
 # Single hole, single player. Tests the core loop (Section 4, Form Card
 # System):
 #   club draft: draw 3 / pick 1 (permanent growing hand, 14-card cap)
@@ -23,9 +23,9 @@ const GIMME_YARDS := 0.7
 # sunk band is 12% of the bar, which needs the room to stay aimable.
 const METER_WIDTH := 620
 
-const Palette := preload("res://scripts/BoogieTheme.gd")
+const Palette := preload("res://scripts/BogeyTheme.gd")
 
-# Parchment / fairway theme, shared with Title.gd via BoogieTheme.
+# Parchment / fairway theme, shared with Title.gd via BogeyTheme.
 const COLOR_BG := Palette.PARCHMENT
 const COLOR_PANEL := Palette.PARCHMENT_RAISED
 const COLOR_TEXT := Palette.INK
@@ -51,6 +51,7 @@ var live_brands: Array = []
 
 var current_hole_index: int = 1
 var round_scores: Array = []  # [{"hole": int, "par": int, "strokes": int}, ...]
+var _restart_armed: bool = false  # Restart pressed once mid-round, awaiting confirm
 
 var hole: HoleData
 var hole_yardage: float = 380.0
@@ -95,7 +96,8 @@ var form_container: HBoxContainer
 # on refresh. Newest first.
 var log_entries: Array = []
 var scorecard: ScorecardView
-var header_meta: HFlowContainer     # live-brand/round/bag chip row, right of the title
+var header_meta: HFlowContainer     # round/bag/form-deck chip row, right of the title
+var brand_rack: HFlowContainer      # brand chips, in the bag header — hover for the set's clubs and bonuses
 var hole_title: Label
 var shot_outlook: VBoxContainer
 var form_deck_popup: PopupPanel
@@ -127,7 +129,7 @@ func build_ui() -> void:
 	# the left, what to do next in the middle, and the running numbers on
 	# the right. The step pill is the important addition — the old header
 	# left "what now?" to a line of small grey text in the log column.
-	var header := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, true, 20))
+	var header := BogeyUI.make_panel(BogeyUI.ruled_panel(false, false, false, true, 20))
 	header.custom_minimum_size = Vector2(0, 92)
 	root.add_child(header)
 
@@ -140,18 +142,18 @@ func build_ui() -> void:
 	title_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	title_col.custom_minimum_size = Vector2(190, 0)
 	header_row.add_child(title_col)
-	title_col.add_child(BoogieUI.heading("Boogie", 24))
-	title_col.add_child(BoogieUI.kicker("Boogie Links", BoogieTheme.ACCENT_700))
+	title_col.add_child(BogeyUI.heading("Bogey", 24))
+	title_col.add_child(BogeyUI.kicker("Bogey Links", BogeyTheme.ACCENT_700))
 
 	var hole_col := VBoxContainer.new()
 	hole_col.add_theme_constant_override("separation", 2)
 	hole_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	header_row.add_child(hole_col)
 
-	hole_title = BoogieUI.heading("Hole 1 — Par 4", 28)
+	hole_title = BogeyUI.heading("Hole 1 — Par 4", 28)
 	hole_col.add_child(hole_title)
 
-	status_label = BoogieUI.body("Loading...", 14, BoogieTheme.NEUTRAL_700)
+	status_label = BogeyUI.body("Loading...", 14, BogeyTheme.NEUTRAL_700)
 	hole_col.add_child(status_label)
 
 	# The step pill sits centered between the hole line and the figures.
@@ -171,13 +173,26 @@ func build_ui() -> void:
 	header_meta.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header_row.add_child(header_meta)
 
+	# Restart, pinned to the far right of the header so it's reachable from
+	# every state — mid-aim, mid-putt, or sitting on the scorecard. Kept
+	# out of header_meta (which reflows with the run's brand chips) so it
+	# never drifts to a second line or moves under the cursor.
+	var restart_btn := Button.new()
+	restart_btn.text = "Restart"
+	restart_btn.tooltip_text = "Abandon this round and start a new one from hole 1"
+	restart_btn.custom_minimum_size = Vector2(84, 32)
+	restart_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	restart_btn.focus_mode = Control.FOCUS_NONE
+	restart_btn.pressed.connect(_on_header_restart_pressed)
+	header_row.add_child(restart_btn)
+
 	# --- Middle: scorecard | hole plate | shot panel ----------------------
 	var mid_row := HBoxContainer.new()
 	mid_row.add_theme_constant_override("separation", 0)
 	mid_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(mid_row)
 
-	var card_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, true, false, false, 18))
+	var card_panel := BogeyUI.make_panel(BogeyUI.ruled_panel(false, true, false, false, 18))
 	card_panel.custom_minimum_size = Vector2(300, 0)
 	mid_row.add_child(card_panel)
 
@@ -190,7 +205,7 @@ func build_ui() -> void:
 	scorecard.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	card_col.add_child(scorecard)
 
-	var plate_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(false, true, false, false, 20))
+	var plate_panel := BogeyUI.make_panel(BogeyUI.ruled_panel(false, true, false, false, 20))
 	plate_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mid_row.add_child(plate_panel)
 
@@ -200,11 +215,11 @@ func build_ui() -> void:
 
 	var plate_head := HBoxContainer.new()
 	plate_col.add_child(plate_head)
-	plate_head.add_child(BoogieUI.kicker("The hole · tee to green", BoogieTheme.ACCENT_700))
+	plate_head.add_child(BogeyUI.kicker("The hole · tee to green", BogeyTheme.ACCENT_700))
 	var plate_spacer := Control.new()
 	plate_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	plate_head.add_child(plate_spacer)
-	map_caption = BoogieUI.body("", 13, BoogieTheme.NEUTRAL_700)
+	map_caption = BogeyUI.body("", 13, BogeyTheme.NEUTRAL_700)
 	map_caption.autowrap_mode = TextServer.AUTOWRAP_OFF
 	plate_head.add_child(map_caption)
 
@@ -215,13 +230,13 @@ func build_ui() -> void:
 	# long), so the mat is capped to a sensible width and centered rather
 	# than stretched to fill the column — matted like a course-guide
 	# illustration, not a wide empty frame around a thin strip.
-	var hole_plate := BoogieUI.plate(map_view)
+	var hole_plate := BogeyUI.plate(map_view)
 	hole_plate.custom_minimum_size = Vector2(360, 0)
 	hole_plate.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	plate_col.add_child(hole_plate)
 
 	# --- Shot panel: the numbers for the shot in front of you -------------
-	var shot_panel := BoogieUI.make_panel(BoogieUI.ruled_panel(true, false, false, false, 0))
+	var shot_panel := BogeyUI.make_panel(BogeyUI.ruled_panel(true, false, false, false, 0))
 	shot_panel.custom_minimum_size = Vector2(380, 0)
 	mid_row.add_child(shot_panel)
 
@@ -229,21 +244,21 @@ func build_ui() -> void:
 	shot_col.add_theme_constant_override("separation", 0)
 	shot_panel.add_child(shot_col)
 
-	var this_shot := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, true, 20))
+	var this_shot := BogeyUI.make_panel(BogeyUI.ruled_panel(false, false, false, true, 20))
 	shot_col.add_child(this_shot)
 
 	shot_outlook = VBoxContainer.new()
 	shot_outlook.add_theme_constant_override("separation", 12)
 	this_shot.add_child(shot_outlook)
 
-	var log_wrap := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, false, false, 20))
+	var log_wrap := BogeyUI.make_panel(BogeyUI.ruled_panel(false, false, false, false, 20))
 	log_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	shot_col.add_child(log_wrap)
 
 	var log_col := VBoxContainer.new()
 	log_col.add_theme_constant_override("separation", 10)
 	log_wrap.add_child(log_col)
-	log_col.add_child(BoogieUI.kicker("Play-by-play", BoogieTheme.ACCENT_700))
+	log_col.add_child(BogeyUI.kicker("Play-by-play", BogeyTheme.ACCENT_700))
 
 	# Each stroke is now its own card rather than a line in one scrolling
 	# block, so a glance finds the stroke you want.
@@ -263,17 +278,20 @@ func build_ui() -> void:
 	# the game. The Form side shows face-down placeholders until a draw
 	# happens, and both sides double as the surface for the draft,
 	# discard, and putting decisions.
-	var strip := BoogieUI.make_panel(BoogieUI.ruled_panel(false, false, true, false, 0))
+	var strip := BogeyUI.make_panel(BogeyUI.ruled_panel(false, false, true, false, 0))
 	# Tall enough for the taller of the two card faces (Form, 184) plus the
-	# kicker row and the panel's own padding — the bag's 168 fits inside it.
-	strip.custom_minimum_size = Vector2(0, 286)
+	# kicker row and the panel's own padding. The bag side is now the
+	# binding one — its shorter 168 card sits under both the kicker and the
+	# brand rack — so the height covers that stack rather than the Form
+	# side's.
+	strip.custom_minimum_size = Vector2(0, 300)
 	root.add_child(strip)
 
 	var strip_row := HBoxContainer.new()
 	strip_row.add_theme_constant_override("separation", 0)
 	strip.add_child(strip_row)
 
-	var bag_wrap := BoogieUI.make_panel(BoogieUI.panel(BoogieTheme.NEUTRAL_100, 20, 0))
+	var bag_wrap := BogeyUI.make_panel(BogeyUI.panel(BogeyTheme.NEUTRAL_100, 20, 0))
 	bag_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	strip_row.add_child(bag_wrap)
 
@@ -284,10 +302,10 @@ func build_ui() -> void:
 	var bag_head := HBoxContainer.new()
 	bag_head.add_theme_constant_override("separation", 14)
 	bag_col.add_child(bag_head)
-	hand_label = BoogieUI.kicker("Your bag", BoogieTheme.ACCENT_700)
+	hand_label = BogeyUI.kicker("Your bag", BogeyTheme.ACCENT_700)
 	hand_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	bag_head.add_child(hand_label)
-	options_label = BoogieUI.body("", 13, BoogieTheme.NEUTRAL_600)
+	options_label = BogeyUI.body("", 13, BogeyTheme.NEUTRAL_600)
 	options_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	# A one-line caption beside the kicker: let it take the rest of the row
 	# and ellipsize rather than autowrap into a one-word-per-line column.
@@ -295,6 +313,16 @@ func build_ui() -> void:
 	options_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	options_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	bag_head.add_child(options_label)
+
+	# The brand rack sits with the bag rather than in the page header:
+	# these chips are a read on the clubs directly beneath them, so they
+	# belong next to what they describe. Each chip carries a hover tooltip
+	# naming the clubs of that brand you actually hold and the bonus the
+	# next one unlocks — see brand_chip_tooltip().
+	brand_rack = HFlowContainer.new()
+	brand_rack.add_theme_constant_override("h_separation", 6)
+	brand_rack.add_theme_constant_override("v_separation", 4)
+	bag_col.add_child(brand_rack)
 
 	var options_scroll := ScrollContainer.new()
 	options_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -306,7 +334,7 @@ func build_ui() -> void:
 	options_container.add_theme_constant_override("separation", 12)
 	options_scroll.add_child(options_container)
 
-	var form_wrap := BoogieUI.make_panel(BoogieUI.ruled_panel(true, false, false, false, 20))
+	var form_wrap := BogeyUI.make_panel(BogeyUI.ruled_panel(true, false, false, false, 20))
 	form_wrap.custom_minimum_size = Vector2(620, 0)
 	strip_row.add_child(form_wrap)
 
@@ -317,10 +345,10 @@ func build_ui() -> void:
 	var form_head := HBoxContainer.new()
 	form_head.add_theme_constant_override("separation", 14)
 	form_col.add_child(form_head)
-	form_label = BoogieUI.kicker("Form hand", BoogieTheme.ACCENT_700)
+	form_label = BogeyUI.kicker("Form hand", BogeyTheme.ACCENT_700)
 	form_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	form_head.add_child(form_label)
-	form_hint = BoogieUI.body("", 13, BoogieTheme.NEUTRAL_600)
+	form_hint = BogeyUI.body("", 13, BogeyTheme.NEUTRAL_600)
 	form_hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	form_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	form_hint.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -357,8 +385,8 @@ func build_form_deck_popup() -> void:
 	vbox.add_theme_constant_override("separation", 8)
 	margin.add_child(vbox)
 
-	vbox.add_child(BoogieUI.kicker("Form deck contents", COLOR_SAND))
-	vbox.add_child(BoogieUI.hairline(0.14))
+	vbox.add_child(BogeyUI.kicker("Form deck contents", COLOR_SAND))
+	vbox.add_child(BogeyUI.hairline(0.14))
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -386,9 +414,9 @@ func rebuild_form_deck_list() -> void:
 		is_good[c.name] = c.good
 
 	var total := all_cards.size()
-	form_deck_list.add_child(BoogieUI.body("%d cards total (%d in deck, %d in discard)" % [
+	form_deck_list.add_child(BogeyUI.body("%d cards total (%d in deck, %d in discard)" % [
 		total, form_deck.deck.size(), form_deck.discard.size()], 11, COLOR_TEXT_SOFT))
-	form_deck_list.add_child(BoogieUI.hairline(0.1))
+	form_deck_list.add_child(BogeyUI.hairline(0.1))
 
 	var names: Array = counts.keys()
 	names.sort_custom(func(a, b):
@@ -398,7 +426,7 @@ func rebuild_form_deck_list() -> void:
 
 	for name in names:
 		var label_color := COLOR_ACCENT if is_good[name] else COLOR_FLAG
-		form_deck_list.add_child(BoogieUI.body("%s  x%d" % [name, counts[name]], 13, label_color))
+		form_deck_list.add_child(BogeyUI.body("%s  x%d" % [name, counts[name]], 13, label_color))
 
 
 func _on_form_deck_chip_pressed() -> void:
@@ -417,7 +445,7 @@ func log_msg(text: String) -> void:
 		return
 
 	var tag := ""
-	var ink := BoogieTheme.NEUTRAL_600
+	var ink := BogeyTheme.NEUTRAL_600
 	var head := ""
 	var body := clean
 
@@ -429,14 +457,14 @@ func log_msg(text: String) -> void:
 			tag = clean.substr(0, dash)
 			head = clean.substr(dash + 3)
 			body = ""
-			ink = BoogieTheme.ACCENT_700
+			ink = BogeyTheme.ACCENT_700
 	elif text.begins_with("[b]"):
 		var close := text.find("[/b]")
 		if close > 0:
 			head = strip_markup(text.substr(3, close - 3))
 			body = strip_markup(text.substr(close + 4)).strip_edges()
 			tag = "Hole"
-			ink = BoogieTheme.OLIVE_700
+			ink = BogeyTheme.OLIVE_700
 
 	if tag == "":
 		tag = "Note"
@@ -466,7 +494,7 @@ func rebuild_log() -> void:
 		return
 	clear_container(log_container)
 	for entry in log_entries:
-		log_container.add_child(BoogieUI.log_entry(
+		log_container.add_child(BogeyUI.log_entry(
 			entry.tag, entry.ink, entry.head, entry.body))
 
 
@@ -491,6 +519,29 @@ func make_club(cname: String, min_y: float, max_y: float, ctype: String,
 	}
 
 
+# Keeps the bag in the order a real golfer racks it: longest club first,
+# putter always last. Every view renders `hand` by index and every pick
+# callback captures that same index, so sorting the array itself — rather
+# than sorting a copy at draw time — keeps the bag row, the discard row,
+# and the click handlers in agreement for free. Called after any change
+# to the bag.
+func sort_hand() -> void:
+	hand.sort_custom(func(a, b):
+		# The putter has a 0-0 band and would otherwise sort to the front.
+		var a_putter: bool = a.type == "putter"
+		var b_putter: bool = b.type == "putter"
+		if a_putter != b_putter:
+			return b_putter
+		if a.max_yard != b.max_yard:
+			return a.max_yard > b.max_yard
+		# Same reach: the club that also carries further at the bottom of
+		# its band is the longer stick, and name is a stable last resort so
+		# two identical bands never swap places between redraws.
+		if a.min_yard != b.min_yard:
+			return a.min_yard > b.min_yard
+		return a.name < b.name)
+
+
 # ---------------------------------------------------------
 # SETUP
 # ---------------------------------------------------------
@@ -503,8 +554,9 @@ func init_game() -> void:
 	hand = [
 		make_club("Bogey-Mart Driver", 190, 235, "wood", Brands.STARTER),
 		make_club("Bogey-Mart 7-Iron", 95, 140, "iron", Brands.STARTER),
-		make_club("Bogey-Mart Putter", 0, 0, "putter", Brands.STARTER)
+		make_club("Bogey-Mart Putter", 0, 35, "putter", Brands.STARTER)
 	]
+	sort_hand()
 
 	live_brands = roll_live_brands()
 	club_deck = build_club_pool()
@@ -555,7 +607,7 @@ func build_club_pool() -> Array:
 		pool.append(make_club("9-Iron", 80, 110, "iron"))
 		pool.append(make_club("Pitching Wedge", 50, 90, "wedge"))
 		pool.append(make_club("Sand Wedge", 20, 60, "wedge"))
-		pool.append(make_club("Putter", 0, 0, "putter"))
+		pool.append(make_club("Putter", 0, 35, "putter"))
 
 	# --- Branded: only this run's live brands (Section 3B) ---
 	for brand in live_brands:
@@ -582,7 +634,7 @@ func limited_clubs() -> Array:
 			"Creates a Flop Shot on landing in a bunker. With a MacGregorian Wood: also Bump and Run on fairway"),
 		make_club("The Rutter", 35, 80, "wedge", "callowell", true,
 			"Purges a bad Form card on each hazard. With a Callowell Iron in bag: purges two"),
-		make_club("Old Reliable Putter", 0, 0, "putter", "pingwell", true,
+		make_club("Old Reliable Putter", 0, 35, "putter", "pingwell", true,
 			"Once per round, create Steady Hands. With another Ping-Well club: once every six holes"),
 		make_club("Persimmon Spoon", 175, 225, "wood", "macgregorian", true,
 			"Playable from rough with no penalty. With a 2nd MacGregorian: playable from any lie"),
@@ -605,7 +657,7 @@ func branded_clubs(brand: String) -> Array:
 				make_club("Titanist 6-Iron", 125, 160, "iron", brand, false, "Buffers deviation 25% better"),
 				make_club("Titanist 8-Iron", 90, 125, "iron", brand, false, "Buffers deviation 25% better"),
 				make_club("Titanist Tour Wedge", 45, 85, "wedge", brand, false, "Buffers deviation 25% better"),
-				make_club("Titanist Blade Putter", 0, 0, "putter", brand, false, "Once per round, a second putt attempt"),
+				make_club("Titanist Blade Putter", 0, 35, "putter", brand, false, "Once per round, a second putt attempt"),
 				make_club("Titanist Fairway 5", 165, 205, "wood", brand, false, "Buffers deviation 20% better"),
 			]
 		"callowell":
@@ -617,7 +669,7 @@ func branded_clubs(brand: String) -> Array:
 				make_club("Callowell 9-Iron", 75, 120, "iron", brand, false, "Wide band"),
 				make_club("Callowell Gap Wedge", 40, 85, "wedge", brand, false, "Shank cannot downgrade your lie"),
 				make_club("Callowell Sand Wedge", 20, 65, "wedge", brand, false, "Wide band"),
-				make_club("Callowell Mallet Putter", 0, 0, "putter", brand, false, "Forgiving on long putts"),
+				make_club("Callowell Mallet Putter", 0, 35, "putter", brand, false, "Forgiving on long putts"),
 			]
 		"pingwell":
 			# Fitted feel: rewards playing a club at its comfortable middle.
@@ -628,7 +680,7 @@ func branded_clubs(brand: String) -> Array:
 				make_club("Ping-Well Driver", 198, 248, "wood", brand, false, "Widened Mid tier"),
 				make_club("Ping-Well Lob Wedge", 15, 55, "wedge", brand, false, "Creates Flop Shot on any hazard lie"),
 				make_club("Ping-Well Gap Wedge", 45, 90, "wedge", brand, false, "Widened Mid tier"),
-				make_club("Ping-Well Mallet Putter", 0, 0, "putter", brand, false, "Steady Hands widens the sunk band twice as much"),
+				make_club("Ping-Well Mallet Putter", 0, 35, "putter", brand, false, "Steady Hands widens the sunk band twice as much"),
 			]
 		"macgregorian":
 			# Heritage: low running ball, built for scrappy lies.
@@ -639,7 +691,7 @@ func branded_clubs(brand: String) -> Array:
 				make_club("MacGregorian Mashie", 120, 165, "iron", brand, false, "Ignores the rough's distance penalty"),
 				make_club("MacGregorian Mid-Mashie", 140, 185, "iron", brand, false, "Ignores the rough's distance penalty"),
 				make_club("MacGregorian Niblick", 45, 95, "wedge", brand, false, "Landing in a hazard adds no bad card to the Form deck"),
-				make_club("MacGregorian Jigger", 0, 0, "putter", brand, false, "Putts from the fringe as though on the green"),
+				make_club("MacGregorian Jigger", 0, 35, "putter", brand, false, "Putts from the fringe as though on the green"),
 			]
 		"slazinger":
 			# Distance at a price: long, and worse at buffering.
@@ -650,7 +702,7 @@ func branded_clubs(brand: String) -> Array:
 				make_club("Slazinger Deep Iron", 125, 175, "iron", brand, false, "Buffers 20% worse"),
 				make_club("Slazinger Blast Wedge", 35, 90, "wedge", brand, false, "Extra distance out of bunkers"),
 				make_club("Slazinger Long Iron", 175, 225, "iron", brand, false, "Buffers 20% worse"),
-				make_club("Slazinger Heavy Putter", 0, 0, "putter", brand, false, "Strong on long putts, wild on short ones"),
+				make_club("Slazinger Heavy Putter", 0, 35, "putter", brand, false, "Strong on long putts, wild on short ones"),
 			]
 		"nimbus":
 			# Hybrid tech: covers gaps, no strong opinion.
@@ -661,7 +713,7 @@ func branded_clubs(brand: String) -> Array:
 				make_club("Nimbus All-Rounder", 105, 165, "iron", brand, false, "Wide band, no rider"),
 				make_club("Nimbus Driver", 195, 250, "wood", brand, false, "Counts as both Wood and Iron"),
 				make_club("Nimbus Utility Wedge", 30, 80, "wedge", brand, false, "Once per hole, playable from any lie with no penalty"),
-				make_club("Nimbus Putter", 0, 0, "putter", brand, false, "No rider — pure flexible filler"),
+				make_club("Nimbus Putter", 0, 35, "putter", brand, false, "No rider — pure flexible filler"),
 			]
 	return []
 
@@ -716,6 +768,7 @@ func begin_aim_for_shot() -> void:
 	map_view.set_aiming(true, pending_club.min_yard, pending_club.max_yard, pending_club)
 	map_view.set_aim_target(hole.pin_pos)
 	aim_target = map_view.aim_target
+	map_view.set_aim_can_hole_out(aim_line_can_hole_out())
 	state = State.AIM
 	refresh_ui()
 
@@ -731,7 +784,36 @@ func _on_aim_changed(target: Vector2) -> void:
 	if state != State.AIM:
 		return
 	aim_target = target
+	map_view.set_aim_can_hole_out(aim_line_can_hole_out())
 	rebuild_shot_outlook()
+
+
+# Whether the crosshair is sitting on a line that could earn the hole-out
+# roll — what turns the aim line yellow.
+#
+# No Form card exists yet at aim time, so the test is the one the player
+# can act on: if this aim were struck cleanly (a straight card, at the
+# distance aimed for, after the lie's own terrain cut), would the ball
+# finish on the cup? A card that curves or comes up short will miss —
+# that's the card's doing, and the Form-card preview then shows the truth
+# per card.
+#
+# Yellow promises the d20, never the hole. Landing it still only drops on
+# a natural 20; the rest of the time it's stone dead for a tap-in.
+func aim_line_can_hole_out() -> bool:
+	if hole == null or pending_club.is_empty():
+		return false
+	var aimed_distance: float = ball_pos.distance_to(aim_target)
+	# The terrain cut the shot will actually take, so aiming out of a
+	# bunker doesn't light up yellow for a shot that lands half way there.
+	var cap: float = 1.0
+	if not (Brands.ignores_terrain_penalty(hand) or Brands.plays_as_fairway(hand)):
+		cap = ShotResolver.TERRAIN_DISTANCE_CAP.get(current_lie, 1.0)
+	var aim_dir: Vector2 = (aim_target - ball_pos).normalized()
+	if aim_dir.length_squared() < 0.0001:
+		return false
+	var clean_landing: Vector2 = ball_pos + aim_dir * (aimed_distance * cap)
+	return ShotResolver.earns_hole_out_roll(clean_landing, hole.pin_pos, aimed_distance * cap)
 
 
 # The player clicked to commit their aim — now draw the 3 Form cards for
@@ -740,6 +822,9 @@ func _on_aim_picked(target: Vector2) -> void:
 	if state != State.AIM:
 		return
 	aim_target = target
+	# The live-aim yellow has done its job; from here the per-card landing
+	# preview is the authority on whether a given card drops.
+	map_view.set_aim_can_hole_out(false)
 	begin_form_draw()
 
 
@@ -889,6 +974,7 @@ func on_draft_pick(index: int) -> void:
 		state = State.DISCARD_FOR_DRAFT
 	else:
 		hand.append(card)
+		sort_hand()
 		log_msg("Added [b]%s[/b] to your hand." % card.name)
 		finish_hole_done()
 	refresh_ui()
@@ -899,6 +985,7 @@ func on_discard_pick(index: int) -> void:
 	var removed = hand.pop_at(index)
 	log_msg("Discarded %s." % removed.name)
 	hand.append(pending_new_card)
+	sort_hand()
 	log_msg("Added [b]%s[/b] to your hand." % pending_new_card.name)
 	pending_new_card = null
 
@@ -970,23 +1057,74 @@ func play_shot(club: Dictionary, card: FormCard) -> void:
 func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictionary) -> void:
 	_animating = false
 
-	# Vector2.rotated() turns clockwise for +angle in Godot's Y-down convention,
-	# so Draw (curves left) needs a positive angle here to end up on -x.
-	var sign: float = 0.0
-	if result.side == ShotResolver.Side.DRAW:
-		sign = 1.0
-	elif result.side == ShotResolver.Side.FADE:
-		sign = -1.0
-	var angle_rad: float = deg_to_rad(float(result.degree)) * sign
-	var shot_dir := aim_dir.rotated(angle_rad)
-	var landing_pos: Vector2 = before_pos + shot_dir * result.distance
+	# Shared with the Form-card landing preview — see
+	# ShotResolver.landing_position().
+	var landing_pos: Vector2 = ShotResolver.landing_position(before_pos, aim_dir, result)
 
 	var lie_result := hole.terrain_at(landing_pos)
 	log_msg("Distance: %d yards -> landed in %s, %d yards from the pin." % [
 		int(result.distance), lie_result, int(landing_pos.distance_to(hole.pin_pos))])
 
+	# A shot that finishes on the cup earns a d20, and only a natural 20
+	# actually drops (see ShotResolver — the aim and the card are fully
+	# visible, so the die is the one thing a player cannot read off the
+	# table). Checked before terrain is applied, because sitting on the cup
+	# outranks whatever the ball was flying over.
+	#
+	# Anything short of 20 still rattles the hole and finishes stone dead —
+	# you keep the reward for a perfect shot, you just have to tap it in.
+	if ShotResolver.earns_hole_out_roll(landing_pos, hole.pin_pos, result.distance):
+		var roll: int = ShotResolver.roll_for_hole_out()
+		if roll >= ShotResolver.HOLE_OUT_TARGET:
+			ball_pos = hole.pin_pos
+			current_lie = "green"
+			shot_path.append(ball_pos)
+			map_view.set_ball(ball_pos, shot_path)
+			map_view.set_aim_target(ball_pos)
+			log_msg("[color=#%s][b]d20: %d — IN THE HOLE, from %d yards![/b][/color]" % [
+				COLOR_ACCENT.to_html(false), roll, int(result.distance)])
+			finish_hole()
+			return
+		# Rimmed out. Deliberately left OUTSIDE gimme range: a rim-out
+		# conceded as a tap-in ends the hole the same instant a made one
+		# does, which makes the die invisible — the player sees the ball
+		# vanish either way and cannot tell a 20 from a 3. Leaving a short
+		# putt to actually play is what makes the miss land, and the higher
+		# the roll the closer it finishes, so the number on the die is
+		# visible in where the ball ends up.
+		log_msg("[color=#%s]d20: %d — rattles the cup and stays out.[/color]" % [
+			COLOR_FLAG.to_html(false), roll])
+		var rim_dir: Vector2 = (landing_pos - hole.pin_pos)
+		if rim_dir.length_squared() < 0.0001:
+			rim_dir = Vector2(0, 1)
+		# A 19 lips out to ~1 yard, a 1 pulls up ~3 — always beyond the
+		# gimme, so there is always a putt.
+		var rim_leave: float = lerpf(3.0, 1.0,
+			float(roll - 1) / float(ShotResolver.HOLE_OUT_DIE - 1))
+		ball_pos = hole.pin_pos + rim_dir.normalized() * rim_leave
+		current_lie = "green"
+		shot_path.append(ball_pos)
+		map_view.set_ball(ball_pos, shot_path)
+		map_view.set_aim_target(ball_pos)
+		advance_after_shot()
+		return
+
 	var hazard_hit := false
-	if lie_result == "water":
+	if lie_result == "out":
+		# Rule 18 — stroke and distance: a penalty stroke, and the ball is
+		# replayed from where the shot was struck. Same shape as the water
+		# case, which is already stroke-and-distance in all but name.
+		strokes += 1
+		ball_pos = before_pos
+		current_lie = hole.terrain_at(before_pos)
+		if current_lie == "out":
+			# The previous spot can itself be off the course only if the
+			# ball was already OB, which cannot happen — but never leave
+			# the lie in a state no club can be played from.
+			current_lie = "rough"
+		log_msg("[color=#%s]Out of bounds! +1 penalty stroke, replayed from your previous position.[/color]" % COLOR_FLAG.to_html(false))
+		hazard_hit = true
+	elif lie_result == "water":
 		strokes += 1
 		ball_pos = before_pos
 		current_lie = "rough" if hole.terrain_at(before_pos) != "fairway" else "fairway"
@@ -1059,6 +1197,19 @@ func start_putting() -> void:
 	_putt_dir = (ball_pos - hole.pin_pos).normalized()
 	if _putt_dir == Vector2.ZERO:
 		_putt_dir = Vector2(0, 1)
+
+	# The same gimme on_putt_stopped() applies, enforced on arrival too: a
+	# shot can now finish inside tap-in range without ever going through
+	# the putt meter (a rattled hole-out does exactly that), and asking for
+	# a timing check on a 2-foot putt the game concedes everywhere else
+	# would be a check the player cannot meaningfully fail.
+	if putt_dist <= GIMME_YARDS:
+		strokes += 1
+		putt_dist = 0.0
+		sync_ball_to_putt()
+		log_msg("[color=#%s]Tap-in conceded.[/color]" % COLOR_TEXT_SOFT.to_html(false))
+		finish_hole()
+		return
 	log_msg("\n[b]On the green.[/b] %s to the pin — stop the marker in the green band to hole it." % putt_distance_text())
 	refresh_ui()
 
@@ -1199,6 +1350,35 @@ func score_name(diff: int) -> String:
 	return "Triple Bogey+" if diff == 3 else "%d Over" % diff
 
 
+# --- Restart -----------------------------------------------------------
+# The header's always-available Restart. A round in progress is real work,
+# so a misclick shouldn't wipe it: the first press arms, the second
+# confirms. On hole 1 before a single stroke there is nothing to lose, so
+# it restarts immediately.
+#
+# Mid-animation presses are ignored — a scene torn down while a tween is
+# still driving the map would resolve its callback into a rebuilt UI.
+func _on_header_restart_pressed() -> void:
+	if _animating:
+		return
+	var nothing_to_lose: bool = current_hole_index == 1 and strokes == 0 \
+		and round_scores.is_empty()
+	if nothing_to_lose or _restart_armed:
+		restart_round()
+		return
+
+	_restart_armed = true
+	log_msg("\n[color=#%s][b]Restart?[/b] Press Restart again to abandon this round and start over from hole 1.[/color]" % COLOR_FLAG.to_html(false))
+	# Disarms on its own, so an ignored prompt can't sit armed for the rest
+	# of the round waiting to eat an unrelated press much later.
+	var t := get_tree().create_timer(5.0)
+	t.timeout.connect(func():
+		if _restart_armed:
+			_restart_armed = false
+			log_msg("[color=#%s]Restart cancelled.[/color]" % COLOR_TEXT_SOFT.to_html(false))
+	)
+
+
 func finish_hole() -> void:
 	var diff := strokes - hole_par
 	log_msg("\n[b]Holed out![/b] Total strokes: %d (par %d) — %s" % [strokes, hole_par, score_diff_text(diff)])
@@ -1222,7 +1402,7 @@ func finish_round() -> void:
 	state = State.DONE
 	log_entries.clear()
 	rebuild_log()
-	log_msg("[b]Round Complete — Boogie Links[/b]\n")
+	log_msg("[b]Round Complete — Bogey Links[/b]\n")
 	var total_strokes := 0
 	var total_par := 0
 	for entry in round_scores:
@@ -1234,9 +1414,13 @@ func finish_round() -> void:
 	refresh_ui()
 
 
-func _on_restart_pressed() -> void:
+# The actual reset, shared by the header button and the end-of-round
+# "Restart Round" button. init_game() rebuilds the bag, brands, Form deck
+# and draft pools, so a new run inherits nothing from the last one.
+func restart_round() -> void:
 	current_hole_index = 1
 	round_scores = []
+	_restart_armed = false
 	init_game()
 	start_hole()
 
@@ -1262,22 +1446,86 @@ func running_score_diff_text(diff: int) -> String:
 	return ("+%d" % diff) if diff > 0 else ("%d" % diff)
 
 
-# Brands in the Bag that haven't reached a tier yet, or have reached one
-# and are climbing toward the next — "CALLOWELL 3/4". Only brands the
-# player actually holds appear, so the row stays short.
-func brand_progress_chips() -> Array:
-	var out: Array = []
+# The hover text behind a brand chip in the bag rack. Answers the two
+# questions the chip itself can't fit: which clubs of this brand am I
+# actually carrying, and what does the next one buy me? Brands in the
+# run's pool that you hold none of still get a chip, greyed — knowing a
+# set is available and empty is as much of a plan as knowing it's half
+# built.
+func brand_chip_tooltip(brand: String) -> String:
+	var owned: Array = []
+	for club in hand:
+		if club.get("brand", Brands.NONE) == brand:
+			owned.append("  %s (%d-%d yds)" % [
+				club.name, int(club.min_yard), int(club.max_yard)])
+	# The count comes from Brands.counts(), never from owned.size(): that
+	# is the same figure the set bonuses are computed from, so the tooltip
+	# can never claim a tier the rules don't actually grant.
+	var n: int = int(Brands.counts(hand).get(brand, 0))
+
+	var lines: Array = [Brands.display_name(brand).to_upper()]
+	if n == 0:
+		lines.append("None in the bag.")
+	else:
+		lines.append("In the bag (%d):" % n)
+		lines.append_array(owned)
+
+	var tier: int = Brands.tier_reached(n)
+	lines.append("")
+	if tier > 0:
+		lines.append("ACTIVE — set of %d:" % tier)
+		lines.append("  %s" % String(Brands.BONUS_TEXT.get(brand, {}).get(tier, "")))
+	var next: int = Brands.next_tier(n)
+	if next > 0:
+		# The gap is what turns the chip into a decision at draft time.
+		lines.append("%d more for the set of %d:" % [next - n, next])
+		lines.append("  %s" % String(Brands.BONUS_TEXT.get(brand, {}).get(next, "")))
+	elif tier > 0:
+		lines.append("Top tier reached.")
+	return "\n".join(lines)
+
+
+# Rebuilds the brand rack under the bag kicker: one chip per brand in this
+# run's live pool, plus any brand you somehow hold that isn't in it. A
+# chip reads "TITANIST 4" once a tier is live, "CALLOWELL 1/2" while
+# climbing, and just the name when you hold none — and every one of them
+# carries the full hover breakdown.
+func rebuild_brand_rack() -> void:
+	if not brand_rack:
+		return
+	clear_container(brand_rack)
+
 	var counts := Brands.counts(hand)
-	for brand in counts:
-		if brand == Brands.STARTER:
-			continue  # Bogey-Mart has no set bonus — nothing to progress toward
-		var n: int = int(counts[brand])
+	var brands: Array = live_brands.duplicate()
+	for b in counts:
+		if not brands.has(b):
+			brands.append(b)
+
+	for brand in brands:
+		var n: int = int(counts.get(brand, 0))
+		var tier: int = Brands.tier_reached(n)
 		var next: int = Brands.next_tier(n)
-		if next == 0:
-			continue  # top tier reached; the active-bonus chip says it all
-		out.append("%s %d/%d" % [Brands.display_name(brand).to_upper(), n, next])
-	out.sort()
-	return out
+		var label: String = Brands.display_name(brand).to_upper()
+		var accent: Color = BogeyTheme.NEUTRAL_600
+		if tier > 0:
+			# A live set is the one thing on this row worth the accent.
+			label += " %d" % tier
+			accent = BogeyTheme.ACCENT_700
+		elif next > 0 and n > 0:
+			label += " %d/%d" % [n, next]
+		var chip := BogeyUI.chip(label, accent, tier > 0)
+		var tip: String = brand_chip_tooltip(brand)
+		# Godot resolves a tooltip from the topmost control under the
+		# cursor, which here is the chip's inner Label — so the text goes
+		# on the whole subtree, and every part of it takes the mouse so
+		# the panel still catches the gaps around the label.
+		chip.tooltip_text = tip
+		chip.mouse_filter = Control.MOUSE_FILTER_STOP
+		for child in chip.get_children():
+			if child is Control:
+				child.tooltip_text = tip
+				child.mouse_filter = Control.MOUSE_FILTER_STOP
+		brand_rack.add_child(chip)
 
 
 func refresh_ui() -> void:
@@ -1299,28 +1547,20 @@ func refresh_ui() -> void:
 
 	if header_meta:
 		clear_container(header_meta)
-		# Section 3B: the run's live brands, shown from the start — the
-		# player plans around a known pool rather than guessing at it.
-		for b in live_brands:
-			header_meta.add_child(BoogieUI.chip(Brands.display_name(b).to_upper(), BoogieTheme.ACCENT_700))
-		header_meta.add_child(BoogieUI.meta_stat(
+		# Brands used to live here. They now sit in the bag rack (Section
+		# 3A/3B), directly above the clubs that earn them — the header
+		# keeps only what's about the round rather than the bag.
+		header_meta.add_child(BogeyUI.meta_stat(
 			"Thru %d" % round_scores.size(),
 			running_score_diff_text(running_score_diff()),
-			BoogieTheme.OLIVE_200, BoogieTheme.OLIVE_900))
-		header_meta.add_child(BoogieUI.meta_stat(
+			BogeyTheme.OLIVE_200, BogeyTheme.OLIVE_900))
+		header_meta.add_child(BogeyUI.meta_stat(
 			"Bag", "%d/%d" % [hand.size(), HAND_CAP],
-			BoogieTheme.NEUTRAL_200, BoogieTheme.NEUTRAL_800))
-		# Section 3A: the live set-bonus counter. Active bonuses read as
-		# "TITANIST 4" in the accent colour; brands still short of their
-		# next tier show progress ("CALLOWELL 3/4") so the player can always
-		# see how close a set is.
-		for bonus in Brands.active_bonuses(hand):
-			header_meta.add_child(BoogieUI.chip("%s %d" % [
-				bonus.name.to_upper(), bonus.tier], BoogieTheme.ACCENT_700))
-		for progress in brand_progress_chips():
-			header_meta.add_child(BoogieUI.chip(progress, BoogieTheme.NEUTRAL_600))
+			BogeyTheme.NEUTRAL_200, BogeyTheme.NEUTRAL_800))
 		if form_deck:
 			header_meta.add_child(make_form_deck_chip_button())
+
+	rebuild_brand_rack()
 
 	if _animating:
 		return
@@ -1360,6 +1600,9 @@ func refresh_ui() -> void:
 			for i in range(current_form_options.size()):
 				var fv := make_form_card_view(current_form_options[i])
 				fv.picked.connect(_make_form_pick_callback(i))
+				# Hovering a Form card previews exactly where it lands.
+				fv.hover_started.connect(_on_form_hover_start)
+				fv.hover_ended.connect(_on_form_hover_end)
 				form_container.add_child(fv)
 
 		State.DRAFT:
@@ -1391,7 +1634,7 @@ func refresh_ui() -> void:
 			hand_label.text = "YOUR BAG %d/%d" % [hand.size(), HAND_CAP]
 			options_label.text = "Tap a club, then aim on the hole."
 			if current_lie == "bunker":
-				options_label.text += "  (bunker — irons/wedges only)"
+				options_label.text += "  (bunker — no woods)"
 			rebuild_bag_row()
 			build_form_placeholders("Drawn fresh for every single shot")
 
@@ -1417,14 +1660,14 @@ func refresh_ui() -> void:
 			var restart_btn := Button.new()
 			restart_btn.text = "Restart Round"
 			restart_btn.custom_minimum_size = Vector2(180, 60)
-			restart_btn.pressed.connect(_on_restart_pressed)
+			restart_btn.pressed.connect(restart_round)
 			options_container.add_child(restart_btn)
 			build_form_placeholders("")
 
 	if step_holder:
 		clear_container(step_holder)
 		if step_hint != "":
-			step_holder.add_child(BoogieUI.step_pill(step_num, step_hint))
+			step_holder.add_child(BogeyUI.step_pill(step_num, step_hint))
 
 
 # Face-down Form slots. The Form half of the strip is always present, so
@@ -1453,23 +1696,23 @@ func build_form_placeholders(note: String) -> void:
 # doesn't jump when the draw lands.
 func make_form_placeholder() -> PanelContainer:
 	var s := StyleBoxFlat.new()
-	s.bg_color = BoogieTheme.NEUTRAL_200
+	s.bg_color = BogeyTheme.NEUTRAL_200
 	s.set_corner_radius_all(12)
-	s.border_color = BoogieTheme.NEUTRAL_400
+	s.border_color = BogeyTheme.NEUTRAL_400
 	s.set_border_width_all(2)
 	s.content_margin_left = 14
 	s.content_margin_right = 14
 	s.content_margin_top = 14
 	s.content_margin_bottom = 14
-	var p := BoogieUI.make_panel(s)
+	var p := BogeyUI.make_panel(s)
 	p.custom_minimum_size = Vector2(180, 0)
 	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 6)
 	p.add_child(col)
-	col.add_child(BoogieUI.tag("Awaiting draw", BoogieTheme.NEUTRAL_300, BoogieTheme.NEUTRAL_700))
-	col.add_child(BoogieUI.body("Face down", 17, BoogieTheme.NEUTRAL_600))
+	col.add_child(BogeyUI.tag("Awaiting draw", BogeyTheme.NEUTRAL_300, BogeyTheme.NEUTRAL_700))
+	col.add_child(BogeyUI.body("Face down", 17, BogeyTheme.NEUTRAL_600))
 	return p
 
 
@@ -1485,8 +1728,8 @@ func make_form_card_view(card: FormCard, interactive: bool = true) -> FormCardVi
 	return fv
 
 
-# A clickable pill matching BoogieUI.chip()'s look, opening the Form deck
-# contents popup — BoogieUI.chip() itself is a plain, non-interactive
+# A clickable pill matching BogeyUI.chip()'s look, opening the Form deck
+# contents popup — BogeyUI.chip() itself is a plain, non-interactive
 # PanelContainer, so this builds an equivalent Button instead.
 func make_form_deck_chip_button() -> Button:
 	var b := Button.new()
@@ -1523,11 +1766,11 @@ func rebuild_shot_outlook() -> void:
 	clear_container(shot_outlook)
 	shot_outlook.visible = true
 
-	shot_outlook.add_child(BoogieUI.kicker("This shot", BoogieTheme.ACCENT_700))
+	shot_outlook.add_child(BogeyUI.kicker("This shot", BogeyTheme.ACCENT_700))
 
 	var dist_to_pin: float = ball_pos.distance_to(hole.pin_pos) if hole else 0.0
 	var on_green := current_lie == "green"
-	var big := BoogieUI.big_stat(
+	var big := BogeyUI.big_stat(
 		str(maxi(1, int(round(dist_to_pin * 3.0)))) if (on_green and dist_to_pin < 4.0) else str(int(round(dist_to_pin))),
 		"ft to pin" if (on_green and dist_to_pin < 4.0) else "yds to pin")
 	shot_outlook.add_child(big[0])
@@ -1535,9 +1778,9 @@ func rebuild_shot_outlook() -> void:
 	var stats := HBoxContainer.new()
 	stats.add_theme_constant_override("separation", 8)
 	shot_outlook.add_child(stats)
-	stats.add_child(BoogieUI.stat_block("Lie", current_lie.capitalize()))
-	stats.add_child(BoogieUI.stat_block("Strokes", str(strokes)))
-	stats.add_child(BoogieUI.stat_block("Par", str(hole_par) if hole else "—"))
+	stats.add_child(BogeyUI.stat_block("Lie", current_lie.capitalize()))
+	stats.add_child(BogeyUI.stat_block("Strokes", str(strokes)))
+	stats.add_child(BogeyUI.stat_block("Par", str(hole_par) if hole else "—"))
 
 	# What this lie costs you — Section 5's terrain modifiers, said plainly
 	# rather than left for the player to remember.
@@ -1555,28 +1798,28 @@ func rebuild_shot_outlook() -> void:
 			lie_note = "On the green — putting switches to the timing meter, and the sunk band narrows with distance."
 	if lie_note != "":
 		var risky := current_lie == "rough" or current_lie == "bunker"
-		shot_outlook.add_child(BoogieUI.note_box(
+		shot_outlook.add_child(BogeyUI.note_box(
 			lie_note,
-			BoogieTheme.ACCENT_100 if risky else BoogieTheme.OLIVE_100,
-			BoogieTheme.ACCENT_300 if risky else BoogieTheme.OLIVE_300,
-			BoogieTheme.ACCENT_900 if risky else BoogieTheme.OLIVE_900))
+			BogeyTheme.ACCENT_100 if risky else BogeyTheme.OLIVE_100,
+			BogeyTheme.ACCENT_300 if risky else BogeyTheme.OLIVE_300,
+			BogeyTheme.ACCENT_900 if risky else BogeyTheme.OLIVE_900))
 
 	# Club-specific read, only once a club is actually in hand.
 	if (state == State.AIM or state == State.FORM_DRAW) and not pending_club.is_empty():
-		shot_outlook.add_child(BoogieUI.hairline(0.14))
+		shot_outlook.add_child(BogeyUI.hairline(0.14))
 
 		var club_row := VBoxContainer.new()
 		club_row.add_theme_constant_override("separation", 2)
 		shot_outlook.add_child(club_row)
-		club_row.add_child(BoogieUI.kicker("Club in hand", BoogieTheme.NEUTRAL_600))
-		club_row.add_child(BoogieUI.body("%s — %d-%d yds" % [
+		club_row.add_child(BogeyUI.kicker("Club in hand", BogeyTheme.NEUTRAL_600))
+		club_row.add_child(BogeyUI.body("%s — %d-%d yds" % [
 			pending_club.name, int(pending_club.min_yard), int(pending_club.max_yard)],
-			15, BoogieTheme.INK))
+			15, BogeyTheme.INK))
 
 		var tier := swing_tier_for_shot()
 		var aim_dist: float = ball_pos.distance_to(aim_target)
-		club_row.add_child(BoogieUI.body("%s — aiming %d yds" % [
-			ShotResolver.tier_name(tier), int(round(aim_dist))], 13, BoogieTheme.NEUTRAL_700))
+		club_row.add_child(BogeyUI.body("%s — aiming %d yds" % [
+			ShotResolver.tier_name(tier), int(round(aim_dist))], 13, BogeyTheme.NEUTRAL_700))
 
 		var tier_hint := ""
 		var tier_is_risky := false
@@ -1592,22 +1835,35 @@ func rebuild_shot_outlook() -> void:
 			ShotResolver.Tier.EXTREME_FINESSE:
 				tier_hint = "⚠ Below this club's range — no draw at all, a bad Form card is created and you must play it."
 				tier_is_risky = true
-		shot_outlook.add_child(BoogieUI.body(
-			tier_hint, 12, BoogieTheme.ACCENT_700 if tier_is_risky else BoogieTheme.NEUTRAL_600))
+		shot_outlook.add_child(BogeyUI.body(
+			tier_hint, 12, BogeyTheme.ACCENT_700 if tier_is_risky else BogeyTheme.NEUTRAL_600))
+
+		# Says in words what the yellow aim line says on the map: this line
+		# is on the cup. Sits above the bunker warning because it's the
+		# better news and the reason you'd accept a risky tier at all.
+		# States the 1-in-20 outright — the yellow should never read as a
+		# guarantee the die is about to break.
+		if state == State.AIM and aim_line_can_hole_out():
+			shot_outlook.add_child(BogeyUI.note_box(
+				"★ On the cup — struck straight and full, this one earns a d20 at the hole. Only a natural 20 drops; anything else finishes stone dead for a tap-in.",
+				BogeyTheme.OLIVE_100, BogeyTheme.OLIVE_300, BogeyTheme.OLIVE_900))
 
 		if current_lie == "bunker" and tier != ShotResolver.Tier.EXTREME_FINESSE:
-			shot_outlook.add_child(BoogieUI.body(
+			shot_outlook.add_child(BogeyUI.body(
 				"⚠ Playing from the sand — forces the same treatment as Extreme Finesse: no draw, a bad Form card is created and you must play it.",
-				12, BoogieTheme.ACCENT_700))
+				12, BogeyTheme.ACCENT_700))
 
 
-# Builds the bag row for CLUB_SELECT: every card in hand, in hand order.
+# Builds the bag row for CLUB_SELECT: every card in the bag, longest
+# club first and the putter last — see sort_hand().
 func rebuild_bag_row() -> void:
 	var playable := {}
 	for i in range(hand.size()):
 		var c = hand[i]
-		if c.type == "putter":
-			continue
+		# The putter is playable from anywhere — its 0-35 band is what
+		# limits it, not a rule about where you're standing. Off the green
+		# it resolves as a normal Form-card shot; on the green, picking it
+		# hands over to the putt meter (see on_club_select).
 		if current_lie == "bunker" and c.type == "wood":
 			continue
 		playable[i] = true
@@ -1617,6 +1873,10 @@ func rebuild_bag_row() -> void:
 		var cv := make_card_view(card, state == State.CLUB_SELECT and playable.has(i), true)
 		if cv.interactive:
 			cv.picked.connect(_make_club_callback(i))
+			# Hovering a club previews its reach on the hole map, so two
+			# clubs can be compared by passing the cursor over each.
+			cv.hover_started.connect(_on_club_hover_start.bind(card))
+			cv.hover_ended.connect(_on_club_hover_end)
 		options_container.add_child(cv)
 
 
@@ -1656,6 +1916,52 @@ func _make_form_pick_callback(i: int) -> Callable:
 
 func _make_discard_callback(i: int) -> Callable:
 	return func(_cv): on_discard_pick(i)
+
+
+# --- Form-card hover: preview where that card puts the ball ------------
+# Runs the real resolver against the real aim, so what the marker shows is
+# precisely what playing the card will do — every Form card is fully
+# deterministic, so there is nothing to approximate.
+func _on_form_hover_start(fv: FormCardView) -> void:
+	if not map_view or not hole or pending_club.is_empty():
+		return
+	var card: FormCard = fv.form_card
+	if card == null:
+		return
+
+	var aimed_distance: float = ball_pos.distance_to(aim_target)
+	var result := ShotResolver.resolve_shot(pending_club, aimed_distance,
+		current_lie, card,
+		Brands.ignores_terrain_penalty(hand) or Brands.plays_as_fairway(hand),
+		Brands.deviation_mult(hand, current_lie, card),
+		Brands.severity_mult(hand))
+
+	# Same fallback chain the real shot uses when the aim sits on the ball.
+	var aim_dir: Vector2 = (aim_target - ball_pos).normalized()
+	if aim_dir.length_squared() < 0.0001:
+		aim_dir = (hole.pin_pos - ball_pos).normalized()
+	if aim_dir.length_squared() < 0.0001:
+		aim_dir = Vector2.UP
+
+	var landing: Vector2 = ShotResolver.landing_position(ball_pos, aim_dir, result)
+	map_view.set_preview_landing(true, ball_pos, landing, card.good,
+		ShotResolver.earns_hole_out_roll(landing, hole.pin_pos, result.distance))
+
+
+func _on_form_hover_end(_fv: FormCardView) -> void:
+	if map_view:
+		map_view.set_preview_landing(false)
+
+
+# --- Club hover: preview that club's reach on the hole map -------------
+func _on_club_hover_start(_cv: CardView, card: Dictionary) -> void:
+	if map_view:
+		map_view.set_preview_club(card)
+
+
+func _on_club_hover_end(_cv: CardView) -> void:
+	if map_view:
+		map_view.set_preview_club({})
 
 
 func _make_club_callback(hand_index: int) -> Callable:
