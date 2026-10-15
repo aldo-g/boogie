@@ -41,6 +41,10 @@ var current_lie: String = "tee"
 var aim_target: Vector2 = Vector2.ZERO
 var holed_out: bool = false            # finished this hole; skipped in the turn order
 
+# Left the game (online only). Treated like holed_out for turn order, so
+# the round can finish without them — see Main.next_to_play().
+var abandoned: bool = false
+
 # --- Putting ---
 var putt_dist: float = 0.0
 var putt_dir: Vector2 = Vector2(0, 1)

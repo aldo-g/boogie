@@ -85,10 +85,17 @@ par; **2-4 players** can share a screen in hot-seat.
   nerve test.
 - Putts inside 0.7 yards (about 2 feet) are conceded as a gimme.
 
-## Multiplayer (hot-seat, 2-4 players)
+## Multiplayer (2-4 players)
 
-Pick a player count on the title screen; clicking anywhere else still tees
-off solo. Everyone plays on one screen, taking turns.
+Two ways to play together, both from the title screen.
+
+**Online** — one player hosts, the others join by address. Up to 4 players,
+each on their own machine.
+
+**Hot-seat** — pick a player count and everyone shares one screen, taking
+turns. Clicking the background still tees off solo.
+
+Both use the same turn rules below.
 
 - **Turn order is "furthest from the pin plays first"** — real golf
   etiquette, and it spreads downtime evenly. Seating order off the tee,
@@ -101,6 +108,31 @@ off solo. Everyone plays on one screen, taking turns.
   hole map in their seat colours.
 - At the end of the round the log leads with **final standings** and the
   winner (stroke play — lowest total wins; ties are reported as ties).
+
+### Online play
+
+ENet over LAN or a direct IP, with **no backend to run** — but that means
+playing across the internet needs port forwarding or a VPN (Tailscale,
+ZeroTier). On the same network it just works.
+
+The host is also a player and is **authoritative**: clients send what they
+want to do, the host decides what happened and tells everyone. Clients
+never roll their own dice, so nobody can disagree about a shot. The design
+makes this cheap — every per-player write in `Main.gd` goes through the
+active player, so pointing that at the acting seat makes the ordinary
+hot-seat code the authoritative code, with no separate server logic.
+
+If a player drops, their seat is retired, the hole is conceded for them,
+and the round carries on. If the *host* drops the round ends — there is no
+host migration.
+
+One accepted limitation: the putting meter is a real-time timing check on
+the putting player's own machine, so the host takes their word for the
+result. For a game among friends that is the right trade; hardening it
+would mean the host owning the meter's clock, which would make the one
+timing-based moment in the game feel laggy.
+
+### Per-player state
 
 **Each player has their own bag, Form deck, and draft pool.** That means
 hazard decay only degrades the Form deck of the player who found the
@@ -130,8 +162,12 @@ Bogey/
 └── scripts/
     ├── Main.gd            Game loop, state machine, UI construction
     ├── Player.gd          One player's state (bag, ball, score, Form deck)
-    ├── GameSetup.gd       Player count carried from the title screen
+    ├── Net.gd             The multiplayer connection (autoload)
+    ├── GameSetup.gd       Round setup carried between scenes
     ├── MPTest.gd          Headless flow harness (dev tool, see below)
+    ├── DetTest.gd         Determinism harness (dev tool)
+    ├── GuardTest.gd       Action-validation harness (dev tool)
+    ├── NetTest.gd         Two-peer networked harness (dev tool)
     ├── ShotResolver.gd    Shot math — distance, deviation, cup radius
     ├── FormCard.gd        A single Form card and its known effect
     ├── FormDeck.gd        The shared Form deck and per-tier draws
@@ -170,12 +206,31 @@ because neither is registered when one script is checked in isolation.
 Import the project once (`godot --headless --editor --quit`) and those
 resolve.
 
-To drive full 18-hole rounds for 1-4 players headlessly and assert the
-turn order, hole flow, and round completion all hold:
+Four headless harnesses, all dev tools:
 
 ```sh
+# Full 18-hole rounds for 1-4 players: turn order, hole flow, bag caps
 godot --headless --script res://scripts/MPTest.gd
+
+# Malformed and out-of-turn actions are refused rather than crashing
+godot --headless --script res://scripts/GuardTest.gd
+
+# Two instances, same actions + same rolls -> identical state.
+# This is the property online play depends on.
+godot --headless --script res://scripts/DetTest.gd
+
+# A real host and client over a socket in one process, asserting after
+# every action that they agree about the whole round.
+godot --headless --script res://scripts/NetTest.gd
+
+# ...and the same, but the client disconnects partway through
+NETTEST_DROP_AT=120 godot --headless --script res://scripts/NetTest.gd
 ```
+
+`NetTest` shares a process, so it covers the protocol and the mirroring
+but cannot catch genuine socket problems (real latency, packet loss, MTU).
+Two machines, or two processes over 127.0.0.1, are still worth a smoke
+test before trusting a change.
 
 Add `MPTEST_COUNTS=3,4` to run a subset. It plays randomly rather than
 well, so the stroke totals are meaningless — it checks that the flow never
@@ -187,8 +242,9 @@ takes a few seconds.
 ## What's implemented
 
 - Full **18-hole round** with a running scorecard and end-of-round summary
-- **Hot-seat multiplayer for 2-4 players** — furthest-from-pin turn order,
-  per-player bags/Form decks/draft pools, standings and a winner
+- **Multiplayer for 2-4 players, online or hot-seat** — furthest-from-pin
+  turn order, per-player bags/Form decks/draft pools, standings and a
+  winner; host-authoritative online with disconnect recovery
 - Starting Bogey-Mart bag; draw-3-pick-1 club draft each hole (14-club cap,
   forced discard when full)
 - **Brands, set bonuses at 2/4/7, per-run draft pools, and limited-edition
@@ -206,8 +262,10 @@ takes a few seconds.
 ## Not in this version
 
 - Weather (per-flight conditions)
-- Networked/online multiplayer (hot-seat only — see above)
-- Simultaneous/secret shot declaration (needs networking)
+- Internet play without port forwarding (no relay — see above)
+- Host migration if the host leaves
+- Simultaneous/secret shot declaration
+- Mid-round join
 - Slope on the greens
 
 ## Numbers worth tuning

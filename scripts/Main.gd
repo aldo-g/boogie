@@ -54,6 +54,22 @@ var players: Array = []          # Array[Player], in seating order
 var active_index: int = 0        # whose turn it is — index into players
 var player_count: int = 1
 
+# --- Online play -------------------------------------------------------
+# False for solo and hot-seat. When false, any input is legitimate: one
+# screen is shared and whoever is sitting at it is whoever is up.
+var online: bool = false
+
+# The seat this machine controls in an online round. Only meaningful when
+# `online` — hot-seat deliberately plays every seat from one keyboard.
+var my_seat: int = 0
+
+# Set by the net harness to trace RPC traffic; off in normal play.
+var _net_trace: bool = false
+
+# Seats whose peer dropped while a shot was animating. Applied once the
+# animation is done — see on_peer_dropped().
+var _pending_drops: Array = []
+
 # Players still owing an end-of-hole draft, in order. Drafts run one player
 # at a time because each is a choice made on one screen.
 var _draft_queue: Array = []
@@ -229,9 +245,57 @@ func _ready() -> void:
 	# Chosen on the title screen. Clamped so running Main.tscn directly
 	# (or a stale value) can't produce a zero-player round.
 	player_count = clampi(GameSetup.player_count, 1, 4)
+	online = GameSetup.online
+	my_seat = clampi(GameSetup.my_seat, 0, player_count - 1) if online else 0
 	build_ui()
-	init_game()
+
+	if online and not GameSetup.round_payload.is_empty():
+		# Online: the host already rolled every deck and sent it, so adopt
+		# that rather than rolling our own — otherwise no two machines
+		# would start the round holding the same cards.
+		apply_round_payload(GameSetup.round_payload)
+		apply_seat_names(GameSetup.seat_names)
+	else:
+		init_game()
+		if online:
+			apply_seat_names(GameSetup.seat_names)
+
+	if online:
+		connect_net_signals()
+
 	start_hole()
+
+
+# Subscribes to the connection events this round needs. Its own method
+# rather than inline setup, so anything that builds a round without going
+# through _ready() still gets disconnect handling — the harness does
+# exactly that, and so would any future headless mode.
+#
+# Listens on this node's own API rather than the Net autoload, so it works
+# under a bare connection too.
+func connect_net_signals() -> void:
+	if multiplayer == null:
+		return
+	if not multiplayer.peer_connected.is_connected(_on_peer_joined):
+		multiplayer.peer_connected.connect(_on_peer_joined)
+	if not multiplayer.peer_disconnected.is_connected(on_peer_dropped):
+		multiplayer.peer_disconnected.connect(on_peer_dropped)
+	if not multiplayer.server_disconnected.is_connected(on_host_lost):
+		multiplayer.server_disconnected.connect(on_host_lost)
+	# Peers that connected during the lobby, before this round existed.
+	for pid in multiplayer.get_peers():
+		_on_peer_joined(pid)
+
+
+# Labels each seat with the name agreed in the lobby. Seats the lobby
+# didn't name keep their default.
+func apply_seat_names(names: Dictionary) -> void:
+	for seat in names:
+		var i := int(seat)
+		if i >= 0 and i < players.size():
+			var n := str(names[seat]).strip_edges()
+			if n != "":
+				players[i].name = n
 
 
 # ---------------------------------------------------------
@@ -366,7 +430,7 @@ func build_ui() -> void:
 	plate_head.add_child(map_caption)
 
 	map_view = CourseMapView.new()
-	map_view.aim_picked.connect(_on_aim_picked)
+	map_view.aim_picked.connect(_on_aim_committed)
 	map_view.aim_changed.connect(_on_aim_changed)
 	# Holes run tall and narrow (roughly 120-200 yds wide, 400-600 yds
 	# long), so the mat is capped to a sensible width and centered rather
@@ -700,6 +764,68 @@ func init_game() -> void:
 	active_index = 0
 
 
+# --- Online round setup ------------------------------------------------
+# Everything a machine needs to start the same round as everyone else.
+#
+# Only the deck-derived parts matter here: bags, draft pools, live brands
+# and Form decks are all shuffle results, so they cannot be re-rolled
+# locally and must be sent. The course is not sent at all — every peer
+# derives it from the hole number (HoleData.hole is a static table with
+# deterministic geometry).
+#
+# Shapes are deliberately plain: club entries are already Dictionaries of
+# scalars, and a FormCard is reconstructible from its name alone, so the
+# whole payload is wire-safe without a custom serializer.
+func build_round_payload() -> Dictionary:
+	var out: Array = []
+	for p in players:
+		out.append({
+			"name": p.name,
+			"hand": p.hand.duplicate(true),
+			"club_deck": p.club_deck.duplicate(true),
+			"club_discard": p.club_discard.duplicate(true),
+			"live_brands": p.live_brands.duplicate(),
+			"form_deck": form_card_names(p.form_deck.deck),
+			"form_discard": form_card_names(p.form_deck.discard),
+		})
+	return {"players": out}
+
+
+# Rebuilds this machine's players from the host's payload, so every peer
+# begins the round holding identical decks in identical order.
+func apply_round_payload(payload: Dictionary) -> void:
+	var entries: Array = payload.get("players", [])
+	players = []
+	for e in entries:
+		var p := Player.new(str(e.get("name", "Player")))
+		p.hand = (e.get("hand", []) as Array).duplicate(true)
+		p.club_deck = (e.get("club_deck", []) as Array).duplicate(true)
+		p.club_discard = (e.get("club_discard", []) as Array).duplicate(true)
+		p.live_brands = (e.get("live_brands", []) as Array).duplicate()
+		p.form_deck = FormDeck.new()
+		p.form_deck.deck = form_cards_from_names(e.get("form_deck", []))
+		p.form_deck.discard = form_cards_from_names(e.get("form_discard", []))
+		players.append(p)
+	player_count = players.size()
+	active_index = 0
+
+
+# A FormCard is fully described by its name — every card in the game comes
+# from FormCard.make() — so decks travel as name lists.
+func form_card_names(cards: Array) -> Array:
+	var names: Array = []
+	for c in cards:
+		names.append(c.name)
+	return names
+
+
+func form_cards_from_names(names: Array) -> Array:
+	var cards: Array = []
+	for n in names:
+		cards.append(FormCard.make(str(n)))
+	return cards
+
+
 # Default seat names. Single-player keeps the old unnamed framing ("You"),
 # since there's nobody to distinguish from.
 func default_player_name(index: int) -> String:
@@ -957,7 +1083,7 @@ func other_ball_markers() -> Array:
 		if i == active_index:
 			continue
 		var p: Player = players[i]
-		if p.holed_out:
+		if p.holed_out or p.abandoned:
 			continue
 		markers.append({"pos": p.ball_pos, "name": p.name, "index": i})
 	return markers
@@ -972,7 +1098,7 @@ func next_to_play() -> int:
 	var best_dist := -1.0
 	for i in range(players.size()):
 		var p: Player = players[i]
-		if p.holed_out:
+		if p.holed_out or p.abandoned:
 			continue
 		var d: float = p.distance_to(hole.pin_pos)
 		if d > best_dist:
@@ -1264,6 +1390,81 @@ func inject_rolls(rolls: Array) -> void:
 	_injected_rolls = rolls.duplicate(true)
 
 
+# UI entry points. These exist so the widgets don't need to know whether
+# the round is local or online — they report what the player did, and
+# submit() decides whether that goes straight into the game or to the host.
+func _on_aim_committed(target: Vector2) -> void:
+	submit("aim", {"target": target})
+
+
+func _on_putt_meter_stopped(result: String, accuracy: float) -> void:
+	submit("putt", {"result": result, "accuracy": accuracy})
+
+
+# --- Online authority --------------------------------------------------
+# Whether this machine may act for the seat currently up.
+#
+# Local rounds: always, because one shared screen means whoever is sitting
+# at it is whoever is up — that is the whole premise of hot-seat.
+# Online rounds: only your own seat, and only when it is your turn.
+const HOST_PEER_ID := 1
+
+# peer id -> seat, recorded as peers arrive.
+#
+# This has to be remembered rather than derived: by the time a peer
+# DISCONNECTS it is already gone from multiplayer.get_peers(), so looking
+# its seat up from the live peer list would fail for exactly the case
+# that needs it most — retiring the seat of someone who just left.
+var _peer_seats: Dictionary = {}
+
+
+# Which seat a peer controls. The lobby's table is the real answer when
+# there is one; otherwise the local record built as peers connected.
+func seat_of_peer(peer_id: int) -> int:
+	if peer_id == HOST_PEER_ID:
+		return 0
+	if Net.is_online() and Net.seated_count() > 0:
+		var seat := Net.seat_of_peer(peer_id)
+		if seat >= 0:
+			return seat
+	return int(_peer_seats.get(peer_id, -1))
+
+
+# Assigns the next free seat to a newly connected peer, in arrival order,
+# with the host holding seat 0.
+func _on_peer_joined(peer_id: int) -> void:
+	if _peer_seats.has(peer_id):
+		return
+	var taken := {0: true}
+	for pid in _peer_seats:
+		taken[int(_peer_seats[pid])] = true
+	for seat in range(1, players.size()):
+		if not taken.has(seat):
+			_peer_seats[peer_id] = seat
+			return
+
+
+func is_my_turn() -> bool:
+	if not online:
+		return true
+	return active_index == my_seat
+
+
+# True when this machine decides outcomes. The host is also a player, so
+# it runs the game exactly as a solo round does and additionally tells
+# everyone else what happened.
+#
+# Asks THIS node's multiplayer API rather than the Net autoload, so a
+# Main is authoritative with respect to whatever connection it sits
+# under. That keeps the game decoupled from the single global connection
+# and is what lets a host and a client run side by side in one process
+# for testing.
+func is_authority() -> bool:
+	if not online:
+		return true
+	return multiplayer.multiplayer_peer != null and multiplayer.is_server()
+
+
 func _reject(what: String, why: String) -> void:
 	push_warning("Bogey: refused %s — %s" % [what, why])
 
@@ -1408,6 +1609,10 @@ func play_shot(club: Dictionary, card: FormCard) -> void:
 
 func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictionary) -> void:
 	_animating = false
+	# A peer may have dropped mid-flight; it is safe to act on that now
+	# that this closure has finished writing through `me`.
+	if not _pending_drops.is_empty():
+		call_deferred("_drain_pending_drops")
 
 	# Shared with the Form-card landing preview — see
 	# ShotResolver.landing_position().
@@ -1713,7 +1918,7 @@ func build_putt_controls() -> void:
 	putt_meter = PuttMeter.new()
 	putt_meter.custom_minimum_size = Vector2(METER_WIDTH, 0)
 	putt_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	putt_meter.stopped.connect(on_putt_stopped)
+	putt_meter.stopped.connect(_on_putt_meter_stopped)
 	col.add_child(putt_meter)
 
 	var strike_btn := Button.new()
@@ -2436,7 +2641,7 @@ func _on_draft_card_picked(cv: CardView, index: int) -> void:
 
 	get_tree().create_timer(0.25).timeout.connect(func():
 		_animating = false
-		on_draft_pick(index)
+		submit("draft", {"index": index})
 	)
 
 
@@ -2448,7 +2653,7 @@ func _on_form_card_picked(fv: FormCardView, index: int) -> void:
 
 	get_tree().create_timer(0.25).timeout.connect(func():
 		_animating = false
-		on_form_pick(index)
+		submit("form", {"index": index})
 	)
 
 
@@ -2462,7 +2667,7 @@ func _make_form_pick_callback(i: int) -> Callable:
 
 
 func _make_discard_callback(i: int) -> Callable:
-	return func(_cv): on_discard_pick(i)
+	return func(_cv): submit("discard", {"index": i})
 
 
 # --- Form-card hover: preview where that card puts the ball ------------
@@ -2512,4 +2717,260 @@ func _on_club_hover_end(_cv: CardView) -> void:
 
 
 func _make_club_callback(hand_index: int) -> Callable:
-	return func(_cv): on_club_select(hand_index)
+	return func(_cv): submit("club", {"index": hand_index})
+
+
+# ---------------------------------------------------------
+# NETWORK LAYER (online rounds only)
+#
+# Shape of every exchange:
+#   1. A client sends what it wants to do           (req_* , any_peer)
+#   2. The host validates it, sets active_index to that seat, and calls
+#      the ordinary hot-seat function — unmodified
+#   3. The host broadcasts what happened            (net_* , authority)
+#
+# Step 2 is the whole trick. Every per-player write in this file goes
+# through `me`, which is players[active_index], so pointing active_index
+# at the submitting seat makes the existing local code the authoritative
+# code. There is no separate server implementation to keep in step.
+#
+# Two rules about call_local, which is the easiest thing to get wrong:
+#   - req_* are call_local=false. A client sends them; it must not also
+#     apply them locally, or it would act without the host's agreement.
+#   - net_* are call_local=false too, because the host has ALREADY
+#     applied the outcome by running the logic in step 2. Calling local
+#     would apply it twice.
+# The one exception is Net.net_start_round, which is call_local=true
+# precisely because the host has not yet done that work.
+#
+# Everything is reliable and ordered. This is a turn-based card game
+# sending a handful of messages a minute, so ordering matters enormously
+# and bandwidth not at all.
+# ---------------------------------------------------------
+
+# Sends an action to the host, or applies it directly in a local round.
+# Every UI callback goes through here rather than calling the game
+# functions, so there is one place that knows whether we're online.
+func submit(kind: String, payload: Dictionary) -> void:
+	if not online:
+		_apply_action(kind, payload)
+		return
+	if not is_my_turn():
+		_reject(kind, "not this seat's turn")
+		return
+	if is_authority():
+		# The host needs no round trip; it is the authority.
+		_host_apply(my_seat, kind, payload)
+	else:
+		rpc_id(HOST_PEER_ID, "req_action", kind, payload)
+
+
+# Host side: an action arrived from a client.
+@rpc("any_peer", "reliable")
+func req_action(kind: String, payload: Dictionary) -> void:
+	if not is_authority():
+		return
+	var seat := seat_of_peer(multiplayer.get_remote_sender_id())
+	if seat < 0:
+		_reject(kind, "sender holds no seat")
+		return
+	_host_apply(seat, kind, payload)
+
+
+# The authoritative step: point the game at the acting seat, record the
+# rolls the action consumes, run it, then tell everyone.
+func _host_apply(seat: int, kind: String, payload: Dictionary) -> void:
+	if seat != active_index:
+		# Out of turn. Expected occasionally — a client can click as the
+		# turn passes — so refuse quietly rather than treating it as an
+		# error.
+		_reject(kind, "seat %d acted out of turn (seat %d is up)" % [seat, active_index])
+		return
+
+	begin_roll_capture()
+	_apply_action(kind, payload)
+	var rolls: Array = take_captured_rolls()
+
+	if _net_trace:
+		print("  [host] broadcasting %s seat=%d peers=%s" % [
+			kind, seat, str(multiplayer.get_peers())])
+	rpc("net_action_applied", seat, kind, payload, rolls, snapshot_decks())
+
+
+# Client side: the host resolved an action. Replay it with the host's
+# rolls injected, then adopt the host's deck state — the parts that come
+# from a shuffle and so cannot be reproduced locally.
+@rpc("authority", "reliable")
+func net_action_applied(seat: int, kind: String, payload: Dictionary,
+		rolls: Array, decks: Dictionary) -> void:
+	if _net_trace:
+		print("  [client] received %s seat=%d" % [kind, seat])
+	active_index = clampi(seat, 0, players.size() - 1)
+	inject_rolls(rolls)
+	_apply_action(kind, payload)
+	apply_deck_snapshot(decks)
+	refresh_ui()
+
+
+# Routes an action to the function the UI used to call directly.
+func _apply_action(kind: String, payload: Dictionary) -> void:
+	match kind:
+		"club":
+			on_club_select(int(payload.get("index", -1)))
+		"aim":
+			_on_aim_picked(payload.get("target", Vector2.ZERO))
+		"form":
+			on_form_pick(int(payload.get("index", -1)))
+		"draft":
+			on_draft_pick(int(payload.get("index", -1)))
+		"discard":
+			on_discard_pick(int(payload.get("index", -1)))
+		"putt":
+			on_putt_stopped(str(payload.get("result", "")),
+				float(payload.get("accuracy", 0.0)))
+		_:
+			_reject("action", "unknown kind '%s'" % kind)
+
+
+# --- Deck state --------------------------------------------------------
+# Draws come off a shuffled deck, so a client cannot reproduce them from
+# the action and the rolls alone — the resulting order IS the information.
+# Committing an aim triggers the Form draw and entering the draft draws
+# the club options, so these travel with every action rather than only
+# some, which is cheaper than tracking which actions touched a deck.
+func snapshot_decks() -> Dictionary:
+	var out: Array = []
+	for p in players:
+		out.append({
+			"hand": p.hand.duplicate(true),
+			"club_deck": p.club_deck.duplicate(true),
+			"club_discard": p.club_discard.duplicate(true),
+			"form_deck": form_card_names(p.form_deck.deck),
+			"form_discard": form_card_names(p.form_deck.discard),
+			"form_options": form_card_names(p.current_form_options),
+			"form_forced": p.current_form_forced,
+			"draft_options": p.current_draft_options.duplicate(true),
+			"pending_club": p.pending_club.duplicate(true),
+			"pending_new_card": p.pending_new_card,
+		})
+	return {"players": out, "active_index": active_index, "state": state,
+		"hole": current_hole_index, "draft_queue": _draft_queue.duplicate()}
+
+
+func apply_deck_snapshot(decks: Dictionary) -> void:
+	var entries: Array = decks.get("players", [])
+	for i in range(mini(entries.size(), players.size())):
+		var e: Dictionary = entries[i]
+		var p: Player = players[i]
+		p.hand = (e.get("hand", []) as Array).duplicate(true)
+		p.club_deck = (e.get("club_deck", []) as Array).duplicate(true)
+		p.club_discard = (e.get("club_discard", []) as Array).duplicate(true)
+		p.form_deck.deck = form_cards_from_names(e.get("form_deck", []))
+		p.form_deck.discard = form_cards_from_names(e.get("form_discard", []))
+		p.current_form_options = form_cards_from_names(e.get("form_options", []))
+		p.current_form_forced = bool(e.get("form_forced", false))
+		p.current_draft_options = (e.get("draft_options", []) as Array).duplicate(true)
+		p.pending_club = (e.get("pending_club", {}) as Dictionary).duplicate(true)
+		p.pending_new_card = e.get("pending_new_card", null)
+
+	# The host's turn and phase are authoritative. next_to_play() compares
+	# float distances, so recomputing them locally could tie differently —
+	# cheaper and safer to be told.
+	if decks.has("active_index"):
+		active_index = clampi(int(decks["active_index"]), 0, players.size() - 1)
+	if decks.has("state"):
+		state = int(decks["state"])
+	if decks.has("draft_queue"):
+		_draft_queue = (decks["draft_queue"] as Array).duplicate()
+	# A hole change has to be adopted too, since start_hole() may have run
+	# on the host as part of this action.
+	if decks.has("hole") and int(decks["hole"]) != current_hole_index:
+		current_hole_index = int(decks["hole"])
+		hole = HoleData.hole(current_hole_index)
+		hole_yardage = hole.yardage
+		hole_par = hole.par
+		sync_map_to_active()
+
+
+# ---------------------------------------------------------
+# DISCONNECTS (online rounds)
+# ---------------------------------------------------------
+
+# A peer went away. Host only — clients learn about it from the broadcast,
+# so every machine retires the seat the same way rather than each deciding
+# for itself.
+#
+# Deferred when a shot is in flight: _resolve_shot_landing runs from an
+# animation callback holding a closure that writes through `me`, so moving
+# active_index out from under it would write a resolved shot into the
+# wrong player. The queue is drained once the animation finishes.
+func on_peer_dropped(peer_id: int) -> void:
+	if not online or not is_authority():
+		return
+	var seat := seat_of_peer(peer_id)
+	if seat < 0:
+		return
+	_pending_drops.append(seat)
+	_drain_pending_drops()
+
+
+func _drain_pending_drops() -> void:
+	if _animating or _pending_drops.is_empty():
+		return
+	while not _pending_drops.is_empty():
+		var seat: int = int(_pending_drops.pop_front())
+		_retire_seat(seat)
+		rpc("net_seat_abandoned", seat)
+
+
+# Retires a seat so the round can finish without it. The player concedes
+# the hole rather than being deleted: their card keeps a score, the
+# standings still make sense, and every other seat plays on.
+func _retire_seat(seat: int) -> void:
+	if seat < 0 or seat >= players.size():
+		return
+	var p: Player = players[seat]
+	if p.abandoned:
+		return
+	p.abandoned = true
+	log_msg("\n[b]%s left the game.[/b]" % p.name)
+
+	# Concede the current hole if they were still playing it, so the hole
+	# can complete and the scorecard isn't left with a gap.
+	if not p.holed_out:
+		p.holed_out = true
+		var conceded: int = maxi(p.strokes, hole_par + 3)
+		p.round_scores.append({
+			"hole": current_hole_index, "par": hole_par, "strokes": conceded})
+
+	# They may have been mid-draft, which would otherwise stall the queue.
+	_draft_queue = _draft_queue.filter(func(i): return int(i) != seat)
+
+	if active_index == seat:
+		# They were up. Hand over, or finish the hole if nobody is left.
+		if advance_turn():
+			state = State.CLUB_SELECT
+			if me.current_lie == "green":
+				start_putting()
+			else:
+				refresh_ui()
+		else:
+			begin_end_of_hole()
+	else:
+		refresh_ui()
+
+
+# Clients: adopt the host's decision about a departed seat.
+@rpc("authority", "reliable")
+func net_seat_abandoned(seat: int) -> void:
+	_retire_seat(seat)
+
+
+# The host went away. There is no migration — it owned every decision and
+# every deck — so the round ends rather than limping on.
+func on_host_lost() -> void:
+	if not online:
+		return
+	log_msg("\n[b]The host left — the round can't continue.[/b]")
+	state = State.DONE
+	refresh_ui()

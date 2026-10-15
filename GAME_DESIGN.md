@@ -423,7 +423,7 @@ The curve is eased so difficulty ramps hardest over the first stretch — the st
 ## 7. Modes
 
 - **Solo vs. Par**: track strokes against course par, no opponents needed. Clean, works as-is.
-- **Multiplayer**: 2-4 players. **Implemented as local hot-seat** — everyone plays on one screen, taking turns.
+- **Multiplayer**: 2-4 players, **online or local hot-seat**. Same turn rules either way.
 
 ### Hot-seat multiplayer — as built
 
@@ -448,7 +448,21 @@ The hole ends only when **every** player is in. Each player's score for the hole
 
 > **Still open:** whether the lack of sniping makes the draft feel like solitaire played in parallel. The relevant open question below ("whether the shared club deck creates awkward sniping") is now a question about whether to *add* contention rather than soften it.
 
-**Simultaneous shot declaration is NOT implemented.** The original note above proposed everyone secretly declaring, then revealing together. That needs hidden per-player input, which a single shared screen cannot give — it's a networked-multiplayer feature, not a hot-seat one. Sequential turns are the hot-seat equivalent and are what's built.
+**Simultaneous shot declaration is still NOT implemented**, even now that play is networked. The original note proposed everyone secretly declaring, then revealing together. Networking makes it *possible* (hidden per-player input exists now), but it was deliberately not built: it drops the furthest-from-pin etiquette the rest of the design leans on, and the chosen pacing is that everyone watches each shot land. Worth revisiting only if 4-player downtime proves intolerable in play.
+
+### Online play — as built
+
+ENet, host-is-a-player, **host-authoritative**, LAN or direct IP with no backend. Internet play therefore needs port forwarding or a VPN; that was an accepted trade for having nothing to host.
+
+Clients send intent ("club 3, aiming here, Form card 2"); the host resolves with the ordinary game code and broadcasts the outcome. Clients never roll their own dice, so there is one true game state by construction.
+
+**Why that was cheap:** every per-player write goes through the active player, so pointing the active seat at whoever submitted makes the existing hot-seat code the authoritative code. There is no second implementation to keep in step. What *did* need work was the randomness — 13 sites, all on the global generator — and the aim clamp, which was being computed in the view and read back, making the view the authority on a gameplay value.
+
+Deck shuffles are deliberately **not** made deterministic. Doing so would need every peer's generator in lockstep for the whole session, which is the coupling host authority exists to avoid. Instead the shuffled order *is* the message: a Form deck travels as a list of card names.
+
+**Disconnects:** a departed player's seat is retired, their hole conceded, and the round continues. Turn order skips them — necessary, since they would otherwise stay "furthest from the pin" forever and the hole would never end. If the host leaves, the round ends; there is no migration, which would be weeks of work against a problem friends solve socially.
+
+**One accepted cheat surface:** the putting meter is a real-time timing check on the putting player's own machine, and the host cannot verify the reported result. Trusting the client is the right call for a friends-only game; the alternative makes the one timing moment in the game feel laggy. Hardening it later means the host owning the meter clock.
 
 ---
 
@@ -493,7 +507,8 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 8. **Add per-run pool shaping** (Section 3B): seed 4 of 6 brands per round, with the axis-coverage constraint, and the pre-round reveal.
 9. **Add pair riders** on limited editions — the last synergy layer, and the easiest to cut if sets alone already carry the draft.
 10. **Add limited edition cards** into the shared club deck, including their Created-card abilities.
-11. ~~**Add local multiplayer**~~ **Done** — hot-seat for 2-4 players, turn order by distance (furthest from the pin plays first), independent per-player drafts. Simultaneous/secret shot declaration was dropped as unbuildable on one shared screen; see Section 7.
+11. ~~**Add local multiplayer**~~ **Done** — hot-seat for 2-4 players, turn order by distance (furthest from the pin plays first), independent per-player drafts.
+12. ~~**Add online multiplayer**~~ **Done** — ENet, host-authoritative, 2-4 players, with disconnect recovery. See Section 7. Simultaneous/secret declaration remains unbuilt by choice, not by limitation.
 
 ---
 
@@ -510,7 +525,8 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 - **Whether Bogey-Mart clubs should be cuttable from hole 1** or locked in for a few holes — cutting the starter Driver on hole 1 for a good Wood may end the "escape the starter set" arc before it's felt.
 - **Whether the four live brands should be revealed pre-round** (current stance: yes, Section 3B) or discovered — the reveal fits the game's known-information stance, but discovery may make the early draft more exciting.
 - In multiplayer, whether to **introduce** club-deck contention at all. As built, each player drafts from their own pool, so sniping cannot happen (Section 7). The open question is whether the draft feels inert without it — and if so, whether a shared pool with sequential picks is good tension or just a feel-bad.
-- Whether hot-seat downtime is acceptable at 4 players, or whether the per-shot turn handover needs to batch somehow.
+- Whether downtime is acceptable at 4 players, hot-seat or online, or whether the per-shot turn handover needs to batch somehow. Online makes simultaneous declaration buildable if it isn't — that's the escape hatch.
+- Whether the end-of-hole draft should stay sequential online. It is one player drafting while three watch, 18 times a round, and the drafts are independent so they *could* run at once. Kept sequential deliberately to preserve the ceremony; revisit if it drags.
 - Whether Form cards should differ between clubs (e.g. a Driver-specific bad card set vs. a universal pool) or stay universal for simplicity.
 - Full Form card list is still a first draft (6 bad / 8 good) — needs expansion to a real deck-sized set before implementation.
 - How many Created-card sources should exist across the full club list (standard clubs too, or Limited Edition only?) — needs deciding before the full club list is finalized.
