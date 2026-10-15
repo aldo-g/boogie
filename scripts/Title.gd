@@ -197,8 +197,25 @@ func _build_lobby() -> void:
 	row.add_child(cancel)
 
 	if mode == Mode.HOSTING:
-		panel.add_child(_outlined_label(
-			"Others join with your address on port %d." % Net.DEFAULT_PORT, 12))
+		# Show the address rather than telling the host to go and find it.
+		# This is the whole setup step for two people in one house.
+		var addr := Net.lan_address()
+		if addr != "":
+			panel.add_child(_outlined_label(
+				"On the same network, they join with:   %s" % addr, 15))
+			if Net.DEFAULT_PORT != 45888:
+				panel.add_child(_outlined_label("Port %d" % Net.DEFAULT_PORT, 12))
+			# A machine can have several addresses and the guess above can
+			# be wrong (VPNs, virtual adapters), so list the others.
+			var others: Array = Net.all_lan_addresses().filter(
+				func(a): return a != addr)
+			if not others.is_empty():
+				panel.add_child(_outlined_label(
+					"If that doesn't work, try: %s" % ", ".join(others), 11))
+		else:
+			panel.add_child(_outlined_label(
+				"Couldn't detect this machine's network address — check your "
+				+ "Wi-Fi settings for it. Port %d." % Net.DEFAULT_PORT, 12))
 	else:
 		panel.add_child(_outlined_label("Waiting for the host to start…", 12))
 

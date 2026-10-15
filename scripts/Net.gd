@@ -121,6 +121,48 @@ func local_name() -> String:
 	return _local_name
 
 
+# The address a player on the same network should type to reach this host.
+#
+# Picking this well matters more than it looks: a machine typically has
+# several addresses — loopback, VPN tunnels, virtual-machine bridges — and
+# handing out the wrong one fails with no useful error. So prefer the
+# ordinary home-network ranges, and skip the 192.168.64+ block that
+# virtualisation tools (Docker, UTM, Parallels) commonly claim.
+func lan_address() -> String:
+	var fallbacks: Array = []
+	for addr in IP.get_local_addresses():
+		if not addr.contains("."):
+			continue  # IPv6
+		if addr.begins_with("127.") or addr.begins_with("169.254."):
+			continue  # loopback, link-local
+		if addr.begins_with("192.168."):
+			# 192.168.64-127 is the usual virtual-adapter range; keep it
+			# only as a last resort.
+			var third := int(addr.split(".")[2])
+			if third >= 64 and third <= 127:
+				fallbacks.append(addr)
+				continue
+			return addr
+		if addr.begins_with("10.") or addr.begins_with("172."):
+			fallbacks.append(addr)
+	if not fallbacks.is_empty():
+		return str(fallbacks[0])
+	return ""
+
+
+# Every candidate address, so the lobby can offer the rest if the first
+# one turns out to be the wrong guess.
+func all_lan_addresses() -> Array:
+	var out: Array = []
+	for addr in IP.get_local_addresses():
+		if not addr.contains("."):
+			continue
+		if addr.begins_with("127.") or addr.begins_with("169.254."):
+			continue
+		out.append(addr)
+	return out
+
+
 # --- Lifecycle ---------------------------------------------------------
 
 func _connect_signals() -> void:

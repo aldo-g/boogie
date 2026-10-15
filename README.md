@@ -90,7 +90,9 @@ par; **2-4 players** can share a screen in hot-seat.
 Two ways to play together, both from the title screen.
 
 **Online** — one player hosts, the others join by address. Up to 4 players,
-each on their own machine.
+each on their own machine. On the same network (two people in one house,
+say) there is nothing to configure: the host's lobby shows the address to
+type, and that's the whole setup.
 
 **Hot-seat** — pick a player count and everyone shares one screen, taking
 turns. Clicking the background still tees off solo.
@@ -111,9 +113,10 @@ Both use the same turn rules below.
 
 ### Online play
 
-ENet over LAN or a direct IP, with **no backend to run** — but that means
-playing across the internet needs port forwarding or a VPN (Tailscale,
-ZeroTier). On the same network it just works.
+ENet over LAN or a direct IP, with **no backend to run**. On the same
+network it just works — the host's lobby displays the address to join on,
+so there is nothing to look up. Across the internet it needs port
+forwarding or a VPN (Tailscale, ZeroTier).
 
 The host is also a player and is **authoritative**: clients send what they
 want to do, the host decides what happened and tells everyone. Clients
