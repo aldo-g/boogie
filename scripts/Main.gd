@@ -37,43 +37,161 @@ const COLOR_FLAG := Palette.FLAG
 
 var state: int = State.DRAFT
 
-var hand: Array = []
-var club_deck: Array = []
-var club_discard: Array = []
+# ---------------------------------------------------------
+# PLAYERS (Section 7 — Modes)
+#
+# A round holds 1..4 Players. Hot-seat: they share this one screen and
+# take turns, so exactly one is "active" at a time and the whole UI is
+# drawn for that player only.
+#
+# Every per-player field below (hand, ball_pos, strokes, ...) is a
+# PROPERTY that reads and writes through to `me` — the active Player.
+# That keeps the rest of this file reading exactly as it did when there
+# was only one player, while the state itself lives in Player.gd. Set
+# `me` and the entire UI follows.
+# ---------------------------------------------------------
+var players: Array = []          # Array[Player], in seating order
+var active_index: int = 0        # whose turn it is — index into players
+var player_count: int = 1
 
-var form_deck: FormDeck
+# Players still owing an end-of-hole draft, in order. Drafts run one player
+# at a time because each is a choice made on one screen.
+var _draft_queue: Array = []
+
+# ---------------------------------------------------------
+# RANDOMNESS GATING
+#
+# Every per-action random result in the tee-to-green game goes through
+# _roll(). Solo and hot-seat leave _injected_rolls empty, so _roll() just
+# calls the generator and behaves exactly as the bare randf()/randi_range()
+# did before — this is deliberately a no-op for local play.
+#
+# When a result has instead been decided elsewhere (the authoritative host
+# in an online round, or a replay/determinism test), those results are
+# pushed into _injected_rolls first and _roll() hands them back in order.
+# The surrounding logic is then identical on every machine, which means
+# the log lines, the branch taken, and the resulting state all match
+# without any of that code knowing about the network.
+#
+# _consumed_rolls records what a roll-producing machine actually used, in
+# order, so it can be sent to the other machines.
+# ---------------------------------------------------------
+var _injected_rolls: Array = []   # results decided elsewhere, consumed FIFO
+var _consumed_rolls: Array = []   # what this machine generated, in order
+var _recording_rolls: bool = false
+
+# Stand-in used only before init_game() has built the real players — a
+# getter can fire while the UI is still being constructed, and reading
+# sane defaults is better than a null dereference.
+var _fallback: Player = Player.new("—")
+
+# The active player. All the per-player properties below delegate here.
+var me: Player:
+	get:
+		if players.is_empty():
+			return _fallback
+		return players[active_index]
+
+
+# --- Per-player state, delegated to `me` ---------------------------------
+# These exist so the ~270 call sites elsewhere in this file keep working
+# unchanged. Read/write them exactly as before.
+
+var hand: Array:
+	get: return me.hand
+	set(v): me.hand = v
+
+var club_deck: Array:
+	get: return me.club_deck
+	set(v): me.club_deck = v
+
+var club_discard: Array:
+	get: return me.club_discard
+	set(v): me.club_discard = v
+
+var form_deck: FormDeck:
+	get: return me.form_deck
+	set(v): me.form_deck = v
 
 # Section 3B — the run's live brands. Only 4 of the 6 draftable brands are
 # in the club deck each round; the other two are absent entirely, not
 # rarer. This is where run-to-run variance lives, since the course itself
-# is fixed and knowable. Revealed to the player before hole 1.
-var live_brands: Array = []
+# is fixed and knowable. Revealed to the player before hole 1. Rolled
+# per player, so each player's pool is shaped independently.
+var live_brands: Array:
+	get: return me.live_brands
+	set(v): me.live_brands = v
 
+var round_scores: Array:
+	get: return me.round_scores
+	set(v): me.round_scores = v
+
+var ball_pos: Vector2:
+	get: return me.ball_pos
+	set(v): me.ball_pos = v
+
+var shot_path: Array:
+	get: return me.shot_path
+	set(v): me.shot_path = v
+
+var strokes: int:
+	get: return me.strokes
+	set(v): me.strokes = v
+
+var current_lie: String:
+	get: return me.current_lie
+	set(v): me.current_lie = v
+
+var aim_target: Vector2:
+	get: return me.aim_target
+	set(v): me.aim_target = v
+
+var putt_dist: float:
+	get: return me.putt_dist
+	set(v): me.putt_dist = v
+
+var _putt_dir: Vector2:
+	get: return me.putt_dir
+	set(v): me.putt_dir = v
+
+var yips_pending: bool:
+	get: return me.yips_pending
+	set(v): me.yips_pending = v
+
+# Holds a club Dictionary, or null when nothing is pending — hence Variant.
+var pending_new_card: Variant:
+	get: return me.pending_new_card
+	set(v): me.pending_new_card = v
+
+var current_draft_options: Array:
+	get: return me.current_draft_options
+	set(v): me.current_draft_options = v
+
+var pending_club: Dictionary:
+	get: return me.pending_club
+	set(v): me.pending_club = v
+
+var current_form_options: Array:
+	get: return me.current_form_options
+	set(v): me.current_form_options = v
+
+var current_form_forced: bool:
+	get: return me.current_form_forced
+	set(v): me.current_form_forced = v
+
+func is_multiplayer() -> bool:
+	return player_count > 1
+
+
+# --- Shared round state (not per player) --------------------------------
 var current_hole_index: int = 1
-var round_scores: Array = []  # [{"hole": int, "par": int, "strokes": int}, ...]
 var _restart_armed: bool = false  # Restart pressed once mid-round, awaiting confirm
 
 var hole: HoleData
 var hole_yardage: float = 380.0
 var hole_par: int = 4
-var ball_pos: Vector2 = Vector2.ZERO  # yard-space, (0,0) at tee, +y toward pin
-var shot_path: Array = []  # history of ball_pos points this hole, for drawing the trail
-var strokes: int = 0
-var current_lie: String = "tee"
-var aim_target: Vector2 = Vector2.ZERO  # yard-space, the player's clicked target for the next shot
 
-# Putting (Section 7) — a timing QTE whose sweet spot shrinks and whose
-# marker speeds up the further the ball is from the pin.
-var putt_dist: float = 0.0     # yards from ball to pin for the current putt
-var _putt_dir: Vector2 = Vector2(0, 1)  # unit vector pin -> ball, so misses stay on a plausible line
 var putt_meter: PuttMeter
-var yips_pending: bool = false  # Section 4 putting cross-trigger: taints the next putt
-
-var pending_new_card = null
-var current_draft_options: Array = []
-var pending_club: Dictionary = {}
-var current_form_options: Array = []  # Array[FormCard] for this shot — 3 (MID), 2 (FULL/FINESSE), or 1 forced (EXTREME_FINESSE/bunker)
-var current_form_forced: bool = false  # true when there's no choice: a single created bad card, must be played
 
 # --- UI node refs (built in code) ---
 var status_label: Label
@@ -99,12 +217,18 @@ var scorecard: ScorecardView
 var header_meta: HFlowContainer     # round/bag/form-deck chip row, right of the title
 var brand_rack: HFlowContainer      # brand chips, in the bag header — hover for the set's clubs and bonuses
 var hole_title: Label
+var turn_banner: PanelContainer     # "Player 2 to play" — hot-seat only
+var turn_banner_label: Label
+var standings_rack: HFlowContainer  # per-player score chips — hot-seat only
 var shot_outlook: VBoxContainer
 var form_deck_popup: PopupPanel
 var form_deck_list: VBoxContainer
 
 
 func _ready() -> void:
+	# Chosen on the title screen. Clamped so running Main.tscn directly
+	# (or a stale value) can't produce a zero-player round.
+	player_count = clampi(GameSetup.player_count, 1, 4)
 	build_ui()
 	init_game()
 	start_hole()
@@ -150,11 +274,29 @@ func build_ui() -> void:
 	hole_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	header_row.add_child(hole_col)
 
+	# Whose turn it is. In a hot-seat round this is the single most
+	# important thing on screen — the wrong player taking a shot is
+	# unrecoverable — so it sits above the hole title, tinted with that
+	# player's seat colour. Hidden entirely in a solo round.
+	turn_banner = BogeyUI.make_panel(BogeyUI.panel(BogeyTheme.NEUTRAL_200, 6, 3))
+	turn_banner_label = BogeyUI.heading("", 17)
+	turn_banner.add_child(turn_banner_label)
+	turn_banner.visible = false
+	hole_col.add_child(turn_banner)
+
 	hole_title = BogeyUI.heading("Hole 1 — Par 4", 28)
 	hole_col.add_child(hole_title)
 
 	status_label = BogeyUI.body("Loading...", 14, BogeyTheme.NEUTRAL_700)
 	hole_col.add_child(status_label)
+
+	# Running standings, so players can see where they stand without
+	# waiting for the end of the round. Hidden in a solo round.
+	standings_rack = HFlowContainer.new()
+	standings_rack.add_theme_constant_override("h_separation", 6)
+	standings_rack.add_theme_constant_override("v_separation", 4)
+	standings_rack.visible = false
+	hole_col.add_child(standings_rack)
 
 	# The step pill sits centered between the hole line and the figures.
 	step_holder = HBoxContainer.new()
@@ -526,7 +668,13 @@ func make_club(cname: String, min_y: float, max_y: float, ctype: String,
 # and the click handlers in agreement for free. Called after any change
 # to the bag.
 func sort_hand() -> void:
-	hand.sort_custom(func(a, b):
+	sort_bag(hand)
+
+
+# The bag comparator, usable on any player's bag (not just the active
+# one's) — needed when setting up the other seats at the start of a run.
+func sort_bag(bag: Array) -> void:
+	bag.sort_custom(func(a, b):
 		# The putter has a 0-0 band and would otherwise sort to the front.
 		var a_putter: bool = a.type == "putter"
 		var b_putter: bool = b.type == "putter"
@@ -546,24 +694,50 @@ func sort_hand() -> void:
 # SETUP
 # ---------------------------------------------------------
 func init_game() -> void:
+	players = []
+	for i in range(player_count):
+		players.append(make_player(default_player_name(i)))
+	active_index = 0
+
+
+# Default seat names. Single-player keeps the old unnamed framing ("You"),
+# since there's nobody to distinguish from.
+func default_player_name(index: int) -> String:
+	if player_count <= 1:
+		return "You"
+	return "Player %d" % (index + 1)
+
+
+# Builds one player at the start of a run: the Bogey-Mart starter bag, an
+# independently shaped draft pool (Section 3B), and that player's own Form
+# deck.
+#
+# Pool and Form deck are per player because the draft is independent (no
+# sniping) and because hazard decay must land on the player who hit the
+# hazard rather than on the table.
+func make_player(player_name: String) -> Player:
+	var p := Player.new(player_name)
+
 	# The starting set is Bogey-Mart (Section 3A): a cheap supermarket
 	# three-piece, deliberately the worst gear in the game. Shorter bands,
 	# and — the sharper penalty — NARROWER ones, which drops you into the
 	# 2-card Form draw far more often than a real club would. Escaping this
 	# set is the run's first goal.
-	hand = [
+	p.hand = [
 		make_club("Bogey-Mart Driver", 190, 235, "wood", Brands.STARTER),
 		make_club("Bogey-Mart 7-Iron", 95, 140, "iron", Brands.STARTER),
 		make_club("Bogey-Mart Putter", 0, 35, "putter", Brands.STARTER)
 	]
-	sort_hand()
 
-	live_brands = roll_live_brands()
-	club_deck = build_club_pool()
-	club_deck.shuffle()
-	club_discard = []
+	p.live_brands = roll_live_brands()
+	var pool: Array = build_club_pool(p.live_brands)
+	pool.shuffle()
+	p.club_deck = pool
+	p.club_discard = []
 
-	form_deck = FormDeck.new()
+	p.form_deck = FormDeck.new()
+	sort_bag(p.hand)
+	return p
 
 
 # Section 3B — picks this run's 4 live brands, under the pairing rule:
@@ -595,7 +769,7 @@ func roll_live_brands() -> Array:
 #
 # Yardage lives here, on individual cards, where it's a local stat the
 # player reads. Set bonuses never touch yardage — see Brands.gd.
-func build_club_pool() -> Array:
+func build_club_pool(brands: Array) -> Array:
 	var pool: Array = []
 
 	# --- Standards: brandless, always in the pool, 3 copies each ---
@@ -610,12 +784,12 @@ func build_club_pool() -> Array:
 		pool.append(make_club("Putter", 0, 35, "putter"))
 
 	# --- Branded: only this run's live brands (Section 3B) ---
-	for brand in live_brands:
+	for brand in brands:
 		pool.append_array(branded_clubs(brand))
 
 	# --- Limited editions: rare, one copy each, live brands only ---
 	for card in limited_clubs():
-		if card.brand == Brands.NONE or live_brands.has(card.brand):
+		if card.brand == Brands.NONE or brands.has(card.brand):
 			pool.append(card)
 
 	return pool
@@ -737,25 +911,89 @@ func draw_from_deck(deck: Array, discard: Array) -> Dictionary:
 # HOLE FLOW
 # ---------------------------------------------------------
 func start_hole() -> void:
+	Sound.play("card_shuffle", 0.0, -6.0)
 	hole = HoleData.hole(current_hole_index)
 	hole_yardage = hole.yardage
 	hole_par = hole.par
-	ball_pos = hole.tee_pos
-	shot_path = [hole.tee_pos]
-	strokes = 0
-	current_lie = "tee"
-	yips_pending = false
+
+	# Every player starts the hole on the tee. Order of play off the tee is
+	# seating order (there are no distances to compare yet); from the
+	# second shot on it's furthest-from-pin — see next_to_play().
+	for p in players:
+		p.start_hole(hole.tee_pos)
+	active_index = 0
+
 	log_entries.clear()
 	rebuild_log()
 	log_msg("[b]Hole %d — Par %d — %d yards[/b]" % [current_hole_index, hole_par, int(hole_yardage)])
-	map_view.set_hole(hole)
-	map_view.set_ball(ball_pos, shot_path)
+	if is_multiplayer():
+		log_msg("[i]%s to play.[/i]" % me.name)
+	sync_map_to_active()
 	# Clears any aim line left over from the previous hole's last shot —
 	# otherwise it points at wherever that old target was, which is
 	# nonsensical geometry once the ball's moved to a brand new hole's tee.
 	map_view.set_aim_target(ball_pos)
 	state = State.CLUB_SELECT
 	refresh_ui()
+
+
+# Points the map at the active player: their hole, their ball, their trail,
+# and in multiplayer the other players' balls as markers so you can see the
+# whole group on the hole.
+func sync_map_to_active() -> void:
+	map_view.set_hole(hole)
+	map_view.set_ball(ball_pos, shot_path)
+	if map_view.has_method("set_other_balls"):
+		map_view.set_other_balls(other_ball_markers())
+
+
+# The other players' positions on this hole, for drawing as secondary
+# markers. Holed-out players are left off — their ball is in the cup.
+func other_ball_markers() -> Array:
+	var markers: Array = []
+	if not is_multiplayer():
+		return markers
+	for i in range(players.size()):
+		if i == active_index:
+			continue
+		var p: Player = players[i]
+		if p.holed_out:
+			continue
+		markers.append({"pos": p.ball_pos, "name": p.name, "index": i})
+	return markers
+
+
+# Turn order (Section 7): of the players still on the hole, the one
+# furthest from the pin plays next — real golf etiquette, and it keeps
+# everyone's downtime short and even. Returns -1 when every player has
+# holed out, which ends the hole.
+func next_to_play() -> int:
+	var best := -1
+	var best_dist := -1.0
+	for i in range(players.size()):
+		var p: Player = players[i]
+		if p.holed_out:
+			continue
+		var d: float = p.distance_to(hole.pin_pos)
+		if d > best_dist:
+			best_dist = d
+			best = i
+	return best
+
+
+# Hands the turn to whoever plays next. Returns false when the hole is
+# over (everyone has holed out).
+func advance_turn() -> bool:
+	var next := next_to_play()
+	if next < 0:
+		return false
+	var changed := next != active_index
+	active_index = next
+	if is_multiplayer() and changed:
+		log_msg("\n[i]%s to play — %d yards from the pin.[/i]" % [
+			me.name, int(me.distance_to(hole.pin_pos))])
+	sync_map_to_active()
+	return true
 
 
 # Opens the click-to-aim step once a club is chosen: locks the crosshair's
@@ -767,7 +1005,11 @@ func start_hole() -> void:
 func begin_aim_for_shot() -> void:
 	map_view.set_aiming(true, pending_club.min_yard, pending_club.max_yard, pending_club)
 	map_view.set_aim_target(hole.pin_pos)
-	aim_target = map_view.aim_target
+	# Compute the default aim from game data rather than reading back what
+	# the view clamped — same answer, but the logic no longer depends on a
+	# view having run first.
+	aim_target = ShotResolver.clamp_aim(hole.pin_pos, ball_pos,
+		float(pending_club.max_yard), hole.bounds)
 	map_view.set_aim_can_hole_out(aim_line_can_hole_out())
 	state = State.AIM
 	refresh_ui()
@@ -820,8 +1062,18 @@ func aim_line_can_hole_out() -> bool:
 # this swing.
 func _on_aim_picked(target: Vector2) -> void:
 	if state != State.AIM:
+		_reject("aim", "not in the aim phase")
 		return
-	aim_target = target
+	if pending_club.is_empty():
+		_reject("aim", "no club selected")
+		return
+	# Re-clamp here rather than trusting the incoming point. Locally this
+	# is a no-op (the crosshair was already clamped by the same function),
+	# but it means the rule is enforced by the game rather than by the
+	# view that happened to draw it — so an aim arriving from anywhere
+	# else is held to the club's reach and the hole's bounds too.
+	aim_target = ShotResolver.clamp_aim(target, ball_pos,
+		float(pending_club.max_yard), hole.bounds)
 	# The live-aim yellow has done its job; from here the per-card landing
 	# preview is the authority on whether a given card drops.
 	map_view.set_aim_can_hole_out(false)
@@ -893,6 +1145,7 @@ func begin_form_draw() -> void:
 			pending_club.name, ShotResolver.tier_name(tier), current_form_options.size(),
 			"" if current_form_options.size() == 1 else "s"])
 	state = State.FORM_DRAW
+	Sound.play("card_draw")
 	refresh_ui()
 
 
@@ -916,11 +1169,13 @@ func begin_draft_phase() -> void:
 		# so the 3 offers can't repeat a name amongst themselves either.
 		owned_names[card.name] = true
 
+	if not current_draft_options.is_empty():
+		Sound.play("card_draw")
 	if current_draft_options.is_empty():
 		# Nothing left to offer at all — skip the draft and move on, so the
 		# round can still finish instead of stalling on an empty pick.
 		log_msg("[i]The club deck is exhausted — no draft this hole.[/i]")
-		finish_hole_done()
+		begin_next_draft()
 		return
 	refresh_ui()
 
@@ -962,8 +1217,72 @@ func draw_unowned_club(owned_names: Dictionary) -> Dictionary:
 	return found
 
 
+# --- Action validation -------------------------------------------------
+# The six entry points below are the only way a player action enters the
+# game. They used to trust their arguments completely, which was fine
+# while the only caller was this machine's own UI. Once an action can
+# arrive from another peer (online play), an out-of-range index is a crash
+# and an out-of-turn action is a desync, so each one validates first and
+# refuses rather than acting.
+#
+# Refusals are logged to the console, not the in-game log: a rejected
+# action is a bug or a bad actor, not something the player did.
+# Returns the next pre-decided result if one is queued, otherwise calls
+# `generate` and (when recording) notes what came out. `kind` is only for
+# diagnostics — a mismatch between what was injected and what the logic
+# asks for is a desync bug, and naming the roll makes it findable.
+func _roll(kind: String, generate: Callable) -> Variant:
+	if not _injected_rolls.is_empty():
+		var entry = _injected_rolls.pop_front()
+		if entry is Dictionary and entry.get("kind", kind) != kind:
+			push_warning("Bogey: roll order mismatch — expected '%s', got '%s'" % [
+				kind, entry.get("kind", "?")])
+		return entry.value if entry is Dictionary else entry
+	var value = generate.call()
+	if _recording_rolls:
+		_consumed_rolls.append({"kind": kind, "value": value})
+	return value
+
+
+# Clears the roll ledger at the start of an action whose results need
+# sending. Called by whichever machine owns the randomness.
+func begin_roll_capture() -> void:
+	_consumed_rolls = []
+	_recording_rolls = true
+
+
+# The rolls generated since begin_roll_capture(), ready to hand to another
+# machine so it can reproduce this action exactly.
+func take_captured_rolls() -> Array:
+	_recording_rolls = false
+	return _consumed_rolls.duplicate(true)
+
+
+# Queues results decided elsewhere, to be consumed by the next action's
+# _roll() calls in this same order.
+func inject_rolls(rolls: Array) -> void:
+	_injected_rolls = rolls.duplicate(true)
+
+
+func _reject(what: String, why: String) -> void:
+	push_warning("Bogey: refused %s — %s" % [what, why])
+
+
+# True when `index` is a valid position in `arr`.
+func _valid_index(index: int, arr: Array) -> bool:
+	return index >= 0 and index < arr.size()
+
+
 func on_draft_pick(index: int) -> void:
+	if state != State.DRAFT:
+		_reject("draft pick", "not in the draft phase")
+		return
+	if not _valid_index(index, current_draft_options):
+		_reject("draft pick", "index %d outside 0..%d" % [
+			index, current_draft_options.size() - 1])
+		return
 	var card: Dictionary = current_draft_options[index]
+	Sound.play("card_place")
 	for i in range(current_draft_options.size()):
 		if i != index:
 			club_discard.append(current_draft_options[i])
@@ -976,13 +1295,25 @@ func on_draft_pick(index: int) -> void:
 		hand.append(card)
 		sort_hand()
 		log_msg("Added [b]%s[/b] to your hand." % card.name)
-		finish_hole_done()
+		begin_next_draft()
 	refresh_ui()
 
 
 # --- Discard flow (shared by draft-cap and hazard-cap cases) ---
 func on_discard_pick(index: int) -> void:
+	if state != State.DISCARD_FOR_DRAFT and state != State.DISCARD_FOR_HAZARD:
+		_reject("discard pick", "not in a discard phase")
+		return
+	if not _valid_index(index, hand):
+		_reject("discard pick", "index %d outside 0..%d" % [index, hand.size() - 1])
+		return
+	if pending_new_card == null:
+		# Nothing is waiting to come in, so discarding would shrink the bag
+		# with no replacement.
+		_reject("discard pick", "no incoming card to make room for")
+		return
 	var removed = hand.pop_at(index)
+	Sound.play("card_discard")
 	log_msg("Discarded %s." % removed.name)
 	hand.append(pending_new_card)
 	sort_hand()
@@ -990,7 +1321,7 @@ func on_discard_pick(index: int) -> void:
 	pending_new_card = null
 
 	if state == State.DISCARD_FOR_DRAFT:
-		finish_hole_done()
+		begin_next_draft()
 	else:
 		# was DISCARD_FOR_HAZARD -> shot already resolved, move on
 		advance_after_shot()
@@ -999,7 +1330,14 @@ func on_discard_pick(index: int) -> void:
 
 # --- Club select -> aim (crosshair, locked to the club's range) -> Form draw -> pick -> resolve ---
 func on_club_select(hand_index: int) -> void:
+	if state != State.CLUB_SELECT:
+		_reject("club select", "not in the club-select phase")
+		return
+	if not _valid_index(hand_index, hand):
+		_reject("club select", "index %d outside 0..%d" % [hand_index, hand.size() - 1])
+		return
 	pending_club = hand[hand_index]
+	Sound.play("card_slide")
 	begin_aim_for_shot()
 
 
@@ -1011,10 +1349,22 @@ func on_club_select(hand_index: int) -> void:
 # saw all 3 cards before choosing, so the choice among them already
 # encodes their read).
 func on_form_pick(index: int) -> void:
+	if state != State.FORM_DRAW:
+		_reject("form pick", "not in the Form-draw phase")
+		return
+	if not _valid_index(index, current_form_options):
+		_reject("form pick", "index %d outside 0..%d" % [
+			index, current_form_options.size() - 1])
+		return
+	if pending_club.is_empty():
+		# play_shot() needs the club this draw was made for.
+		_reject("form pick", "no club selected for this shot")
+		return
 	var card: FormCard = current_form_options[index]
 	form_deck.return_unpicked(current_form_options, index)
 	current_form_options = []
 	current_form_forced = false
+	Sound.play("card_place")
 	play_shot(pending_club, card)
 
 
@@ -1026,6 +1376,7 @@ func play_shot(club: Dictionary, card: FormCard) -> void:
 		else:
 			log_msg("[color=#%s]Yips! Taints your next putt if you're forced to play it near the green.[/color]" % COLOR_FLAG.to_html(false))
 			yips_pending = true
+			Sound.play("ui_error")
 
 	var aimed_distance: float = ball_pos.distance_to(aim_target)
 	var result := ShotResolver.resolve_shot(club, aimed_distance, current_lie, card,
@@ -1042,6 +1393,7 @@ func play_shot(club: Dictionary, card: FormCard) -> void:
 	pending_club = {}
 	_animating = true
 	clear_container(options_container)
+	Sound.swing(club.type)
 
 	var aim_dir: Vector2 = (aim_target - before_pos).normalized()
 	if aim_dir.length_squared() < 0.0001:
@@ -1074,7 +1426,7 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 	# Anything short of 20 still rattles the hole and finishes stone dead —
 	# you keep the reward for a perfect shot, you just have to tap it in.
 	if ShotResolver.earns_hole_out_roll(landing_pos, hole.pin_pos, result.distance):
-		var roll: int = ShotResolver.roll_for_hole_out()
+		var roll: int = _roll("d20", func(): return ShotResolver.roll_for_hole_out())
 		if roll >= ShotResolver.HOLE_OUT_TARGET:
 			ball_pos = hole.pin_pos
 			current_lie = "green"
@@ -1083,6 +1435,7 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 			map_view.set_aim_target(ball_pos)
 			log_msg("[color=#%s][b]d20: %d — IN THE HOLE, from %d yards![/b][/color]" % [
 				COLOR_ACCENT.to_html(false), roll, int(result.distance)])
+			Sound.play("cup")
 			finish_hole()
 			return
 		# Rimmed out. Deliberately left OUTSIDE gimme range: a rim-out
@@ -1094,6 +1447,7 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 		# visible in where the ball ends up.
 		log_msg("[color=#%s]d20: %d — rattles the cup and stays out.[/color]" % [
 			COLOR_FLAG.to_html(false), roll])
+		Sound.play("rim_out")
 		var rim_dir: Vector2 = (landing_pos - hole.pin_pos)
 		if rim_dir.length_squared() < 0.0001:
 			rim_dir = Vector2(0, 1)
@@ -1151,6 +1505,7 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 		log_msg("[color=#%s]Shank — lie downgraded to %s.[/color]" % [COLOR_FLAG.to_html(false), current_lie])
 		hazard_hit = true
 
+	Sound.landing(lie_result)
 	shot_path.append(ball_pos)
 	map_view.set_ball(ball_pos, shot_path)
 	# Clears the just-played aim line — otherwise the old target (now stale,
@@ -1172,13 +1527,33 @@ func maybe_add_bad_card_to_form_deck(lie_result: String) -> void:
 	# a rough patch no longer compounds for the rest of the round.
 	if Brands.blocks_form_decay(hand):
 		return
-	if randf() < (1.0 / 3.0):
-		var card := form_deck.add_bad_card_to_deck()
+	if _roll("decay_chance", func(): return randf()) < (1.0 / 3.0):
+		# Which bad card it is also has to match across machines, so pick
+		# the name here (add_bad_card_to_deck already takes one) rather
+		# than letting the deck roll it internally.
+		var bad_name: String = _roll("decay_card", func():
+			return FormCard.BAD_NAMES[randi_range(0, FormCard.BAD_NAMES.size() - 1)])
+		var card := form_deck.add_bad_card_to_deck(bad_name)
+		Sound.play("ui_error")
 		log_msg("[color=#%s](The %s left a %s card in your Form deck.)[/color]" % [
 			COLOR_TEXT_SOFT.to_html(false), lie_result, card.name])
 
 
+# Called when the active player's shot is fully resolved and they are still
+# on the hole. In multiplayer the turn now passes to whoever is furthest
+# from the pin, which may well be this same player again.
 func advance_after_shot() -> void:
+	# Hand over to whoever is now furthest from the pin. In a solo round
+	# this is always the same player; in a group round it can also land
+	# back on the player who just played, if they are still furthest out.
+	if is_multiplayer() and not advance_turn():
+		# Unreachable while this player is still on the hole, but end the
+		# hole rather than stall if it ever happens.
+		begin_end_of_hole()
+		return
+
+	# Everything below reads through to whoever is active NOW, so the green
+	# check applies to the player about to play, not the one who just did.
 	if current_lie == "green":
 		start_putting()
 	else:
@@ -1223,20 +1598,31 @@ func putt_distance_text() -> String:
 
 
 func on_putt_stopped(result: String, accuracy: float) -> void:
+	if state != State.PUTTING:
+		_reject("putt result", "not in the putting phase")
+		return
+	if result != "sunk" and result != "close" and result != "miss":
+		_reject("putt result", "unknown result '%s'" % result)
+		return
+	# Accuracy scales a miss's leave distance, so an out-of-range value
+	# would throw the ball to a nonsense spot rather than crash. Clamp it
+	# to the 0..1 the meter is documented to emit.
+	accuracy = clampf(accuracy, 0.0, 1.0)
 	strokes += 1
 
 	if yips_pending:
 		yips_pending = false
 		log_msg("[color=#%s]The Yips strike — the putt misses regardless of how well you struck it.[/color]" % COLOR_FLAG.to_html(false))
+		Sound.play("ui_error")
 		putt_dist = maxf(1.0, putt_dist * 0.35)
-		sync_ball_to_putt(randf_range(-0.8, 0.8))
-		state = State.PUTTING
-		refresh_ui()
+		sync_ball_to_putt(_roll("putt_offline_yips", func(): return randf_range(-0.8, 0.8)))
+		continue_after_putt()
 		return
 
 	match result:
 		"sunk":
 			log_msg("[color=#%s]Dead centre — in the hole![/color]" % COLOR_ACCENT.to_html(false))
+			Sound.play("cup")
 			putt_dist = 0.0
 			sync_ball_to_putt()
 			finish_hole()
@@ -1245,7 +1631,7 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 			# A good-but-not-perfect strike leaves a short one. The better
 			# the timing, the closer it finishes.
 			putt_dist = minf(lerpf(2.2, 0.6, accuracy), maxf(putt_dist * 0.5, GIMME_YARDS))
-			sync_ball_to_putt(randf_range(-0.5, 0.5))
+			sync_ball_to_putt(_roll("putt_offline_close", func(): return randf_range(-0.5, 0.5)))
 			log_msg("Good pace — slides by, leaving %s." % putt_distance_text())
 		_:
 			# A miss scales with how wild the timing was, and with how long
@@ -1255,7 +1641,7 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 			# get longer — the sequence always walks toward the hole.
 			var leave: float = lerpf(0.25, 0.06, accuracy) * maxf(putt_dist, 3.0)
 			putt_dist = clampf(leave, GIMME_YARDS, minf(putt_dist, 12.0))
-			sync_ball_to_putt(randf_range(-1.2, 1.2))
+			sync_ball_to_putt(_roll("putt_offline_miss", func(): return randf_range(-1.2, 1.2)))
 			log_msg("[color=#%s]Mishit — pushed off line, %s left.[/color]" % [
 				COLOR_FLAG.to_html(false), putt_distance_text()])
 
@@ -1271,7 +1657,33 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 		finish_hole()
 		return
 
-	state = State.PUTTING
+	continue_after_putt()
+
+
+# The ball is still out of the hole after a putt. In a solo round that just
+# means putting again; in a group round the turn passes, since a player who
+# has left themselves 8 yards is no longer the one furthest from the pin.
+#
+# "Furthest plays first" is applied to putting too rather than letting a
+# player hole out continuously — that's the order Section 7 specifies, and
+# it also stops one player sinking a long sequence of putts while the
+# others sit watching.
+func continue_after_putt() -> void:
+	if is_multiplayer() and not advance_turn():
+		begin_end_of_hole()
+		return
+	# Reads through to whoever is active now: still on the green means the
+	# putt meter, otherwise they are playing a normal shot.
+	if current_lie == "green":
+		state = State.PUTTING
+		# Re-derive the putt for the player now up, so the meter's
+		# difficulty matches THEIR distance rather than the last player's.
+		putt_dist = ball_pos.distance_to(hole.pin_pos)
+		_putt_dir = (ball_pos - hole.pin_pos).normalized()
+		if _putt_dir == Vector2.ZERO:
+			_putt_dir = Vector2(0, 1)
+	else:
+		state = State.CLUB_SELECT
 	refresh_ui()
 
 
@@ -1316,6 +1728,7 @@ func build_putt_controls() -> void:
 
 func _on_strike_pressed() -> void:
 	if putt_meter and putt_meter.active:
+		Sound.play("putt")
 		putt_meter.stop_putt()
 
 
@@ -1361,8 +1774,17 @@ func score_name(diff: int) -> String:
 func _on_header_restart_pressed() -> void:
 	if _animating:
 		return
-	var nothing_to_lose: bool = current_hole_index == 1 and strokes == 0 \
-		and round_scores.is_empty()
+	# "Nothing to lose" has to be true for EVERY player, not just whoever is
+	# active: in a group round the active player can be sitting on the tee
+	# with 0 strokes while someone else is mid-hole, and skipping the
+	# confirm there would throw away their round without asking.
+	var nothing_to_lose: bool = current_hole_index == 1
+	if nothing_to_lose:
+		for p in players:
+			if p.strokes != 0 or not p.round_scores.is_empty():
+				nothing_to_lose = false
+				break
+	Sound.play("ui_back")
 	if nothing_to_lose or _restart_armed:
 		restart_round()
 		return
@@ -1379,11 +1801,64 @@ func _on_header_restart_pressed() -> void:
 	)
 
 
+# The ACTIVE player has holed out. Records their score for the hole and
+# marks them done. In multiplayer the hole continues until every player is
+# in, so this hands over rather than going straight to the draft.
 func finish_hole() -> void:
 	var diff := strokes - hole_par
-	log_msg("\n[b]Holed out![/b] Total strokes: %d (par %d) — %s" % [strokes, hole_par, score_diff_text(diff)])
+	me.holed_out = true
+	Sound.jingle(diff)
 	round_scores.append({"hole": current_hole_index, "par": hole_par, "strokes": strokes})
-	log_msg("\n[b]End of hole.[/b] Draw 3, pick 1 to add to your hand permanently.")
+
+	if is_multiplayer():
+		log_msg("\n[b]%s holed out![/b] %d strokes (par %d) — %s" % [
+			me.name, strokes, hole_par, score_diff_text(diff)])
+	else:
+		log_msg("\n[b]Holed out![/b] Total strokes: %d (par %d) — %s" % [
+			strokes, hole_par, score_diff_text(diff)])
+
+	# Anyone still out on the hole plays on.
+	if advance_turn():
+		state = State.CLUB_SELECT
+		if me.current_lie == "green":
+			start_putting()
+		else:
+			refresh_ui()
+		return
+
+	begin_end_of_hole()
+
+
+# Every player is in. Report the hole, then run the end-of-hole draft for
+# each player in turn (Section 7: independent draw-3 per player, so nobody
+# can take the card another player wanted).
+func begin_end_of_hole() -> void:
+	if is_multiplayer():
+		log_msg("\n[b]Hole %d complete.[/b]" % current_hole_index)
+		for p in players:
+			var entry = p.round_scores[p.round_scores.size() - 1] if not p.round_scores.is_empty() else null
+			if entry != null:
+				log_msg("  %s — %d strokes (%s)" % [
+					p.name, int(entry.strokes), score_name(int(entry.strokes) - int(entry.par))])
+
+	_draft_queue = []
+	for i in range(players.size()):
+		_draft_queue.append(i)
+	begin_next_draft()
+
+
+# Runs the next queued player's end-of-hole draft, or moves on to the next
+# hole once every player has drafted.
+func begin_next_draft() -> void:
+	if _draft_queue.is_empty():
+		finish_hole_done()
+		return
+	active_index = int(_draft_queue.pop_front())
+	sync_map_to_active()
+	if is_multiplayer():
+		log_msg("\n[b]%s's draft.[/b] Draw 3, pick 1 to add to the bag permanently." % me.name)
+	else:
+		log_msg("\n[b]End of hole.[/b] Draw 3, pick 1 to add to your hand permanently.")
 	begin_draft_phase()
 
 
@@ -1400,9 +1875,45 @@ func finish_hole_done() -> void:
 
 func finish_round() -> void:
 	state = State.DONE
+	Sound.play("jingle_round", 0.0)
 	log_entries.clear()
 	rebuild_log()
 	log_msg("[b]Round Complete — Bogey Links[/b]\n")
+
+	if is_multiplayer():
+		# Leaderboard first — in a group round the result is the comparison,
+		# and the hole-by-hole detail for one player matters less than who
+		# won. Stroke play: lowest total wins.
+		var standings := players.duplicate()
+		standings.sort_custom(func(a, b): return a.total_strokes() < b.total_strokes())
+
+		log_msg("[b]Final standings[/b]")
+		var place := 0
+		var shown := 0
+		var prev_strokes := -1
+		for p in standings:
+			shown += 1
+			# Ties share a place, the way a real card reads.
+			if p.total_strokes() != prev_strokes:
+				place = shown
+				prev_strokes = p.total_strokes()
+			log_msg("  %d. %s — %d strokes (%s)" % [
+				place, p.name, p.total_strokes(), score_diff_text(p.score_diff())])
+
+		var best: Player = standings[0]
+		var tied: Array = []
+		for p in standings:
+			if p.total_strokes() == best.total_strokes():
+				tied.append(p.name)
+		if tied.size() > 1:
+			log_msg("\n[b]Tied — %s, on %d strokes.[/b]" % [
+				", ".join(tied), best.total_strokes()])
+		else:
+			log_msg("\n[b]%s wins, on %d strokes (%s).[/b]" % [
+				best.name, best.total_strokes(), score_diff_text(best.score_diff())])
+		refresh_ui()
+		return
+
 	var total_strokes := 0
 	var total_par := 0
 	for entry in round_scores:
@@ -1419,7 +1930,6 @@ func finish_round() -> void:
 # and draft pools, so a new run inherits nothing from the last one.
 func restart_round() -> void:
 	current_hole_index = 1
-	round_scores = []
 	_restart_armed = false
 	init_game()
 	start_hole()
@@ -1506,11 +2016,12 @@ func rebuild_brand_rack() -> void:
 		var tier: int = Brands.tier_reached(n)
 		var next: int = Brands.next_tier(n)
 		var label: String = Brands.display_name(brand).to_upper()
-		var accent: Color = BogeyTheme.NEUTRAL_600
+		# Each chip wears its brand's livery, so the rack doubles as the key
+		# for the badges on the bag cards below it. Filled once a tier is
+		# live; outlined while climbing.
+		var accent: Color = Brands.color(brand)
 		if tier > 0:
-			# A live set is the one thing on this row worth the accent.
 			label += " %d" % tier
-			accent = BogeyTheme.ACCENT_700
 		elif next > 0 and n > 0:
 			label += " %d/%d" % [n, next]
 		var chip := BogeyUI.chip(label, accent, tier > 0)
@@ -1537,6 +2048,8 @@ func refresh_ui() -> void:
 		else ("%d yards to pin" % int(dist_to_pin))
 	status_label.text = "%s · lie: %s · %d strokes" % [
 		dist_text, current_lie, strokes]
+
+	refresh_turn_ui()
 
 	if scorecard:
 		scorecard.set_round(round_scores, current_hole_index, strokes)
@@ -1762,6 +2275,40 @@ func make_form_deck_chip_button() -> Button:
 # is always on: distance to the pin, your lie, strokes played, and what
 # the lie is doing to you. When a club is in hand it also shows the swing
 # tier and its draw consequence, which is the read the game turns on.
+# Keeps the hot-seat header honest: who is up, and where everyone stands.
+# Both widgets stay hidden in a solo round, so single-player looks exactly
+# as it did before.
+func refresh_turn_ui() -> void:
+	if turn_banner:
+		turn_banner.visible = is_multiplayer()
+		if is_multiplayer() and turn_banner_label:
+			var seat := CourseMapView.seat_color(active_index)
+			turn_banner_label.add_theme_color_override("font_color", BogeyTheme.INK)
+			turn_banner.add_theme_stylebox_override("panel",
+				BogeyUI.panel(seat, 6, 3))
+			if state == State.DRAFT or state == State.DISCARD_FOR_DRAFT:
+				turn_banner_label.text = "%s — draft a club" % me.name
+			elif state == State.DONE:
+				turn_banner_label.text = "Round complete"
+			else:
+				turn_banner_label.text = "%s to play" % me.name
+
+	if standings_rack:
+		standings_rack.visible = is_multiplayer()
+		if is_multiplayer():
+			clear_container(standings_rack)
+			for i in range(players.size()):
+				var p: Player = players[i]
+				var played: int = p.round_scores.size()
+				var label: String = "%s · %s" % [
+					p.name,
+					"—" if played == 0 else running_score_diff_text(p.score_diff())]
+				# The active player's chip is filled, so the rack echoes the
+				# banner rather than making you re-read the name.
+				standings_rack.add_child(BogeyUI.chip(
+					label, CourseMapView.seat_color(i), i == active_index))
+
+
 func rebuild_shot_outlook() -> void:
 	clear_container(shot_outlook)
 	shot_outlook.visible = true

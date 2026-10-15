@@ -16,7 +16,7 @@ Play a round of golf across a **fixed 18-hole course** (a real course layout —
 no random hole generation). Grow a bag of club cards as you go, resolve each
 shot by picking from a hand of Form cards whose effects are fully visible, and
 finish on the green with a timing-based putting meter. Solo play is against
-par.
+par; **2-4 players** can share a screen in hot-seat.
 
 ## Core mechanics
 
@@ -85,6 +85,34 @@ par.
   nerve test.
 - Putts inside 0.7 yards (about 2 feet) are conceded as a gimme.
 
+## Multiplayer (hot-seat, 2-4 players)
+
+Pick a player count on the title screen; clicking anywhere else still tees
+off solo. Everyone plays on one screen, taking turns.
+
+- **Turn order is "furthest from the pin plays first"** — real golf
+  etiquette, and it spreads downtime evenly. Seating order off the tee,
+  since there are no distances to compare yet.
+- The order applies to **putting as well**, so a player who leaves a long
+  one doesn't stand there holing out while everyone waits.
+- A hole ends only once **every** player is in.
+- The header shows **whose turn it is**, tinted by seat colour, plus a
+  running standings chip per player. The other players' balls show on the
+  hole map in their seat colours.
+- At the end of the round the log leads with **final standings** and the
+  winner (stroke play — lowest total wins; ties are reported as ties).
+
+**Each player has their own bag, Form deck, and draft pool.** That means
+hazard decay only degrades the Form deck of the player who found the
+hazard, and the end-of-hole draft is an **independent draw-3 per player** —
+nobody can take the card you wanted. Whether that lack of contention makes
+the draft feel inert is an open playtesting question; see
+[GAME_DESIGN.md](GAME_DESIGN.md) Section 7.
+
+Simultaneous/secret shot declaration (in the original design note) is not
+implemented and isn't buildable on one shared screen — it needs networked
+multiplayer. Sequential turns are the hot-seat equivalent.
+
 ## Repo layout
 
 ```
@@ -95,12 +123,15 @@ Bogey/
 │   ├── fonts/             AlexBrush (title wordmark)
 │   └── maps/              Reference course layout (18 holes)
 ├── scenes/
-│   ├── Title.tscn         Title screen (entry point)
+│   ├── Title.tscn         Title screen + player-count picker (entry point)
 │   └── Main.tscn          The game
 ├── tools/
 │   └── Capture.tscn       Screenshot capture helper
 └── scripts/
     ├── Main.gd            Game loop, state machine, UI construction
+    ├── Player.gd          One player's state (bag, ball, score, Form deck)
+    ├── GameSetup.gd       Player count carried from the title screen
+    ├── MPTest.gd          Headless flow harness (dev tool, see below)
     ├── ShotResolver.gd    Shot math — distance, deviation, cup radius
     ├── FormCard.gd        A single Form card and its known effect
     ├── FormDeck.gd        The shared Form deck and per-tier draws
@@ -133,9 +164,31 @@ To parse-check a script without opening the editor:
 godot --headless --check-only --script scripts/Main.gd
 ```
 
+Note that `--check-only` on a single script reports false errors for
+`class_name` globals (`Player`, `GameSetup`) and autoloads (`Sound`),
+because neither is registered when one script is checked in isolation.
+Import the project once (`godot --headless --editor --quit`) and those
+resolve.
+
+To drive full 18-hole rounds for 1-4 players headlessly and assert the
+turn order, hole flow, and round completion all hold:
+
+```sh
+godot --headless --script res://scripts/MPTest.gd
+```
+
+Add `MPTEST_COUNTS=3,4` to run a subset. It plays randomly rather than
+well, so the stroke totals are meaningless — it checks that the flow never
+stalls, never skips a player, keeps every bag within the 14-club cap, and
+finishes 18 holes for everyone. It sets `CourseMapView.skip_animation` so
+shots resolve with no tween; a full 4-player round is ~1,200 actions and
+takes a few seconds.
+
 ## What's implemented
 
 - Full **18-hole round** with a running scorecard and end-of-round summary
+- **Hot-seat multiplayer for 2-4 players** — furthest-from-pin turn order,
+  per-player bags/Form decks/draft pools, standings and a winner
 - Starting Bogey-Mart bag; draw-3-pick-1 club draft each hole (14-club cap,
   forced discard when full)
 - **Brands, set bonuses at 2/4/7, per-run draft pools, and limited-edition
@@ -153,7 +206,8 @@ godot --headless --check-only --script scripts/Main.gd
 ## Not in this version
 
 - Weather (per-flight conditions)
-- Multiplayer (simultaneous selection, turn order)
+- Networked/online multiplayer (hot-seat only — see above)
+- Simultaneous/secret shot declaration (needs networking)
 - Slope on the greens
 
 ## Numbers worth tuning

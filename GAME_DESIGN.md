@@ -423,7 +423,32 @@ The curve is eased so difficulty ramps hardest over the first stretch — the st
 ## 7. Modes
 
 - **Solo vs. Par**: track strokes against course par, no opponents needed. Clean, works as-is.
-- **Multiplayer**: simultaneous shot declarations — everyone secretly picks their club/target, reveal together, resolve shots in "furthest from pin plays first" order (mirrors real golf etiquette, minimizes downtime).
+- **Multiplayer**: 2-4 players. **Implemented as local hot-seat** — everyone plays on one screen, taking turns.
+
+### Hot-seat multiplayer — as built
+
+Turn order is **"furthest from the pin plays first"** (real golf etiquette, and it keeps downtime short and evenly spread). Off the tee there are no distances to compare yet, so the first shot of each hole goes in seating order.
+
+The order is applied to **putting too**, rather than letting a player hole out continuously: a player who leaves themselves 8 yards is no longer the one furthest out, so the turn passes. That was a deliberate call — continuous putting is also realistic, but it would have one player sinking a sequence of putts while everyone else watched.
+
+The hole ends only when **every** player is in. Each player's score for the hole is recorded as they hole out.
+
+**What is per-player, and why:**
+
+| State | Scope | Why |
+|---|---|---|
+| The Bag, and every brand set bonus from it | Per player | It's the thing you build; sharing it would remove the game |
+| Form deck | **Per player** | Hazard decay must punish the player who hit the hazard, not the table |
+| Club draft pool + discard | **Per player** | See the draft rule below |
+| Live brands (the 4-of-6 roll) | **Per player** | Each player's pool is shaped independently, so two players in the same round can be building toward different brands |
+| Score / position / lie / strokes | Per player | Obviously |
+| The hole, pin, and terrain | Shared | It's one course |
+
+**The draft rule: independent draw-3 per player, no contention.** Each player draws their own 3 from their own pool at the end of every hole, and nobody can take a card another player wanted. The alternative — one shared pool with sequential picks, where sniping is real — is the more interesting tension and is still worth trying, but it was deliberately not built first: it couples every player's draft to the turn order and makes the pool a shared resource that needs its own balancing. Starting without contention keeps the first playable version honest about what's being tested (does hot-seat golf hold attention?) rather than testing two new things at once.
+
+> **Still open:** whether the lack of sniping makes the draft feel like solitaire played in parallel. The relevant open question below ("whether the shared club deck creates awkward sniping") is now a question about whether to *add* contention rather than soften it.
+
+**Simultaneous shot declaration is NOT implemented.** The original note above proposed everyone secretly declaring, then revealing together. That needs hidden per-player input, which a single shared screen cannot give — it's a networked-multiplayer feature, not a hot-seat one. Sequential turns are the hot-seat equivalent and are what's built.
 
 ---
 
@@ -468,7 +493,7 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 8. **Add per-run pool shaping** (Section 3B): seed 4 of 6 brands per round, with the axis-coverage constraint, and the pre-round reveal.
 9. **Add pair riders** on limited editions — the last synergy layer, and the easiest to cut if sets alone already carry the draft.
 10. **Add limited edition cards** into the shared club deck, including their Created-card abilities.
-11. **Add local multiplayer** (simultaneous shot declarations, turn order by distance).
+11. ~~**Add local multiplayer**~~ **Done** — hot-seat for 2-4 players, turn order by distance (furthest from the pin plays first), independent per-player drafts. Simultaneous/secret shot declaration was dropped as unbuildable on one shared screen; see Section 7.
 
 ---
 
@@ -484,7 +509,8 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 - **How many brands should be live per run** — 4 of 6 is the starting guess. 3 makes commitment easier but runs samier; 5 makes the pool noisy and sets hard to complete.
 - **Whether Bogey-Mart clubs should be cuttable from hole 1** or locked in for a few holes — cutting the starter Driver on hole 1 for a good Wood may end the "escape the starter set" arc before it's felt.
 - **Whether the four live brands should be revealed pre-round** (current stance: yes, Section 3B) or discovered — the reveal fits the game's known-information stance, but discovery may make the early draft more exciting.
-- In multiplayer, whether the shared club deck creates awkward "sniping" (another player takes the card you wanted) and whether that's good tension or needs softening.
+- In multiplayer, whether to **introduce** club-deck contention at all. As built, each player drafts from their own pool, so sniping cannot happen (Section 7). The open question is whether the draft feels inert without it — and if so, whether a shared pool with sequential picks is good tension or just a feel-bad.
+- Whether hot-seat downtime is acceptable at 4 players, or whether the per-shot turn handover needs to batch somehow.
 - Whether Form cards should differ between clubs (e.g. a Driver-specific bad card set vs. a universal pool) or stay universal for simplicity.
 - Full Form card list is still a first draft (6 bad / 8 good) — needs expansion to a real deck-sized set before implementation.
 - How many Created-card sources should exist across the full club list (standard clubs too, or Limited Edition only?) — needs deciding before the full club list is finalized.

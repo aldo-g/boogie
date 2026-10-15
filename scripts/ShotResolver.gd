@@ -92,6 +92,42 @@ static func roll_for_hole_out() -> int:
 	return randi_range(1, HOLE_OUT_DIE)
 
 
+# --- Aim clamping ------------------------------------------------------
+# Where an aim actually lands once the club's reach and the hole's own
+# playable extent are applied.
+#
+# This used to live in CourseMapView, which made the *view* the authority
+# on a gameplay value: the clamped point was computed during drawing and
+# read back out. That is fine with one screen and wrong with several —
+# two machines would clamp against their own view state and disagree about
+# where the ball was aimed. It lives here now, with the rest of the shot
+# math, so every machine computes the same answer from the same data.
+#
+# Note the deliberate asymmetry: the distance is capped at the club's
+# max reach but NOT floored at its minimum. Aiming inside a club's band
+# is legal — that is exactly what Section 4's Extreme Finesse tier is, a
+# punishing draw rather than a blocked shot.
+static func clamp_aim(target: Vector2, ball_pos: Vector2, max_reach: float,
+		bounds: Rect2) -> Vector2:
+	var offset := target - ball_pos
+	var dist := offset.length()
+	if dist < 0.0001:
+		return ball_pos
+	var clamped_dist: float = min(dist, max_reach)
+	var point: Vector2 = ball_pos + offset.normalized() * clamped_dist
+	return clamp_to_bounds(point, bounds)
+
+
+# Keeps a yard-space point inside the hole's playable rectangle. The drawn
+# extent IS the playable extent (see HoleData.bounds), so the picture and
+# the rule are the same number.
+static func clamp_to_bounds(p: Vector2, bounds: Rect2) -> Vector2:
+	return Vector2(
+		clamp(p.x, bounds.position.x, bounds.position.x + bounds.size.x),
+		clamp(p.y, bounds.position.y, bounds.position.y + bounds.size.y)
+	)
+
+
 static func tier_name(tier: int) -> String:
 	match tier:
 		Tier.FULL: return "Full swing"

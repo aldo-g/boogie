@@ -17,6 +17,19 @@ var hole: HoleData
 var ball_pos: Vector2 = Vector2.ZERO  # yard-space
 var shot_path: Array = []             # yard-space points, tee to current ball_pos
 
+# The OTHER players' balls in a hot-seat round (Section 7), as
+# [{"pos": Vector2, "name": String, "index": int}, ...]. Empty in a solo
+# round, so nothing extra is drawn. Drawn smaller and tinted by seat so
+# the active player's own ball stays the one your eye goes to.
+var other_balls: Array = []
+
+# Set true to resolve shots with no tween at all — the ball jumps straight
+# to where it lands and the callback fires immediately. Only the headless
+# flow harness (scripts/MPTest.gd) sets it: the animation is ~0.4-1.0s of
+# real time per shot, which makes driving a full round in a test take
+# minutes. Never set in normal play.
+var skip_animation: bool = false
+
 var aiming: bool = false           # true while the player can move/set the aim crosshair
 var aim_target: Vector2 = Vector2.ZERO  # yard-space, current crosshair position
 var aim_min_range: float = 0.0     # yards — the selected club's min_yard
@@ -78,6 +91,17 @@ const COLOR_BUNKER_EDGE := Color(0.745, 0.651, 0.435)
 const COLOR_WATER := Color(0.561, 0.663, 0.722)
 const COLOR_WATER_RIPPLE := Color(0.702, 0.784, 0.831, 0.6)
 const COLOR_BALL := Color(0.98, 0.98, 0.97)
+# Seat tints for other players' balls, indexed by seat. Picked to read
+# against both fairway green and sand, and to stay distinct from each
+# other, from the white active ball, and from the red pin. None of them is
+# white: the active player's ball is the white one, so a seat tint has to
+# differ from it even for seat 1.
+const COLOR_SEATS := [
+	Color(0.839, 0.333, 0.333), # seat 1 — red
+	Color(0.384, 0.502, 0.788), # seat 2 — blue
+	Color(0.886, 0.620, 0.216), # seat 3 — amber
+	Color(0.608, 0.420, 0.718), # seat 4 — violet
+]
 const COLOR_BALL_OUTLINE := Color(0.169, 0.227, 0.184)
 const COLOR_BALL_SHADOW := Color(0.106, 0.129, 0.110, 0.35)
 const COLOR_TRAIL := Color(0.169, 0.227, 0.184, 0.55)
@@ -134,6 +158,19 @@ func set_ball(p_pos: Vector2, p_path: Array) -> void:
 	ball_pos = p_pos
 	shot_path = p_path
 	queue_redraw()
+
+
+func set_other_balls(p_others: Array) -> void:
+	other_balls = p_others
+	queue_redraw()
+
+
+# The tint for a seat index, wrapping rather than erroring if a round ever
+# seats more players than there are colors.
+static func seat_color(index: int) -> Color:
+	if COLOR_SEATS.is_empty():
+		return COLOR_BALL
+	return COLOR_SEATS[index % COLOR_SEATS.size()]
 
 
 # Enables/disables click-to-aim, locked to the selected club's max yardage —
@@ -264,24 +301,16 @@ func set_aim_can_hole_out(p_can: bool) -> void:
 # crosshair, its line, and the range rings can never reach out into the
 # dead space beyond the mapped course art.
 func _clamp_to_range(p: Vector2) -> Vector2:
-	var offset := p - ball_pos
-	var dist := offset.length()
-	if dist < 0.0001:
-		return ball_pos
-	var clamped_dist: float = min(dist, aim_max_range)
-	var target := ball_pos + offset.normalized() * clamped_dist
-	return _clamp_to_extent(target)
+	# Delegates to ShotResolver so the crosshair and the authoritative
+	# gameplay value can never drift apart.
+	return ShotResolver.clamp_aim(p, ball_pos, aim_max_range, _yard_extent())
 
 
 # Clamps a yard-space point to stay within the rectangle _yard_extent()
 # actually draws terrain in, so the aim crosshair can never sit visibly
 # off the course.
 func _clamp_to_extent(p: Vector2) -> Vector2:
-	var extent := _yard_extent()
-	return Vector2(
-		clamp(p.x, extent.position.x, extent.position.x + extent.size.x),
-		clamp(p.y, extent.position.y, extent.position.y + extent.size.y)
-	)
+	return ShotResolver.clamp_to_bounds(p, _yard_extent())
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -309,6 +338,15 @@ func _gui_input(event: InputEvent) -> void:
 # the click-to-aim step), not necessarily toward the pin.
 func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side: int, max_distance: float, on_done: Callable) -> void:
 	if not hole:
+		on_done.call()
+		return
+	if skip_animation:
+		# No tween: land the shot now. Nothing here needs frames, so a
+		# caller driving the game in a loop makes real progress.
+		preview_landing_active = false
+		_aim_active = false
+		_flight_active = false
+		_flight_trail = []
 		on_done.call()
 		return
 	# The card that was hovered is the one just played, and its
@@ -701,6 +739,14 @@ func _draw() -> void:
 		draw_circle(ball_px, 4.5, COLOR_BALL)
 		draw_arc(ball_px, 4.5, 0, TAU, 14, COLOR_BALL_OUTLINE, 1.2)
 	else:
+		# The other players' balls first, so the active player's own ball
+		# draws over the top of them and stays unambiguous.
+		for other in other_balls:
+			var other_px := _to_px(other.pos)
+			draw_circle(other_px + Vector2(0, 2), 3.0, COLOR_BALL_SHADOW)
+			draw_circle(other_px, 4.0, seat_color(int(other.index)))
+			draw_arc(other_px, 4.0, 0, TAU, 14, COLOR_BALL_OUTLINE, 1.2)
+
 		# Ball marker at its current resting position.
 		var ball_px := _to_px(ball_pos)
 		draw_circle(ball_px + Vector2(0, 2), 3.5, COLOR_BALL_SHADOW)
