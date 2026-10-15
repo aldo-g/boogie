@@ -4,8 +4,10 @@ extends Control
 # ---------------------------------------------------------
 # Reusable visual card for a club/bad-card dictionary (see Main.gd's
 # make_club()). Draws a card-shaped panel with a type-colored header,
-# a procedural club icon, and stat text — plus hover lift and a pick
-# "pop" animation. No external art: everything is StyleBoxFlat/draw calls.
+# a club illustration, and stat text — plus hover lift and a pick
+# "pop" animation. The illustrations are 1920s printer's cuts (see
+# assets/art/CREDITS.md), stored white so they can be tinted to the club
+# type's accent; any type without art falls back to a procedural icon.
 # ---------------------------------------------------------
 
 signal picked(card_view: CardView)
@@ -16,6 +18,13 @@ signal hover_ended(card_view: CardView)
 
 const CARD_SIZE := Vector2(150, 190)
 const COMPACT_SIZE := Vector2(132, 168)
+
+const CLUB_ART := {
+	"wood": preload("res://assets/art/clubs/wood.svg"),
+	"iron": preload("res://assets/art/clubs/iron.svg"),
+	"wedge": preload("res://assets/art/clubs/wedge.svg"),
+	"putter": preload("res://assets/art/clubs/putter.svg"),
+}
 
 var card: Dictionary = {}
 var interactive: bool = true
@@ -36,6 +45,7 @@ var _shadow: PanelContainer    # drop shadow, deepened on hover
 var _shadow_style: StyleBoxFlat
 var _panel_style: StyleBoxFlat # the card face, glowed on hover
 var _accent: Color
+var _base_border: int = 2      # 3 on a Limited card's gilt frame
 
 
 static func type_color(ctype: String) -> Color:
@@ -60,6 +70,13 @@ func _build() -> void:
 	pivot_offset = card_size / 2.0
 
 	var accent := type_color(card.get("type", "iron"))
+	var limited: bool = card.get("limited", false)
+	# Limited editions are framed in gilt instead of their type colour —
+	# the draft is where you need to spot them, and the type still shows
+	# in the illustration tint and the category tag.
+	if limited:
+		accent = BogeyTheme.GOLD
+	_base_border = 3 if limited else 2
 
 	var shadow := PanelContainer.new()
 	shadow.position = Vector2(3, 5)
@@ -77,10 +94,10 @@ func _build() -> void:
 	_panel.position = Vector2.ZERO
 	_panel.size = card_size
 	var style := StyleBoxFlat.new()
-	style.bg_color = BogeyTheme.CARD_BG
+	style.bg_color = BogeyTheme.GOLD_100 if limited else BogeyTheme.CARD_BG
 	style.set_corner_radius_all(10)
 	style.border_color = accent
-	style.set_border_width_all(2)
+	style.set_border_width_all(_base_border)
 	style.border_width_top = 6 if not compact else 4
 	var margin: int = 10 if not compact else 5
 	style.content_margin_left = margin
@@ -111,29 +128,19 @@ func _build() -> void:
 		# stats line.
 		_header.add_theme_font_size_override("font_size", 17)
 
-		var brand_id: String = card.get("brand", "")
-		if brand_id != "":
-			var brand_label := Label.new()
-			brand_label.text = Brands.display_name(brand_id).to_upper()
-			brand_label.add_theme_font_size_override("font_size", 10)
-			brand_label.add_theme_color_override("font_color", BogeyTheme.NEUTRAL_600)
-			vbox.add_child(brand_label)
-			vbox.move_child(brand_label, 0)
+		_add_brand_badge(vbox)
 
-		_icon = Control.new()
-		_icon.custom_minimum_size = Vector2(0, 34)
-		_icon.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_icon = _make_icon(34)
 		_icon.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_icon.draw.connect(_draw_icon.bind(_icon))
 		vbox.add_child(_icon)
 
 		var cat_text: String = card.get("type", "").capitalize()
-		if card.get("limited", false):
+		if limited:
 			cat_text = "Limited · " + cat_text
 		vbox.add_child(BogeyUI.tag(
 			cat_text,
-			BogeyTheme.ACCENT_200 if card.get("limited", false) else BogeyTheme.OLIVE_200,
-			BogeyTheme.ACCENT_800 if card.get("limited", false) else BogeyTheme.OLIVE_800))
+			BogeyTheme.GOLD_200 if limited else BogeyTheme.OLIVE_200,
+			BogeyTheme.GOLD_800 if limited else BogeyTheme.OLIVE_800))
 
 		_stats = Label.new()
 		_stats.text = _compact_stats_text()
@@ -148,17 +155,19 @@ func _build() -> void:
 			_panel.gui_input.connect(_on_panel_input)
 		return
 
-	if card.get("limited", false):
+	_add_brand_badge(vbox)
+
+	if limited:
 		_ribbon = Label.new()
 		_ribbon.text = "LIMITED EDITION"
 		_ribbon.add_theme_font_size_override("font_size", 9)
-		_ribbon.add_theme_color_override("font_color", BogeyTheme.SAND_DEEP)
+		_ribbon.add_theme_color_override("font_color", BogeyTheme.GOLD_800)
 		vbox.add_child(_ribbon)
 
-	_icon = Control.new()
-	_icon.custom_minimum_size = Vector2(0, 46)
-	_icon.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_icon.draw.connect(_draw_icon.bind(_icon))
+	# Grows into whatever the stats leave free, so short cards get a bigger
+	# illustration instead of a blank foot.
+	_icon = _make_icon(46)
+	_icon.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(_icon)
 
 	var rule := ColorRect.new()
@@ -177,7 +186,7 @@ func _build() -> void:
 		_ability = Label.new()
 		_ability.text = card.ability
 		_ability.add_theme_font_size_override("font_size", 11)
-		_ability.add_theme_color_override("font_color", accent)
+		_ability.add_theme_color_override("font_color", BogeyTheme.GOLD_800 if limited else accent)
 		_ability.autowrap_mode = TextServer.AUTOWRAP_WORD
 		vbox.add_child(_ability)
 
@@ -208,8 +217,41 @@ func _compact_stats_text() -> String:
 	return "%d-%d yds" % [int(card.get("min_yard", 0)), int(card.get("max_yard", 0))]
 
 
-# Simple procedural silhouettes so each club type reads at a glance
-# without needing external art.
+# A pill in the club's brand livery, pinned to the top of the card. Brand
+# is the read the draft turns on (Section 3A), so it leads; brandless
+# standard clubs get nothing.
+func _add_brand_badge(vbox: VBoxContainer) -> void:
+	var brand_id: String = card.get("brand", "")
+	if brand_id == "":
+		return
+	var badge := BogeyUI.tag(Brands.display_name(brand_id), Brands.color(brand_id), BogeyTheme.CARD_BG)
+	vbox.add_child(badge)
+	vbox.move_child(badge, 0)
+
+
+# The club illustration for this card's type, tinted to its accent, or a
+# procedural silhouette for any type that has no art.
+func _make_icon(min_height: float) -> Control:
+	var ctype: String = card.get("type", "iron")
+	var icon: Control
+	if CLUB_ART.has(ctype):
+		var art := TextureRect.new()
+		art.texture = CLUB_ART[ctype]
+		art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		art.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		art.self_modulate = type_color(ctype)
+		icon = art
+	else:
+		icon = Control.new()
+		icon.draw.connect(_draw_icon.bind(icon))
+	icon.custom_minimum_size = Vector2(0, min_height)
+	icon.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return icon
+
+
+# Simple procedural silhouettes, the fallback for club types with no art.
 func _draw_icon(icon: Control) -> void:
 	var ctype: String = card.get("type", "iron")
 	var accent := type_color(ctype)
@@ -308,7 +350,7 @@ func _build_detail() -> void:
 		box.add_child(_detail_line(ability, 11, type_color(ctype)))
 
 	if card.get("limited", false):
-		box.add_child(_detail_line("LIMITED EDITION", 9, BogeyTheme.SAND_DEEP))
+		box.add_child(_detail_line("LIMITED EDITION", 9, BogeyTheme.GOLD_800))
 
 	# Parented to the viewport rather than to this card on purpose: the bag
 	# row sits inside a ScrollContainer, whose clip_contents would cut off
@@ -417,7 +459,7 @@ func _on_hover_end() -> void:
 # new ones, so nothing re-lays-out and the card cannot change size.
 func _set_hover_emphasis(on: bool) -> void:
 	if _panel_style:
-		var base_w: int = 2
+		var base_w: int = _base_border
 		var base_top: int = 6 if not compact else 4
 		_panel_style.set_border_width_all(3 if on else base_w)
 		_panel_style.border_width_top = (base_top + 2) if on else base_top

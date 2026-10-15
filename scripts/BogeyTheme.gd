@@ -59,6 +59,13 @@ const OLIVE_700 := Color(0.337, 0.388, 0.247)         # 56633F
 const OLIVE_800 := Color(0.239, 0.278, 0.169)         # 3D472B
 const OLIVE_900 := Color(0.153, 0.180, 0.106)         # 272E1B
 
+# Limited-edition gilt: the frame, face and tag of a Limited club. Gold is
+# reserved for these, so nothing else should borrow it.
+const GOLD := Color("B8902F")                          # frame
+const GOLD_100 := Color("FBF3DE")                      # warm card face
+const GOLD_200 := Color("F1DFA8")                      # tag fill
+const GOLD_800 := Color("5E4612")                      # tag ink
+
 # --- Elevation --------------------------------------------------------
 const SHADOW_SM := Color(0.180, 0.169, 0.145, 0.14)
 const SHADOW_MD := Color(0.180, 0.169, 0.145, 0.16)

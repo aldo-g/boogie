@@ -29,6 +29,16 @@ static func accent_color(card: FormCard) -> Color:
 	return BogeyTheme.FAIRWAY_DEEP if card.good else BogeyTheme.FLAG
 
 
+# Shot-shape icon for a card, from game-icons.net (see assets/art/CREDITS.md),
+# stored white so it takes the accent tint. Files are named after the card,
+# snake_cased: "Bump and Run" -> bump_and_run.svg. Null if there is none.
+static func icon_texture(card: FormCard) -> Texture2D:
+	var path := "res://assets/art/form/%s.svg" % card.name.to_lower().replace(" ", "_")
+	if ResourceLoader.exists(path):
+		return load(path)
+	return null
+
+
 func setup(p_card: FormCard, p_interactive: bool = true) -> void:
 	form_card = p_card
 	interactive = p_interactive
@@ -79,12 +89,31 @@ func _build() -> void:
 		BogeyTheme.OLIVE_200 if form_card.good else BogeyTheme.ACCENT_200,
 		BogeyTheme.OLIVE_800 if form_card.good else BogeyTheme.ACCENT_800))
 
+	# Name and shot-shape icon share a row, so the art costs no extra height.
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(name_row)
+
 	var name_label := Label.new()
 	name_label.text = form_card.name
 	name_label.add_theme_font_size_override("font_size", 18)
 	name_label.add_theme_color_override("font_color", BogeyTheme.INK)
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	vbox.add_child(name_label)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	name_row.add_child(name_label)
+
+	var art := icon_texture(form_card)
+	if art:
+		var icon := TextureRect.new()
+		icon.texture = art
+		icon.custom_minimum_size = Vector2(44, 44)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		icon.self_modulate = accent
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		name_row.add_child(icon)
 
 	vbox.add_child(BogeyUI.hairline(0.14))
 

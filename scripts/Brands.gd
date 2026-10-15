@@ -41,6 +41,21 @@ const DISPLAY := {
 	"bogeymart": "Bogey-Mart",
 }
 
+# Each brand's livery: the badge on its clubs and its chip in the brand
+# rack, so a half-built set reads at a glance across the Bag. Muted to sit
+# on parchment, and kept clear of the club-type colours (olive / slate /
+# rust / grey) and the Limited gold, which own the card frame. Bogey-Mart
+# gets a deliberately drab khaki.
+const COLOR := {
+	"titanist": Color("7A2E3A"),      # oxblood
+	"callowell": Color("2E6B66"),     # teal
+	"pingwell": Color("6A4C7A"),      # plum
+	"macgregorian": Color("2E4566"),  # navy
+	"slazinger": Color("B5574A"),     # terracotta
+	"nimbus": Color("4F87A3"),        # sky
+	"bogeymart": Color("776E5D"),     # khaki
+}
+
 # The axis each brand attacks. The per-run pool (Section 3B) uses these to
 # guarantee a run always offers at least two genuinely different
 # directions to build in, rather than four brands doing the same thing.
@@ -93,6 +108,10 @@ const BONUS_TEXT := {
 
 static func display_name(brand: String) -> String:
 	return DISPLAY.get(brand, "")
+
+
+static func color(brand: String) -> Color:
+	return COLOR.get(brand, BogeyTheme.NEUTRAL_600)
 
 
 # --- Counting -------------------------------------------------------
