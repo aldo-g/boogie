@@ -19,8 +19,12 @@ required but is given anyway.
 ## form — Form card shot icons
 From [game-icons.net](https://game-icons.net), licensed
 [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). **Attribution is
-required**: keep this table, and include it in the game's credits screen if
-one is added.
+required**: keep this table, and keep the authors on the in-game credits
+screen (Title screen -> Credits, built from `scripts/Credits.gd`).
+
+If you add an icon here by a new author, add them to `scripts/Credits.gd`
+too — `scripts/CreditsCheck.gd` fails if an author named in this file
+never reaches the screen.
 
 | File | Icon | Author |
 | --- | --- | --- |

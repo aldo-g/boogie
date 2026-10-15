@@ -72,6 +72,13 @@ func _initialize() -> void:
 
 	if e1 != OK or e2 != OK:
 		print("NETTEST: FAIL — could not open peers (server=%d client=%d)" % [e1, e2])
+		if e1 != OK:
+			# Overwhelmingly the cause: a previous run of this harness was
+			# killed and its process still holds the port. Say so, rather
+			# than letting it read as a code regression.
+			print("  Port %d is probably still held by an earlier run." % PORT)
+			print("  Check with:  lsof -nP -iUDP:%d" % PORT)
+			print("  Then kill that PID and try again.")
 		quit(1)
 		return
 

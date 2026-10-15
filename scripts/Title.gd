@@ -25,7 +25,7 @@ const MAX_PLAYERS := 4
 const COLOR_DARK_GREEN := Palette.FAIRWAY_DEEP
 const COLOR_FADED_WHITE := Palette.PARCHMENT
 
-enum Mode { MENU, HOSTING, JOINING }
+enum Mode { MENU, HOSTING, JOINING, CREDITS }
 
 var mode: int = Mode.MENU
 var panel: VBoxContainer          # the part that changes per mode
@@ -116,6 +116,8 @@ func _rebuild_panel() -> void:
 			_build_menu()
 		Mode.HOSTING, Mode.JOINING:
 			_build_lobby()
+		Mode.CREDITS:
+			_build_credits()
 
 
 func _build_menu() -> void:
@@ -165,6 +167,10 @@ func _build_menu() -> void:
 
 	panel.add_child(_outlined_label(
 		"Same network, or a direct IP. Up to 4 players.", 12))
+
+	var credits_btn := _button("Credits", 118)
+	credits_btn.pressed.connect(_on_credits_pressed)
+	panel.add_child(credits_btn)
 
 
 func _build_lobby() -> void:
@@ -218,6 +224,56 @@ func _build_lobby() -> void:
 				+ "Wi-Fi settings for it. Port %d." % Net.DEFAULT_PORT, 12))
 	else:
 		panel.add_child(_outlined_label("Waiting for the host to start…", 12))
+
+
+# The credits screen. This is a licence obligation rather than a nicety:
+# the Form card icons are CC BY 3.0, which requires the authors to be
+# credited where the work is used, so the names have to be reachable from
+# inside the game and not only from a file in the repo.
+#
+# Scrolls, because the list is longer than the panel on a small window and
+# a credit the player cannot scroll to is not a credit.
+func _build_credits() -> void:
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(620, 420)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(scroll)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 2)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(col)
+
+	for section in Credits.SECTIONS:
+		col.add_child(_outlined_label(str(section.heading), 16))
+		if str(section.note) != "":
+			col.add_child(_outlined_label("  " + str(section.note), 12))
+		for line in section.lines:
+			col.add_child(_outlined_label("  " + str(line), 13))
+		# Breathing room between sections.
+		var gap := Control.new()
+		gap.custom_minimum_size = Vector2(0, 8)
+		col.add_child(gap)
+
+	col.add_child(_outlined_label(Credits.LICENCE_NOTE, 11))
+
+	var back := _button("Back")
+	back.pressed.connect(_on_credits_back_pressed)
+	panel.add_child(back)
+
+
+func _on_credits_pressed() -> void:
+	Sound.play("ui_click")
+	mode = Mode.CREDITS
+	status.text = "Credits"
+	_rebuild_panel()
+
+
+func _on_credits_back_pressed() -> void:
+	Sound.play("ui_back")
+	mode = Mode.MENU
+	status.text = "Choose how you want to play"
+	_rebuild_panel()
 
 
 # --- Menu actions ------------------------------------------------------
@@ -323,9 +379,9 @@ func _on_round_starting(payload: Dictionary) -> void:
 	get_tree().change_scene_to_file(MAIN_SCENE)
 
 
-# Clicking the background still tees off solo, but ONLY from the menu —
-# in a lobby that shortcut would fire on every stray click and drop the
-# player into a solo round instead of the game they were waiting for.
+# Clicking the background still tees off solo, but ONLY from the menu — in
+# a lobby or the credits that shortcut would fire on every stray click and
+# drop the player into a solo round instead of the screen they opened.
 func _unhandled_input(event: InputEvent) -> void:
 	if mode != Mode.MENU:
 		return

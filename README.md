@@ -166,11 +166,13 @@ Bogey/
     ├── Main.gd            Game loop, state machine, UI construction
     ├── Player.gd          One player's state (bag, ball, score, Form deck)
     ├── Net.gd             The multiplayer connection (autoload)
+    ├── Credits.gd         Attributions shown on the credits screen
     ├── GameSetup.gd       Round setup carried between scenes
     ├── MPTest.gd          Headless flow harness (dev tool, see below)
     ├── DetTest.gd         Determinism harness (dev tool)
     ├── GuardTest.gd       Action-validation harness (dev tool)
     ├── NetTest.gd         Two-peer networked harness (dev tool)
+    ├── CreditsCheck.gd    Checks required attributions reach the screen
     ├── ShotResolver.gd    Shot math — distance, deviation, cup radius
     ├── FormCard.gd        A single Form card and its known effect
     ├── FormDeck.gd        The shared Form deck and per-tier draws
