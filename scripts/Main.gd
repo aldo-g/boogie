@@ -201,6 +201,9 @@ func is_multiplayer() -> bool:
 
 # --- Shared round state (not per player) --------------------------------
 var current_hole_index: int = 1
+# One per round; every hole's wind is derived from it (see Wind.gd). Sent
+# in the round payload so all machines play the same wind.
+var wind_seed: int = 0
 var _restart_armed: bool = false  # Restart pressed once mid-round, awaiting confirm
 
 var hole: HoleData
@@ -331,7 +334,7 @@ func build_ui() -> void:
 	title_col.custom_minimum_size = Vector2(190, 0)
 	header_row.add_child(title_col)
 	title_col.add_child(BogeyUI.heading("Bogey", 24))
-	title_col.add_child(BogeyUI.kicker("Bogey Links", BogeyTheme.ACCENT_700))
+	title_col.add_child(BogeyUI.kicker(Course.active_name, BogeyTheme.ACCENT_700))
 
 	var hole_col := VBoxContainer.new()
 	hole_col.add_theme_constant_override("separation", 2)
@@ -392,6 +395,17 @@ func build_ui() -> void:
 	restart_btn.pressed.connect(_on_header_restart_pressed)
 	header_row.add_child(restart_btn)
 
+	# The way out: back to the title, or to the editor when this round is a
+	# test of a course being built.
+	var menu_btn := Button.new()
+	menu_btn.text = "Editor" if GameSetup.return_to_editor else "Menu"
+	menu_btn.tooltip_text = "Leave this round"
+	menu_btn.custom_minimum_size = Vector2(72, 32)
+	menu_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	menu_btn.focus_mode = Control.FOCUS_NONE
+	menu_btn.pressed.connect(_on_header_menu_pressed)
+	header_row.add_child(menu_btn)
+
 	# --- Middle: scorecard | hole plate | shot panel ----------------------
 	var mid_row := HBoxContainer.new()
 	mid_row.add_theme_constant_override("separation", 0)
@@ -440,6 +454,14 @@ func build_ui() -> void:
 	hole_plate.custom_minimum_size = Vector2(360, 0)
 	hole_plate.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	plate_col.add_child(hole_plate)
+
+	# Side view of the same hole, matched to the plate's width.
+	var profile := ElevationProfileView.new()
+	profile.map = map_view
+	profile.custom_minimum_size = Vector2(360, 74)
+	profile.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	plate_col.add_child(profile)
+	hole_plate.resized.connect(func(): profile.custom_minimum_size.x = hole_plate.size.x)
 
 	# --- Shot panel: the numbers for the shot in front of you -------------
 	var shot_panel := BogeyUI.make_panel(BogeyUI.ruled_panel(true, false, false, false, 0))
@@ -762,6 +784,7 @@ func init_game() -> void:
 	for i in range(player_count):
 		players.append(make_player(default_player_name(i)))
 	active_index = 0
+	wind_seed = randi()
 
 
 # --- Online round setup ------------------------------------------------
@@ -769,9 +792,9 @@ func init_game() -> void:
 #
 # Only the deck-derived parts matter here: bags, draft pools, live brands
 # and Form decks are all shuffle results, so they cannot be re-rolled
-# locally and must be sent. The course is not sent at all — every peer
-# derives it from the hole number (HoleData.hole is a static table with
-# deterministic geometry).
+# locally and must be sent. The course travels as its definitions (see
+# Course.to_wire) — a custom course exists only on the host's machine —
+# and every peer then builds the identical geometry from them.
 #
 # Shapes are deliberately plain: club entries are already Dictionaries of
 # scalars, and a FormCard is reconstructible from its name alone, so the
@@ -788,12 +811,21 @@ func build_round_payload() -> Dictionary:
 			"form_deck": form_card_names(p.form_deck.deck),
 			"form_discard": form_card_names(p.form_deck.discard),
 		})
-	return {"players": out}
+	return {"players": out, "course": Course.to_wire(Course.active()), "wind_seed": wind_seed}
 
 
 # Rebuilds this machine's players from the host's payload, so every peer
 # begins the round holding identical decks in identical order.
 func apply_round_payload(payload: Dictionary) -> void:
+	# Sanitised on the way in: the host is trusted to run the round, but a
+	# course is data from another machine and the game must stay playable.
+	if not (online and Net.is_host()):
+		var course := Course.from_wire(payload.get("course", {}))
+		if course.is_empty():
+			Course.use_builtin()
+		else:
+			Course.use(course)
+	wind_seed = int(payload.get("wind_seed", 0))
 	var entries: Array = payload.get("players", [])
 	players = []
 	for e in entries:
@@ -850,8 +882,8 @@ func make_player(player_name: String) -> Player:
 	# 2-card Form draw far more often than a real club would. Escaping this
 	# set is the run's first goal.
 	p.hand = [
-		make_club("Bogey-Mart Driver", 190, 235, "wood", Brands.STARTER),
-		make_club("Bogey-Mart 7-Iron", 95, 140, "iron", Brands.STARTER),
+		make_club("Bogey-Mart Driver", 170, 210, "wood", Brands.STARTER),
+		make_club("Bogey-Mart 7-Iron", 90, 135, "iron", Brands.STARTER),
 		make_club("Bogey-Mart Putter", 0, 35, "putter", Brands.STARTER)
 	]
 
@@ -900,11 +932,11 @@ func build_club_pool(brands: Array) -> Array:
 
 	# --- Standards: brandless, always in the pool, 3 copies each ---
 	for i in range(3):
-		pool.append(make_club("Driver", 200, 260, "wood"))
-		pool.append(make_club("3-Wood", 180, 220, "wood"))
-		pool.append(make_club("5-Iron", 140, 180, "iron"))
-		pool.append(make_club("7-Iron", 100, 150, "iron"))
-		pool.append(make_club("9-Iron", 80, 110, "iron"))
+		pool.append(make_club("Driver", 180, 230, "wood"))
+		pool.append(make_club("3-Wood", 160, 195, "wood"))
+		pool.append(make_club("5-Iron", 135, 170, "iron"))
+		pool.append(make_club("7-Iron", 95, 145, "iron"))
+		pool.append(make_club("9-Iron", 75, 105, "iron"))
 		pool.append(make_club("Pitching Wedge", 50, 90, "wedge"))
 		pool.append(make_club("Sand Wedge", 20, 60, "wedge"))
 		pool.append(make_club("Putter", 0, 35, "putter"))
@@ -926,9 +958,9 @@ func build_club_pool(brands: Array) -> Array:
 # count. These are the draft's "I need one more thing" hooks.
 func limited_clubs() -> Array:
 	return [
-		make_club("Gold Cleek", 145, 185, "iron", "titanist", true,
+		make_club("Gold Cleek", 140, 175, "iron", "titanist", true,
 			"Once per hole, create a Pure Strike. With a Titanist Wood in bag: twice per hole"),
-		make_club("The Bulger", 210, 270, "wood", "slazinger", true,
+		make_club("The Bulger", 185, 240, "wood", "slazinger", true,
 			"Create a Big Strike from rough/bunker. With any Wedge in bag: no lie requirement"),
 		make_club("Old Tom's Niblick", 30, 70, "wedge", "macgregorian", true,
 			"Creates a Flop Shot on landing in a bunker. With a MacGregorian Wood: also Bump and Run on fairway"),
@@ -936,9 +968,9 @@ func limited_clubs() -> Array:
 			"Purges a bad Form card on each hazard. With a Callowell Iron in bag: purges two"),
 		make_club("Old Reliable Putter", 0, 35, "putter", "pingwell", true,
 			"Once per round, create Steady Hands. With another Ping-Well club: once every six holes"),
-		make_club("Persimmon Spoon", 175, 225, "wood", "macgregorian", true,
+		make_club("Persimmon Spoon", 155, 200, "wood", "macgregorian", true,
 			"Playable from rough with no penalty. With a 2nd MacGregorian: playable from any lie"),
-		make_club("The Equaliser", 120, 170, "iron", "nimbus", true,
+		make_club("The Equaliser", 115, 160, "iron", "nimbus", true,
 			"With 3+ distinct brands in your bag, counts as EVERY brand for set purposes"),
 	]
 
@@ -952,21 +984,21 @@ func branded_clubs(brand: String) -> Array:
 		"titanist":
 			# Tour precision: tight bands, strong buffering, unforgiving.
 			return [
-				make_club("Titanist Pro Driver", 205, 250, "wood", brand, false, "Buffers deviation 20% better; -30% distance from rough"),
-				make_club("Titanist 4-Iron", 155, 190, "iron", brand, false, "Buffers deviation 25% better"),
-				make_club("Titanist 6-Iron", 125, 160, "iron", brand, false, "Buffers deviation 25% better"),
-				make_club("Titanist 8-Iron", 90, 125, "iron", brand, false, "Buffers deviation 25% better"),
+				make_club("Titanist Pro Driver", 185, 225, "wood", brand, false, "Buffers deviation 20% better; -30% distance from rough"),
+				make_club("Titanist 4-Iron", 150, 180, "iron", brand, false, "Buffers deviation 25% better"),
+				make_club("Titanist 6-Iron", 120, 150, "iron", brand, false, "Buffers deviation 25% better"),
+				make_club("Titanist 8-Iron", 85, 120, "iron", brand, false, "Buffers deviation 25% better"),
 				make_club("Titanist Tour Wedge", 45, 85, "wedge", brand, false, "Buffers deviation 25% better"),
 				make_club("Titanist Blade Putter", 0, 35, "putter", brand, false, "Once per round, a second putt attempt"),
-				make_club("Titanist Fairway 5", 165, 205, "wood", brand, false, "Buffers deviation 20% better"),
+				make_club("Titanist Fairway 5", 145, 185, "wood", brand, false, "Buffers deviation 20% better"),
 			]
 		"callowell":
 			# Forgiveness: wide bands, blunts bad cards, low ceiling.
 			return [
-				make_club("Callowell Big Deal Driver", 195, 255, "wood", brand, false, "Chunk and Top hit at half severity"),
-				make_club("Callowell 6-Iron", 115, 175, "iron", brand, false, "The widest iron in the game"),
-				make_club("Callowell Rescue", 130, 185, "iron", brand, false, "Playable from rough with no distance penalty"),
-				make_club("Callowell 9-Iron", 75, 120, "iron", brand, false, "Wide band"),
+				make_club("Callowell Big Deal Driver", 175, 230, "wood", brand, false, "Chunk and Top hit at half severity"),
+				make_club("Callowell 6-Iron", 110, 165, "iron", brand, false, "The widest iron in the game"),
+				make_club("Callowell Rescue", 125, 175, "iron", brand, false, "Playable from rough with no distance penalty"),
+				make_club("Callowell 9-Iron", 70, 115, "iron", brand, false, "Wide band"),
 				make_club("Callowell Gap Wedge", 40, 85, "wedge", brand, false, "Shank cannot downgrade your lie"),
 				make_club("Callowell Sand Wedge", 20, 65, "wedge", brand, false, "Wide band"),
 				make_club("Callowell Mallet Putter", 0, 35, "putter", brand, false, "Forgiving on long putts"),
@@ -974,10 +1006,10 @@ func branded_clubs(brand: String) -> Array:
 		"pingwell":
 			# Fitted feel: rewards playing a club at its comfortable middle.
 			return [
-				make_club("Ping-Well i-Series 3", 165, 210, "iron", brand, false, "Widened Mid tier"),
-				make_club("Ping-Well i-Series 5", 135, 185, "iron", brand, false, "Widened Mid tier"),
-				make_club("Ping-Well i-Series 8", 85, 130, "iron", brand, false, "Widened Mid tier"),
-				make_club("Ping-Well Driver", 198, 248, "wood", brand, false, "Widened Mid tier"),
+				make_club("Ping-Well i-Series 3", 155, 200, "iron", brand, false, "Widened Mid tier"),
+				make_club("Ping-Well i-Series 5", 130, 175, "iron", brand, false, "Widened Mid tier"),
+				make_club("Ping-Well i-Series 8", 80, 125, "iron", brand, false, "Widened Mid tier"),
+				make_club("Ping-Well Driver", 175, 220, "wood", brand, false, "Widened Mid tier"),
 				make_club("Ping-Well Lob Wedge", 15, 55, "wedge", brand, false, "Creates Flop Shot on any hazard lie"),
 				make_club("Ping-Well Gap Wedge", 45, 90, "wedge", brand, false, "Widened Mid tier"),
 				make_club("Ping-Well Mallet Putter", 0, 35, "putter", brand, false, "Steady Hands widens the sunk band twice as much"),
@@ -985,33 +1017,33 @@ func branded_clubs(brand: String) -> Array:
 		"macgregorian":
 			# Heritage: low running ball, built for scrappy lies.
 			return [
-				make_club("MacGregorian Persimmon Driver", 185, 245, "wood", brand, false, "The only Wood playable from a bunker"),
-				make_club("MacGregorian Brassie", 170, 215, "wood", brand, false, "Bump and Run gains +20 yds roll"),
-				make_club("MacGregorian Spoon", 150, 195, "wood", brand, false, "Ignores the rough's distance penalty"),
-				make_club("MacGregorian Mashie", 120, 165, "iron", brand, false, "Ignores the rough's distance penalty"),
-				make_club("MacGregorian Mid-Mashie", 140, 185, "iron", brand, false, "Ignores the rough's distance penalty"),
+				make_club("MacGregorian Persimmon Driver", 165, 220, "wood", brand, false, "The only Wood playable from a bunker"),
+				make_club("MacGregorian Brassie", 150, 190, "wood", brand, false, "Bump and Run gains +20 yds roll"),
+				make_club("MacGregorian Spoon", 135, 175, "wood", brand, false, "Ignores the rough's distance penalty"),
+				make_club("MacGregorian Mashie", 115, 155, "iron", brand, false, "Ignores the rough's distance penalty"),
+				make_club("MacGregorian Mid-Mashie", 135, 175, "iron", brand, false, "Ignores the rough's distance penalty"),
 				make_club("MacGregorian Niblick", 45, 95, "wedge", brand, false, "Landing in a hazard adds no bad card to the Form deck"),
 				make_club("MacGregorian Jigger", 0, 35, "putter", brand, false, "Putts from the fringe as though on the green"),
 			]
 		"slazinger":
 			# Distance at a price: long, and worse at buffering.
 			return [
-				make_club("Slazinger Cannon Driver", 215, 285, "wood", brand, false, "Longest in the game; buffers deviation 30% worse"),
-				make_club("Slazinger Launch Wood", 190, 240, "wood", brand, false, "Big Strike grants max band +10"),
-				make_club("Slazinger Power Iron", 150, 200, "iron", brand, false, "Long for an iron; buffers 20% worse"),
-				make_club("Slazinger Deep Iron", 125, 175, "iron", brand, false, "Buffers 20% worse"),
+				make_club("Slazinger Cannon Driver", 190, 255, "wood", brand, false, "Longest in the game; buffers deviation 30% worse"),
+				make_club("Slazinger Launch Wood", 170, 215, "wood", brand, false, "Big Strike grants max band +10"),
+				make_club("Slazinger Power Iron", 145, 190, "iron", brand, false, "Long for an iron; buffers 20% worse"),
+				make_club("Slazinger Deep Iron", 120, 165, "iron", brand, false, "Buffers 20% worse"),
 				make_club("Slazinger Blast Wedge", 35, 90, "wedge", brand, false, "Extra distance out of bunkers"),
-				make_club("Slazinger Long Iron", 175, 225, "iron", brand, false, "Buffers 20% worse"),
+				make_club("Slazinger Long Iron", 165, 215, "iron", brand, false, "Buffers 20% worse"),
 				make_club("Slazinger Heavy Putter", 0, 35, "putter", brand, false, "Strong on long putts, wild on short ones"),
 			]
 		"nimbus":
 			# Hybrid tech: covers gaps, no strong opinion.
 			return [
-				make_club("Nimbus Hybrid 3", 160, 215, "iron", brand, false, "Counts as both Wood and Iron"),
-				make_club("Nimbus Hybrid 5", 130, 180, "iron", brand, false, "Counts as both Wood and Iron"),
-				make_club("Nimbus Hybrid 7", 105, 155, "iron", brand, false, "Counts as both Wood and Iron"),
-				make_club("Nimbus All-Rounder", 105, 165, "iron", brand, false, "Wide band, no rider"),
-				make_club("Nimbus Driver", 195, 250, "wood", brand, false, "Counts as both Wood and Iron"),
+				make_club("Nimbus Hybrid 3", 150, 205, "iron", brand, false, "Counts as both Wood and Iron"),
+				make_club("Nimbus Hybrid 5", 125, 170, "iron", brand, false, "Counts as both Wood and Iron"),
+				make_club("Nimbus Hybrid 7", 100, 150, "iron", brand, false, "Counts as both Wood and Iron"),
+				make_club("Nimbus All-Rounder", 100, 155, "iron", brand, false, "Wide band, no rider"),
+				make_club("Nimbus Driver", 175, 225, "wood", brand, false, "Counts as both Wood and Iron"),
 				make_club("Nimbus Utility Wedge", 30, 80, "wedge", brand, false, "Once per hole, playable from any lie with no penalty"),
 				make_club("Nimbus Putter", 0, 35, "putter", brand, false, "No rider — pure flexible filler"),
 			]
@@ -1039,6 +1071,7 @@ func draw_from_deck(deck: Array, discard: Array) -> Dictionary:
 func start_hole() -> void:
 	Sound.play("card_shuffle", 0.0, -6.0)
 	hole = HoleData.hole(current_hole_index)
+	hole.wind = Wind.for_hole(wind_seed, current_hole_index)
 	hole_yardage = hole.yardage
 	hole_par = hole.par
 
@@ -1052,6 +1085,8 @@ func start_hole() -> void:
 	log_entries.clear()
 	rebuild_log()
 	log_msg("[b]Hole %d — Par %d — %d yards[/b]" % [current_hole_index, hole_par, int(hole_yardage)])
+	log_msg("Wind: %s (%s off the tee)." % [Wind.strength_word(hole.wind).to_lower(),
+		Wind.describe(hole.wind, hole.pin_pos - hole.tee_pos)])
 	if is_multiplayer():
 		log_msg("[i]%s to play.[/i]" % me.name)
 	sync_map_to_active()
@@ -1138,6 +1173,7 @@ func begin_aim_for_shot() -> void:
 		float(pending_club.max_yard), hole.bounds)
 	map_view.set_aim_can_hole_out(aim_line_can_hole_out())
 	state = State.AIM
+	refresh_aim_ghost()
 	refresh_ui()
 
 
@@ -1153,6 +1189,7 @@ func _on_aim_changed(target: Vector2) -> void:
 		return
 	aim_target = target
 	map_view.set_aim_can_hole_out(aim_line_can_hole_out())
+	refresh_aim_ghost()
 	rebuild_shot_outlook()
 
 
@@ -1180,8 +1217,38 @@ func aim_line_can_hole_out() -> bool:
 	var aim_dir: Vector2 = (aim_target - ball_pos).normalized()
 	if aim_dir.length_squared() < 0.0001:
 		return false
-	var clean_landing: Vector2 = ball_pos + aim_dir * (aimed_distance * cap)
-	return ShotResolver.earns_hole_out_roll(clean_landing, hole.pin_pos, aimed_distance * cap)
+	var clean := clean_strike_outcome(aimed_distance * cap, aim_dir)
+	return clean.cup
+
+
+# The aim, struck cleanly in still air: straight, the distance aimed for
+# after the lie's cut. Elevation moves the landing off the crosshair and
+# the ghost shows it; the wind is deliberately left out — it's shown, and
+# allowing for it is the player's read. The yellow hole-out line uses this
+# too, so it can't give the wind away by lighting only on a compensated aim.
+func clean_strike_outcome(distance: float, aim_dir: Vector2) -> Dictionary:
+	var result := {"distance": distance, "degree": 0, "side": ShotResolver.Side.STRAIGHT,
+		"roll_mult": 1.0, "extra_roll": 0.0}
+	return ShotResolver.shot_outcome(hole, ball_pos, aim_dir, result, pending_club, false)
+
+
+func refresh_aim_ghost() -> void:
+	if map_view == null:
+		return
+	if state != State.AIM or hole == null or pending_club.is_empty():
+		map_view.set_aim_ghost(false)
+		return
+	var aim_dir: Vector2 = (aim_target - ball_pos).normalized()
+	if aim_dir.length_squared() < 0.0001:
+		map_view.set_aim_ghost(false)
+		return
+	var cap: float = 1.0
+	if not (Brands.ignores_terrain_penalty(hand) or Brands.plays_as_fairway(hand)):
+		cap = ShotResolver.TERRAIN_DISTANCE_CAP.get(current_lie, 1.0)
+	var clean := clean_strike_outcome(ball_pos.distance_to(aim_target) * cap, aim_dir)
+	# Carry only: where a clean strike comes down. The run-out is left to
+	# the Form-card preview, once there's a real card to read.
+	map_view.set_aim_ghost(true, clean.carry_pos, [clean.carry_pos])
 
 
 # The player clicked to commit their aim — now draw the 3 Form cards for
@@ -1203,6 +1270,7 @@ func _on_aim_picked(target: Vector2) -> void:
 	# The live-aim yellow has done its job; from here the per-card landing
 	# preview is the authority on whether a given card drops.
 	map_view.set_aim_can_hole_out(false)
+	map_view.set_aim_ghost(false)
 	begin_form_draw()
 
 
@@ -1602,12 +1670,16 @@ func play_shot(club: Dictionary, card: FormCard) -> void:
 	if aim_dir.length_squared() < 0.0001:
 		aim_dir = Vector2.UP
 
-	map_view.play_aim_animation(aim_dir, result.distance, float(result.degree), result.side, club.max_yard, func():
-		_resolve_shot_landing(before_pos, aim_dir, result)
-	)
+	# Carry and run-out, decided now from the ground — the animation plays
+	# out exactly this, and the landing below acts on exactly this.
+	var outcome := ShotResolver.shot_outcome(hole, before_pos, aim_dir, result, club)
+
+	map_view.play_aim_animation(aim_dir, outcome.carry, float(result.degree), result.side, club.max_yard, func():
+		_resolve_shot_landing(before_pos, aim_dir, result, outcome)
+	, outcome.roll_path)
 
 
-func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictionary) -> void:
+func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictionary, outcome: Dictionary) -> void:
 	_animating = false
 	# A peer may have dropped mid-flight; it is safe to act on that now
 	# that this closure has finished writing through `me`.
@@ -1615,12 +1687,19 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 		call_deferred("_drain_pending_drops")
 
 	# Shared with the Form-card landing preview — see
-	# ShotResolver.landing_position().
-	var landing_pos: Vector2 = ShotResolver.landing_position(before_pos, aim_dir, result)
+	# ShotResolver.shot_outcome(). From here on "landing" means where the
+	# ball comes to rest, roll included.
+	var landing_pos: Vector2 = outcome.rest
+	var rolled: float = outcome.carry_pos.distance_to(landing_pos)
 
 	var lie_result := hole.terrain_at(landing_pos)
-	log_msg("Distance: %d yards -> landed in %s, %d yards from the pin." % [
-		int(result.distance), lie_result, int(landing_pos.distance_to(hole.pin_pos))])
+	if rolled >= 1.0:
+		log_msg("Carried %d yards, rolled %d -> finished in %s, %d yards from the pin." % [
+			int(round(outcome.carry)), int(round(rolled)), lie_result,
+			int(landing_pos.distance_to(hole.pin_pos))])
+	else:
+		log_msg("Carried %d yards -> landed in %s, %d yards from the pin." % [
+			int(round(outcome.carry)), lie_result, int(landing_pos.distance_to(hole.pin_pos))])
 
 	# A shot that finishes on the cup earns a d20, and only a natural 20
 	# actually drops (see ShotResolver — the aim and the card are fully
@@ -1630,7 +1709,7 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 	#
 	# Anything short of 20 still rattles the hole and finishes stone dead —
 	# you keep the reward for a perfect shot, you just have to tap it in.
-	if ShotResolver.earns_hole_out_roll(landing_pos, hole.pin_pos, result.distance):
+	if outcome.cup:
 		var roll: int = _roll("d20", func(): return ShotResolver.roll_for_hole_out())
 		if roll >= ShotResolver.HOLE_OUT_TARGET:
 			ball_pos = hole.pin_pos
@@ -1639,7 +1718,7 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 			map_view.set_ball(ball_pos, shot_path)
 			map_view.set_aim_target(ball_pos)
 			log_msg("[color=#%s][b]d20: %d — IN THE HOLE, from %d yards![/b][/color]" % [
-				COLOR_ACCENT.to_html(false), roll, int(result.distance)])
+				COLOR_ACCENT.to_html(false), roll, int(before_pos.distance_to(hole.pin_pos))])
 			Sound.play("cup")
 			finish_hole()
 			return
@@ -1896,6 +1975,11 @@ func continue_after_putt() -> void:
 # leaves it a little offline rather than perfectly pin-high, so the trail
 # reads like a real putt that slid past instead of a number shrinking.
 func sync_ball_to_putt(offline: float = 0.0) -> void:
+	# A missed putt finishes on the green's low side. The size of the miss
+	# is still the rolled amount; only its side comes from the slope.
+	var fall: float = ShotResolver.putt_read(hole, ball_pos).fall
+	if absf(fall) >= ShotResolver.PUTT_FLAT:
+		offline = absf(offline) * signf(fall)
 	var dir := _putt_dir.rotated(offline)
 	ball_pos = hole.pin_pos + dir * putt_dist
 	shot_path.append(ball_pos)
@@ -1927,8 +2011,15 @@ func build_putt_controls() -> void:
 	strike_btn.pressed.connect(_on_strike_pressed)
 	col.add_child(strike_btn)
 
+	# The read: which way it breaks and how quick it is, in words, above
+	# the meter that shows it in numbers.
+	var read := ShotResolver.putt_read(hole, ball_pos)
+	var read_label := BogeyUI.body(ShotResolver.putt_read_text(read), 13, BogeyTheme.NEUTRAL_700)
+	col.add_child(read_label)
+	col.move_child(read_label, 0)
+
 	options_container.add_child(col)
-	putt_meter.begin(putt_dist)
+	putt_meter.begin(putt_dist, read.shift, read.band_mult)
 
 
 func _on_strike_pressed() -> void:
@@ -2071,7 +2162,7 @@ func begin_next_draft() -> void:
 # a forced discard) — the hole is now fully over. Either advances to the
 # next hole, or — after hole 18 — ends the round and shows the scorecard.
 func finish_hole_done() -> void:
-	if current_hole_index >= HoleData.HOLE_COUNT:
+	if current_hole_index >= Course.hole_count():
 		finish_round()
 	else:
 		current_hole_index += 1
@@ -2083,7 +2174,7 @@ func finish_round() -> void:
 	Sound.play("jingle_round", 0.0)
 	log_entries.clear()
 	rebuild_log()
-	log_msg("[b]Round Complete — Bogey Links[/b]\n")
+	log_msg("[b]Round Complete — %s[/b]\n" % Course.active_name)
 
 	if is_multiplayer():
 		# Leaderboard first — in a group round the result is the comparison,
@@ -2133,6 +2224,13 @@ func finish_round() -> void:
 # The actual reset, shared by the header button and the end-of-round
 # "Restart Round" button. init_game() rebuilds the bag, brands, Form deck
 # and draft pools, so a new run inherits nothing from the last one.
+func _on_header_menu_pressed() -> void:
+	Sound.play("ui_back")
+	var target := "res://scenes/CourseEditor.tscn" if GameSetup.return_to_editor else "res://scenes/Title.tscn"
+	GameSetup.return_to_editor = false
+	get_tree().change_scene_to_file(target)
+
+
 func restart_round() -> void:
 	current_hole_index = 1
 	_restart_armed = false
@@ -2533,6 +2631,10 @@ func rebuild_shot_outlook() -> void:
 	stats.add_child(BogeyUI.stat_block("Lie", current_lie.capitalize()))
 	stats.add_child(BogeyUI.stat_block("Strokes", str(strokes)))
 	stats.add_child(BogeyUI.stat_block("Par", str(hole_par) if hole else "—"))
+	if hole:
+		var calm := Wind.mph(hole.wind) < Wind.CALM_MPH
+		stats.add_child(BogeyUI.stat_block("Wind", "Calm" if calm else "%d mph" % Wind.mph(hole.wind),
+			BogeyTheme.NEUTRAL_200 if Wind.mph(hole.wind) < 18 else BogeyTheme.ACCENT_200))
 
 	# What this lie costs you — Section 5's terrain modifiers, said plainly
 	# rather than left for the player to remember.
@@ -2555,6 +2657,14 @@ func rebuild_shot_outlook() -> void:
 			BogeyTheme.ACCENT_100 if risky else BogeyTheme.OLIVE_100,
 			BogeyTheme.ACCENT_300 if risky else BogeyTheme.OLIVE_300,
 			BogeyTheme.ACCENT_900 if risky else BogeyTheme.OLIVE_900))
+
+	# The wind, read against the line you're playing: toward the aim once
+	# there is one, otherwise toward the pin. Putts don't feel it.
+	if hole and not on_green and Wind.mph(hole.wind) >= Wind.CALM_MPH:
+		var line: Vector2 = (aim_target - ball_pos) if (state == State.AIM or state == State.FORM_DRAW) \
+			and aim_target.distance_to(ball_pos) > 1.0 else (hole.pin_pos - ball_pos)
+		shot_outlook.add_child(BogeyUI.body("Wind %s — high shots ride it, low ones punch under." % \
+			Wind.describe(hole.wind, line), 13, BogeyTheme.NEUTRAL_700))
 
 	# Club-specific read, only once a club is actually in hand.
 	if (state == State.AIM or state == State.FORM_DRAW) and not pending_club.is_empty():
@@ -2695,9 +2805,9 @@ func _on_form_hover_start(fv: FormCardView) -> void:
 	if aim_dir.length_squared() < 0.0001:
 		aim_dir = Vector2.UP
 
-	var landing: Vector2 = ShotResolver.landing_position(ball_pos, aim_dir, result)
-	map_view.set_preview_landing(true, ball_pos, landing, card.good,
-		ShotResolver.earns_hole_out_roll(landing, hole.pin_pos, result.distance))
+	var outcome := ShotResolver.shot_outcome(hole, ball_pos, aim_dir, result, pending_club)
+	map_view.set_preview_landing(true, ball_pos, outcome.rest, card.good,
+		outcome.cup, outcome.carry_pos, outcome.roll_path)
 
 
 func _on_form_hover_end(_fv: FormCardView) -> void:

@@ -159,6 +159,7 @@ Bogey/
 │   └── maps/              Reference course layout (18 holes)
 ├── scenes/
 │   ├── Title.tscn         Title screen + player-count picker (entry point)
+│   ├── CourseEditor.tscn  The course editor
 │   └── Main.tscn          The game
 ├── tools/
 │   └── Capture.tscn       Screenshot capture helper
@@ -173,13 +174,19 @@ Bogey/
     ├── GuardTest.gd       Action-validation harness (dev tool)
     ├── NetTest.gd         Two-peer networked harness (dev tool)
     ├── CreditsCheck.gd    Checks required attributions reach the screen
+    ├── CourseTest.gd      Custom-course harness (dev tool)
     ├── ShotResolver.gd    Shot math — distance, deviation, cup radius
     ├── FormCard.gd        A single Form card and its known effect
     ├── FormDeck.gd        The shared Form deck and per-tier draws
     ├── Brands.gd          Brand sets and their rules bonuses
-    ├── HoleData.gd        18 holes as centrelines; terrain and bounds
+    ├── HoleData.gd        The built-in 18 as centrelines; terrain, bounds, elevation
+    ├── Course.gd          The active course; custom courses, save/load, sanitising
+    ├── CourseEditor.gd    The course editor screen
+    ├── CourseEditOverlay.gd  Drag handles over the hole map in the editor
     ├── CourseShape.gd     Turns centrelines into curved polygons
     ├── CourseMapView.gd   The hole map: terrain, aiming, ball flight
+    ├── ElevationProfileView.gd  Side-view elevation strip under the hole map
+    ├── Wind.gd            Per-hole wind from the round's seed, and how to describe it
     ├── PuttMeter.gd       The putting timing meter
     ├── CardView.gd        Club card rendering and hover detail
     ├── FormCardView.gd    Form card rendering
@@ -211,7 +218,7 @@ because neither is registered when one script is checked in isolation.
 Import the project once (`godot --headless --editor --quit`) and those
 resolve.
 
-Four headless harnesses, all dev tools:
+Headless harnesses, all dev tools:
 
 ```sh
 # Full 18-hole rounds for 1-4 players: turn order, hole flow, bag caps
@@ -230,7 +237,24 @@ godot --headless --script res://scripts/NetTest.gd
 
 # ...and the same, but the client disconnects partway through
 NETTEST_DROP_AT=120 godot --headless --script res://scripts/NetTest.gd
+
+# Custom courses: wire round-trip, sanitising, save/load, editor edits,
+# a 3-hole round, and the course travelling in the online payload
+godot --headless --script res://scripts/CourseTest.gd
 ```
+
+## Custom courses
+
+**Course editor** on the title screen builds courses of 1-18 holes. Drag
+the fairway points, width tabs, green, bunkers and water corners on the
+hole map; set par, green size and tilt, and elevation in the side panel.
+**Test play** runs a solo round on the course in progress and its
+**Editor** button brings you back. Saved courses are JSON in
+`user://courses/` (on macOS,
+`~/Library/Application Support/Godot/app_userdata/Bogey Prototype/courses/`)
+and appear in the title screen's course picker. A hosted online round
+sends its course to everyone who joins, so other players don't need the
+file.
 
 `NetTest` shares a process, so it covers the protocol and the mirroring
 but cannot catch genuine socket problems (real latency, packet loss, MTU).

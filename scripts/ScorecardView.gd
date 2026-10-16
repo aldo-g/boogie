@@ -6,8 +6,8 @@ extends VBoxContainer
 # and your score. The hole you're playing is tinted; flights are parted by
 # hairlines after 6 and 12; the running total sits at the foot.
 #
-# Reads par/yardage straight from HoleData.HOLES so it can never drift
-# from the course the game actually plays.
+# Reads par/yardage straight from the active Course so it can never drift
+# from the course the game actually plays — custom courses may run 1-18.
 #   scorecard.set_round(round_scores, current_hole_index, strokes)
 # ---------------------------------------------------------
 
@@ -31,14 +31,15 @@ func _build() -> void:
 	add_child(head)
 	add_child(BogeyUI.hairline(0.4))
 
-	for n in range(1, HoleData.HOLE_COUNT + 1):
-		var d: Dictionary = HoleData.HOLES[n]
+	var count := Course.hole_count()
+	for n in range(1, count + 1):
+		var d: Dictionary = Course.hole_def(n)
 		var row := _make_row(str(n), str(d.par), str(int(d.yardage)), "—", false)
 		add_child(row)
 		_rows.append(row.get_meta("cells"))
 		if n == 6 or n == 12:
 			add_child(BogeyUI.hairline(0.3))
-		elif n < HoleData.HOLE_COUNT:
+		elif n < count:
 			add_child(BogeyUI.hairline(0.08))
 
 	add_child(BogeyUI.hairline(0.4))

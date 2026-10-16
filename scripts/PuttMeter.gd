@@ -52,6 +52,7 @@ var _sunk_half: float = 0.1
 var _close_half: float = 0.25
 var _result: String = ""     # last result, kept so the bar can show where it landed
 var _flash: float = 0.0      # post-stop highlight, fades out
+var _center: float = 0.5     # the sweet spot, shifted off-centre by the green's break
 
 
 func _ready() -> void:
@@ -60,7 +61,10 @@ func _ready() -> void:
 
 
 # Configure for a putt of the given length and start the marker sweeping.
-func begin(dist_yards: float) -> void:
+# `shift` moves the sweet spot off centre (the read of the break, as a
+# fraction of the bar); `band_mult` scales the bands for pace — both from
+# ShotResolver.putt_read(), so the meter shows the green, not hides it.
+func begin(dist_yards: float, shift: float = 0.0, band_mult: float = 1.0) -> void:
 	distance_yards = dist_yards
 	var t: float = clampf(
 		(dist_yards - NEAR_YARDS) / (FAR_YARDS - NEAR_YARDS), 0.0, 1.0)
@@ -71,6 +75,9 @@ func begin(dist_yards: float) -> void:
 	_sunk_half = lerpf(SUNK_HALF_NEAR, SUNK_HALF_FAR, eased)
 	_close_half = lerpf(CLOSE_HALF_NEAR, CLOSE_HALF_FAR, eased)
 	_speed = lerpf(SPEED_NEAR, SPEED_FAR, eased)
+	_sunk_half *= band_mult
+	_close_half *= band_mult
+	_center = 0.5 + shift
 
 	_pos = randf() * 0.35          # vary the start so it can't be muscle-memoried
 	_dir = 1.0 if randf() < 0.5 else -1.0
@@ -87,7 +94,7 @@ func stop_putt() -> void:
 	active = false
 	set_process(false)
 
-	var offset: float = absf(_pos - 0.5)
+	var offset: float = absf(_pos - _center)
 	if offset <= _sunk_half:
 		_result = "sunk"
 	elif offset <= _close_half:
@@ -124,12 +131,13 @@ func _draw() -> void:
 	# Miss ground — the whole bar, then the friendlier bands painted over it.
 	draw_rect(bar, Color(BogeyTheme.INK, 0.10))
 
+	var cx: float = _center * w
 	var close_w: float = _close_half * 2.0 * w
-	draw_rect(Rect2(w * 0.5 - close_w * 0.5, top, close_w, BAR_HEIGHT),
+	draw_rect(Rect2(cx - close_w * 0.5, top, close_w, BAR_HEIGHT).intersection(bar),
 		Color(BogeyTheme.SAND, 0.55))
 
 	var sunk_w: float = maxf(_sunk_half * 2.0 * w, 2.0)
-	draw_rect(Rect2(w * 0.5 - sunk_w * 0.5, top, sunk_w, BAR_HEIGHT),
+	draw_rect(Rect2(cx - sunk_w * 0.5, top, sunk_w, BAR_HEIGHT).intersection(bar),
 		Color(BogeyTheme.FAIRWAY, 0.95))
 
 	# Hairline frame, matching the sheet's ruled panels.
@@ -137,8 +145,13 @@ func _draw() -> void:
 
 	# Centre tick above the bar, so the target reads even when the sunk
 	# band is only a couple of pixels wide on a long putt.
-	draw_line(Vector2(w * 0.5, top - 6), Vector2(w * 0.5, top - 1),
+	draw_line(Vector2(cx, top - 6), Vector2(cx, top - 1),
 		Color(BogeyTheme.INK, 0.5), 1.0)
+	# On a breaking putt, a faint tick where "straight at it" would be,
+	# so the size of the read is visible.
+	if absf(_center - 0.5) > 0.01:
+		draw_line(Vector2(w * 0.5, top - 6), Vector2(w * 0.5, top - 1),
+			Color(BogeyTheme.INK, 0.2), 1.0)
 
 	# The marker.
 	var mx: float = _pos * w

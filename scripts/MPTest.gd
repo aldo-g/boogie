@@ -83,8 +83,8 @@ func _run_round(count: int) -> bool:
 
 	if ok:
 		for p in main.players:
-			if p.round_scores.size() != 18:
-				print("  !! %s scored %d holes, expected 18" % [p.name, p.round_scores.size()])
+			if p.round_scores.size() != Course.hole_count():
+				print("  !! %s scored %d holes, expected %d" % [p.name, p.round_scores.size(), Course.hole_count()])
 				ok = false
 			if p.hand.size() < 3 or p.hand.size() > main.HAND_CAP:
 				print("  !! %s bag is %d clubs (cap %d)" % [p.name, p.hand.size(), main.HAND_CAP])

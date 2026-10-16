@@ -2,8 +2,8 @@ extends Control
 
 # ---------------------------------------------------------
 # BOGEY TITLE SCREEN + LOBBY
-# Course map fills the entire background. Title wordmark sits on
-# top of it in the open space.
+# Course map fills the entire background, washed to parchment on the
+# left where the menu card sits.
 #
 # Three modes in one screen rather than separate scenes, since the whole
 # UI is built in code and swapping a panel is cheaper than a scene change:
@@ -19,8 +19,10 @@ const COURSE_MAP := preload("res://assets/maps/llanfair-course.jpeg")
 const TITLE_FONT := preload("res://assets/fonts/AlexBrush-Regular.ttf")
 const Palette := preload("res://scripts/BogeyTheme.gd")
 const MAIN_SCENE := "res://scenes/Main.tscn"
+const EDITOR_SCENE := "res://scenes/CourseEditor.tscn"
 
 const MAX_PLAYERS := 4
+const CARD_WIDTH := 560
 
 const COLOR_DARK_GREEN := Palette.FAIRWAY_DEEP
 const COLOR_FADED_WHITE := Palette.PARCHMENT
@@ -33,6 +35,7 @@ var status: Label
 var address_field: LineEdit
 var name_field: LineEdit
 var start_button: Button
+var card: PanelContainer
 
 
 func _ready() -> void:
@@ -52,51 +55,117 @@ func build_ui() -> void:
 	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
+	# A parchment wash fading in from the left, so the menu sits on calm
+	# paper and the course stays the hero on the right.
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.3, 0.62])
+	grad.colors = PackedColorArray([
+		Color(COLOR_FADED_WHITE, 0.9), Color(COLOR_FADED_WHITE, 0.7), Color(COLOR_FADED_WHITE, 0.0)])
+	var grad_tex := GradientTexture2D.new()
+	grad_tex.gradient = grad
+	grad_tex.fill_from = Vector2(0, 0)
+	grad_tex.fill_to = Vector2(1, 0)
+	var wash := TextureRect.new()
+	wash.texture = grad_tex
+	wash.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	wash.stretch_mode = TextureRect.STRETCH_SCALE
+	wash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	wash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(wash)
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 88)
+	margin.add_theme_constant_override("margin_top", 40)
+	margin.add_theme_constant_override("margin_bottom", 40)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(margin)
+
+	# The menu card. It stops mouse input, so only clicks on the open
+	# course fall through to the tee-off-solo shortcut.
+	var card_style := BogeyUI.panel(BogeyTheme.CARD_BG, 40, 18)
+	card_style.content_margin_top = 28
+	card_style.content_margin_bottom = 28
+	card_style.border_color = BogeyTheme.RULE
+	card_style.set_border_width_all(1)
+	card_style.shadow_color = BogeyTheme.SHADOW_LG
+	card_style.shadow_size = 28
+	card_style.shadow_offset = Vector2(0, 10)
+	card = BogeyUI.make_panel(card_style)
+	card.custom_minimum_size = Vector2(CARD_WIDTH, 0)
+	card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	card.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	margin.add_child(card)
+
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 4)
-	vbox.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	vbox.offset_left = 40
-	vbox.offset_top = 24
-	add_child(vbox)
+	vbox.add_theme_constant_override("separation", 0)
+	card.add_child(vbox)
 
 	var title := Label.new()
 	title.text = "Bogey!"
 	title.add_theme_font_override("font", TITLE_FONT)
-	title.add_theme_font_size_override("font_size", 72)
+	title.add_theme_font_size_override("font_size", 104)
 	title.add_theme_color_override("font_color", COLOR_DARK_GREEN)
-	title.add_theme_color_override("font_outline_color", COLOR_FADED_WHITE)
-	title.add_theme_constant_override("outline_size", 6)
 	vbox.add_child(title)
 
-	status = _outlined_label("Choose how you want to play", 16)
+	vbox.add_child(_kicker("A golf card game"))
+	vbox.add_child(_gap(14))
+
+	status = BogeyUI.body("Choose how you want to play", 16, BogeyTheme.INK_SOFT)
 	vbox.add_child(status)
+	vbox.add_child(_gap(20))
 
 	panel = VBoxContainer.new()
-	panel.add_theme_constant_override("separation", 8)
+	panel.add_theme_constant_override("separation", 10)
 	vbox.add_child(panel)
 
 	_rebuild_panel()
 
+	# Ease the card in rather than popping it on.
+	card.modulate.a = 0.0
+	var tw := create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(card, "modulate:a", 1.0, 0.45)
 
-func _outlined_label(text: String, size: int) -> Label:
-	# The map behind is busy, so every label needs an outline to stay legible.
-	var l := Label.new()
-	l.text = text
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", COLOR_DARK_GREEN)
-	l.add_theme_color_override("font_outline_color", COLOR_FADED_WHITE)
-	l.add_theme_constant_override("outline_size", 4)
+
+func _kicker(text: String) -> Label:
+	var l := BogeyUI.kicker(text)
+	l.add_theme_font_size_override("font_size", 12)
 	return l
 
 
-func _button(text: String, width: int = 150) -> Button:
+func _gap(h: int) -> Control:
+	var c := Control.new()
+	c.custom_minimum_size = Vector2(0, h)
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return c
+
+
+func _caption(text: String) -> Label:
+	var l := Label.new()
+	l.text = text.to_upper()
+	l.add_theme_font_size_override("font_size", 11)
+	l.add_theme_color_override("font_color", BogeyTheme.NEUTRAL_600)
+	return l
+
+
+func _button(text: String, primary: bool = false) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(width, 40)
+	b.custom_minimum_size = Vector2(0, 46)
 	b.focus_mode = Control.FOCUS_NONE
-	return b
+	return BogeyUI.style_button(b, primary)
+
+
+func _field(text: String, placeholder: String) -> LineEdit:
+	var e := LineEdit.new()
+	e.text = text
+	e.placeholder_text = placeholder
+	e.custom_minimum_size = Vector2(0, 42)
+	e.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return BogeyUI.style_line_edit(e)
 
 
 func _clear(c: Node) -> void:
@@ -121,109 +190,251 @@ func _rebuild_panel() -> void:
 
 
 func _build_menu() -> void:
-	panel.add_child(_outlined_label("One screen", 13))
+	_build_course_picker()
+	panel.add_child(_gap(2))
+	panel.add_child(BogeyUI.hairline(0.12))
+	panel.add_child(_gap(2))
+
+	panel.add_child(_kicker("On this screen"))
 
 	var local_row := HBoxContainer.new()
 	local_row.add_theme_constant_override("separation", 8)
 	panel.add_child(local_row)
 
 	for n in range(1, MAX_PLAYERS + 1):
-		var b := _button("1 Player" if n == 1 else "%d Players" % n, 118)
+		var b := _button("Solo" if n == 1 else "%d Players" % n, n == 1)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_on_local_pressed.bind(n))
 		local_row.add_child(b)
 
-	panel.add_child(_outlined_label(
-		"Hot-seat — everyone plays on this screen, furthest from the pin first.", 12))
+	panel.add_child(BogeyUI.body(
+		"Hot-seat — everyone shares this screen, furthest from the pin plays first.", 13))
 
-	panel.add_child(_outlined_label("Online", 13))
+	panel.add_child(_gap(6))
+	panel.add_child(BogeyUI.hairline(0.12))
+	panel.add_child(_gap(6))
 
-	var name_row := HBoxContainer.new()
-	name_row.add_theme_constant_override("separation", 8)
-	panel.add_child(name_row)
-	name_row.add_child(_outlined_label("Your name", 12))
-	name_field = LineEdit.new()
-	name_field.text = "Player"
+	panel.add_child(_kicker("Online"))
+
+	# Two columns: your name pairs with hosting, the address with joining.
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 14)
+	panel.add_child(cols)
+
+	var host_col := VBoxContainer.new()
+	host_col.add_theme_constant_override("separation", 6)
+	host_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.add_child(host_col)
+	host_col.add_child(_caption("Your name"))
+	name_field = _field("Player", "your name")
 	name_field.max_length = 16
-	name_field.custom_minimum_size = Vector2(160, 36)
-	name_row.add_child(name_field)
-
-	var online_row := HBoxContainer.new()
-	online_row.add_theme_constant_override("separation", 8)
-	panel.add_child(online_row)
-
+	host_col.add_child(name_field)
 	var host_btn := _button("Host Game")
 	host_btn.pressed.connect(_on_host_pressed)
-	online_row.add_child(host_btn)
+	host_col.add_child(host_btn)
 
-	address_field = LineEdit.new()
-	address_field.text = "127.0.0.1"
-	address_field.placeholder_text = "host address"
-	address_field.custom_minimum_size = Vector2(160, 36)
-	online_row.add_child(address_field)
-
+	var join_col := VBoxContainer.new()
+	join_col.add_theme_constant_override("separation", 6)
+	join_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.add_child(join_col)
+	join_col.add_child(_caption("Host address"))
+	address_field = _field("127.0.0.1", "host address")
+	join_col.add_child(address_field)
 	var join_btn := _button("Join Game")
 	join_btn.pressed.connect(_on_join_pressed)
-	online_row.add_child(join_btn)
+	join_col.add_child(join_btn)
 
-	panel.add_child(_outlined_label(
-		"Same network, or a direct IP. Up to 4 players.", 12))
+	panel.add_child(BogeyUI.body("Same network, or a direct IP. Up to 4 players.", 13))
 
-	var credits_btn := _button("Credits", 118)
+	panel.add_child(_gap(4))
+	panel.add_child(BogeyUI.hairline(0.12))
+
+	var footer := HBoxContainer.new()
+	panel.add_child(footer)
+	var credits_btn := BogeyUI.style_link_button(Button.new())
+	credits_btn.text = "Credits"
+	credits_btn.focus_mode = Control.FOCUS_NONE
 	credits_btn.pressed.connect(_on_credits_pressed)
-	panel.add_child(credits_btn)
+	footer.add_child(credits_btn)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(spacer)
+	var hint := BogeyUI.body("or click the course to tee off solo", 12, BogeyTheme.NEUTRAL_500)
+	hint.autowrap_mode = TextServer.AUTOWRAP_OFF
+	hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	footer.add_child(hint)
 
 
-func _build_lobby() -> void:
-	panel.add_child(_outlined_label("Players", 13))
-
-	var seats := Net.seats_in_order()
-	if seats.is_empty():
-		panel.add_child(_outlined_label("  (waiting…)", 13))
-	for seat in seats:
-		var label := "  Seat %d — %s" % [int(seat) + 1, Net.name_for_seat(int(seat))]
-		if int(seat) == Net.my_seat:
-			label += "   (you)"
-		if int(seat) == 0:
-			label += "   host"
-		panel.add_child(_outlined_label(label, 14))
+# Which course this round is played on: the built-in one or anything
+# saved from the editor. Applies to solo, hot-seat and hosted rounds alike —
+# a hosted round sends the course to everyone who joins.
+func _build_course_picker() -> void:
+	panel.add_child(_kicker("Course"))
+	var courses := _course_choices()
+	var index := 0
+	for i in courses.size():
+		if str(courses[i].path) == Course.active_path and (courses[i].path != "" or Course.is_builtin()):
+			index = i
+			break
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	panel.add_child(row)
 
-	if mode == Mode.HOSTING:
-		start_button = _button("Start Round")
-		# One player is a legitimate online round (handy for testing), so
-		# this is never disabled on headcount.
-		start_button.pressed.connect(_on_start_pressed)
-		row.add_child(start_button)
+	var prev := _button("‹")
+	prev.custom_minimum_size = Vector2(46, 46)
+	prev.disabled = courses.size() < 2
+	prev.pressed.connect(_on_course_step.bind(courses, index, -1))
+	row.add_child(prev)
 
-	var cancel := _button("Back")
-	cancel.pressed.connect(_on_cancel_pressed)
-	row.add_child(cancel)
+	var s := BogeyUI.panel(BogeyTheme.NEUTRAL_100, 0, 10)
+	s.content_margin_left = 14
+	s.content_margin_right = 14
+	s.content_margin_top = 4
+	s.content_margin_bottom = 4
+	s.border_color = BogeyTheme.NEUTRAL_400
+	s.set_border_width_all(1)
+	var box := BogeyUI.make_panel(s)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(box)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 0)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_child(col)
+	var name_l := BogeyUI.body(Course.active_name, 15, BogeyTheme.INK)
+	name_l.autowrap_mode = TextServer.AUTOWRAP_OFF
+	name_l.clip_text = true
+	col.add_child(name_l)
+	col.add_child(BogeyUI.body(Course.summary(Course.active()), 12, BogeyTheme.NEUTRAL_600))
+
+	var next := _button("›")
+	next.custom_minimum_size = Vector2(46, 46)
+	next.disabled = courses.size() < 2
+	next.pressed.connect(_on_course_step.bind(courses, index, 1))
+	row.add_child(next)
+
+	var edit := _button("Course editor")
+	edit.pressed.connect(_on_editor_pressed)
+	row.add_child(edit)
+
+
+func _course_choices() -> Array:
+	var out: Array = [{"name": Course.BUILTIN_NAME, "path": ""}]
+	out.append_array(Course.list_saved())
+	return out
+
+
+func _on_course_step(courses: Array, index: int, step: int) -> void:
+	Sound.play("ui_click")
+	var pick: Dictionary = courses[posmod(index + step, courses.size())]
+	if str(pick.path) == "" or not Course.use_file(str(pick.path)):
+		Course.use_builtin()
+	_rebuild_panel()
+
+
+func _on_editor_pressed() -> void:
+	Sound.play("ui_confirm")
+	get_tree().change_scene_to_file(EDITOR_SCENE)
+
+
+func _seat_row(seat: int) -> PanelContainer:
+	var s := BogeyUI.panel(BogeyTheme.NEUTRAL_100, 12, 10)
+	s.border_color = BogeyTheme.RULE
+	s.set_border_width_all(1)
+	var p := BogeyUI.make_panel(s)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	p.add_child(row)
+
+	var dot_style := BogeyUI.panel(BogeyTheme.FAIRWAY_DEEP, 0, 99)
+	dot_style.content_margin_left = 10
+	dot_style.content_margin_right = 10
+	dot_style.content_margin_top = 3
+	dot_style.content_margin_bottom = 3
+	var dot := BogeyUI.make_panel(dot_style)
+	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var num := Label.new()
+	num.text = str(seat + 1)
+	num.add_theme_font_size_override("font_size", 13)
+	num.add_theme_color_override("font_color", BogeyTheme.NEUTRAL_100)
+	dot.add_child(num)
+	row.add_child(dot)
+
+	var name_label := BogeyUI.body(Net.name_for_seat(seat), 16, BogeyTheme.INK)
+	name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(name_label)
+
+	if seat == 0:
+		var t := BogeyUI.tag("Host", BogeyTheme.OLIVE_200, BogeyTheme.OLIVE_800)
+		t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(t)
+	if seat == Net.my_seat:
+		var t := BogeyUI.tag("You", BogeyTheme.ACCENT_200, BogeyTheme.ACCENT_800)
+		t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(t)
+	return p
+
+
+func _build_lobby() -> void:
+	if mode == Mode.HOSTING:
+		# Only the host knows the course until the round starts; it's sent
+		# with the opening decks.
+		panel.add_child(BogeyUI.body("Course: %s · %s" % [
+			Course.active_name, Course.summary(Course.active())], 13, BogeyTheme.NEUTRAL_700))
+	panel.add_child(_kicker("Players"))
+
+	var seats := Net.seats_in_order()
+	if seats.is_empty():
+		panel.add_child(BogeyUI.body("Waiting…", 14))
+	for seat in seats:
+		panel.add_child(_seat_row(int(seat)))
 
 	if mode == Mode.HOSTING:
 		# Show the address rather than telling the host to go and find it.
 		# This is the whole setup step for two people in one house.
 		var addr := Net.lan_address()
 		if addr != "":
-			panel.add_child(_outlined_label(
-				"On the same network, they join with:   %s" % addr, 15))
+			var text := "On the same network, they join with:   %s" % addr
 			if Net.DEFAULT_PORT != 45888:
-				panel.add_child(_outlined_label("Port %d" % Net.DEFAULT_PORT, 12))
+				text += "   (port %d)" % Net.DEFAULT_PORT
+			panel.add_child(_gap(4))
+			panel.add_child(BogeyUI.note_box(text,
+				BogeyTheme.ACCENT_100, BogeyTheme.ACCENT_300, BogeyTheme.ACCENT_800))
 			# A machine can have several addresses and the guess above can
 			# be wrong (VPNs, virtual adapters), so list the others.
 			var others: Array = Net.all_lan_addresses().filter(
 				func(a): return a != addr)
 			if not others.is_empty():
-				panel.add_child(_outlined_label(
-					"If that doesn't work, try: %s" % ", ".join(others), 11))
+				panel.add_child(BogeyUI.body(
+					"If that doesn't work, try: %s" % ", ".join(others), 12))
 		else:
-			panel.add_child(_outlined_label(
+			panel.add_child(BogeyUI.note_box(
 				"Couldn't detect this machine's network address — check your "
-				+ "Wi-Fi settings for it. Port %d." % Net.DEFAULT_PORT, 12))
+				+ "Wi-Fi settings for it. Port %d." % Net.DEFAULT_PORT,
+				BogeyTheme.ACCENT_100, BogeyTheme.ACCENT_300, BogeyTheme.ACCENT_800))
 	else:
-		panel.add_child(_outlined_label("Waiting for the host to start…", 12))
+		panel.add_child(BogeyUI.body("Waiting for the host to start…", 13))
+
+	panel.add_child(_gap(6))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	panel.add_child(row)
+
+	var cancel := _button("Back")
+	cancel.custom_minimum_size.x = 140
+	cancel.pressed.connect(_on_cancel_pressed)
+	row.add_child(cancel)
+
+	if mode == Mode.HOSTING:
+		start_button = _button("Start Round", true)
+		start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		# One player is a legitimate online round (handy for testing), so
+		# this is never disabled on headcount.
+		start_button.pressed.connect(_on_start_pressed)
+		row.add_child(start_button)
 
 
 # The credits screen. This is a licence obligation rather than a nicety:
@@ -235,7 +446,7 @@ func _build_lobby() -> void:
 # a credit the player cannot scroll to is not a credit.
 func _build_credits() -> void:
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(620, 420)
+	scroll.custom_minimum_size = Vector2(0, 440)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	panel.add_child(scroll)
 
@@ -245,19 +456,23 @@ func _build_credits() -> void:
 	scroll.add_child(col)
 
 	for section in Credits.SECTIONS:
-		col.add_child(_outlined_label(str(section.heading), 16))
+		col.add_child(BogeyUI.heading(str(section.heading), 16))
 		if str(section.note) != "":
-			col.add_child(_outlined_label("  " + str(section.note), 12))
+			var note := _caption(str(section.note))
+			note.add_theme_color_override("font_color", BogeyTheme.SAND_DEEP)
+			col.add_child(note)
 		for line in section.lines:
-			col.add_child(_outlined_label("  " + str(line), 13))
-		# Breathing room between sections.
-		var gap := Control.new()
-		gap.custom_minimum_size = Vector2(0, 8)
-		col.add_child(gap)
+			var l := BogeyUI.body(str(line), 13)
+			l.autowrap_mode = TextServer.AUTOWRAP_OFF
+			col.add_child(l)
+		col.add_child(_gap(12))
 
-	col.add_child(_outlined_label(Credits.LICENCE_NOTE, 11))
+	col.add_child(BogeyUI.body(Credits.LICENCE_NOTE, 12, BogeyTheme.NEUTRAL_600))
 
+	panel.add_child(_gap(4))
 	var back := _button("Back")
+	back.custom_minimum_size.x = 140
+	back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	back.pressed.connect(_on_credits_back_pressed)
 	panel.add_child(back)
 
@@ -376,6 +591,16 @@ func _on_round_starting(payload: Dictionary) -> void:
 	GameSetup.my_seat = maxi(Net.my_seat, 0)
 	GameSetup.seat_names = payload.get("seat_names", {})
 	GameSetup.round_payload = payload
+	# Adopt the host's course before the game scene builds its scorecard
+	# and header from it.
+	# The host already has it — and keeps it as-is, so it still knows which
+	# saved file the course came from.
+	if not Net.is_host():
+		var course := Course.from_wire(payload.get("course", {}))
+		if course.is_empty():
+			Course.use_builtin()
+		else:
+			Course.use(course)
 	get_tree().change_scene_to_file(MAIN_SCENE)
 
 

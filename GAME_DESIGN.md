@@ -40,8 +40,8 @@ Each course is a **fixed, designed layout** — all 18 holes have known yardage,
 ### Starting Bag (baseline, tune in playtesting)
 | Club | Brand | Category | Yardage Band | Handicap |
 |---|---|---|---|---|
-| Bogey-Mart Driver | Bogey-Mart | Wood | 190-235 | Buffers deviation 25% worse |
-| Bogey-Mart 7-Iron | Bogey-Mart | Iron | 95-140 | Narrow band → more 2-card draws |
+| Bogey-Mart Driver | Bogey-Mart | Wood | 170-210 | Buffers deviation 25% worse |
+| Bogey-Mart 7-Iron | Bogey-Mart | Iron | 90-135 | Narrow band → more 2-card draws |
 | Bogey-Mart Putter | Bogey-Mart | Putter | Green only | No Steady Hands ability |
 
 Every draft is measured against this floor. See Section 3A for why the starting set is bad on purpose.
@@ -79,8 +79,8 @@ Your opening three clubs (Driver, 7-Iron, Putter — Section 3) are all **Bogey-
 
 | Bogey-Mart club | Yardage band | Penalty vs. a standard club |
 |---|---|---|
-| Bogey-Mart Driver | 190-235 (vs. 200-260) | Buffers Form deviation **25% worse** — a Hook hooks harder |
-| Bogey-Mart 7-Iron | 95-140 (vs. 100-150) | Narrower band, so more shots fall into Full/Finesse tier instead of Mid |
+| Bogey-Mart Driver | 170-210 (vs. 180-230) | Buffers Form deviation **25% worse** — a Hook hooks harder |
+| Bogey-Mart 7-Iron | 90-135 (vs. 95-145) | Narrower band, so more shots fall into Full/Finesse tier instead of Mid |
 | Bogey-Mart Putter | Green only | Cannot create Steady Hands at all — no Putter ability |
 
 They have **no set bonus**. Collecting Bogey-Mart clubs does nothing; there are none in the club deck to collect. The brand exists purely as the floor you measure everything else against.
@@ -185,11 +185,11 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 
 | Club | Category | Band | Width | Notes |
 |---|---|---|---|---|
-| Driver | Wood | 200-260 | 60 | The baseline big stick |
-| 3-Wood | Wood | 180-220 | 40 | Playable from fairway, unlike Driver |
-| 5-Iron | Iron | 140-180 | 40 | |
-| 7-Iron | Iron | 100-150 | 50 | |
-| 9-Iron | Iron | 80-110 | 30 | Narrow — often a 2-card draw |
+| Driver | Wood | 180-230 | 50 | The baseline big stick |
+| 3-Wood | Wood | 160-195 | 35 | Playable from fairway, unlike Driver |
+| 5-Iron | Iron | 135-170 | 35 | |
+| 7-Iron | Iron | 95-145 | 50 | |
+| 9-Iron | Iron | 75-105 | 30 | Narrow — often a 2-card draw |
 | Pitching Wedge | Wedge | 50-90 | 40 | |
 | Sand Wedge | Wedge | 20-60 | 40 | Passive bunker ability (Section 4) |
 | Putter | Putter | Green | — | Steady Hands source |
@@ -202,26 +202,26 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 
 | Club | Category | Band | Rider |
 |---|---|---|---|
-| Titanist Pro Driver | Wood | 205-250 | Buffers deviation 20% better; **-30% distance from rough** |
-| Titanist 4-Iron | Iron | 155-190 | Buffers deviation 25% better |
-| Titanist 8-Iron | Iron | 90-125 | Buffers deviation 25% better |
+| Titanist Pro Driver | Wood | 185-225 | Buffers deviation 20% better; **-30% distance from rough** |
+| Titanist 4-Iron | Iron | 150-180 | Buffers deviation 25% better |
+| Titanist 8-Iron | Iron | 85-120 | Buffers deviation 25% better |
 | Titanist Blade Putter | Putter | Green | Steady Hands also narrows nothing — but grants a **second** timing attempt once per round |
 
 **Callowell** — *forgiveness; wide bands, blunts bad cards, low ceiling*
 
 | Club | Category | Band | Rider |
 |---|---|---|---|
-| Callowell Big Deal Driver | Wood | 195-255 | Chunk and Top hit at **half severity** with this club |
-| Callowell 6-Iron | Iron | 115-175 | **Width 60** — the widest iron in the game, almost always a Mid-tier draw |
-| Callowell Rescue | Iron | 130-185 | Playable from rough with **no distance penalty** |
+| Callowell Big Deal Driver | Wood | 175-230 | Chunk and Top hit at **half severity** with this club |
+| Callowell 6-Iron | Iron | 110-165 | **Width 55** — joint-widest iron in the game, almost always a Mid-tier draw |
+| Callowell Rescue | Iron | 125-175 | Playable from rough with **no distance penalty** |
 | Callowell Gap Wedge | Wedge | 40-85 | Shank cannot downgrade your lie when played with this club |
 
 **Ping-Well** — *fitted feel; rewards the comfortable middle*
 
 | Club | Category | Band | Rider |
 |---|---|---|---|
-| Ping-Well i-Series 5 | Iron | 135-185 | Mid-tier band is **widened** — the middle third counts as the middle half |
-| Ping-Well i-Series 8 | Iron | 85-130 | Same widened Mid tier |
+| Ping-Well i-Series 5 | Iron | 130-175 | Mid-tier band is **widened** — the middle third counts as the middle half |
+| Ping-Well i-Series 8 | Iron | 80-125 | Same widened Mid tier |
 | Ping-Well Lob Wedge | Wedge | 15-55 | Creates Flop Shot on **any** hazard lie, not just bunker |
 | Ping-Well Mallet Putter | Putter | Green | Steady Hands widens the sunk band **twice** as much |
 
@@ -229,39 +229,39 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 
 | Club | Category | Band | Rider |
 |---|---|---|---|
-| MacGregorian Persimmon Driver | Wood | 185-245 | The only Wood **playable from a bunker** |
-| MacGregorian Brassie | Wood | 170-215 | Bump and Run played with this gains **+20 yds roll** |
-| MacGregorian Mashie | Iron | 120-165 | Ignores the rough's distance penalty |
+| MacGregorian Persimmon Driver | Wood | 165-220 | The only Wood **playable from a bunker** |
+| MacGregorian Brassie | Wood | 150-190 | Bump and Run played with this gains **+20 yds roll** |
+| MacGregorian Mashie | Iron | 115-155 | Ignores the rough's distance penalty |
 | MacGregorian Niblick | Wedge | 45-95 | Landing in a hazard with this in your Bag adds **no** bad card to the Form deck |
 
 **Slazinger** — *distance at a price*
 
 | Club | Category | Band | Rider |
 |---|---|---|---|
-| Slazinger Cannon Driver | Wood | 215-285 | **Longest in the game**; buffers deviation **30% worse** |
-| Slazinger Power Iron | Iron | 150-200 | +15 yds over a standard 5-Iron; buffers 20% worse |
-| Slazinger Launch Wood | Wood | 190-240 | Big Strike created by this club grants **max band +10** |
+| Slazinger Cannon Driver | Wood | 190-255 | **Longest in the game**; buffers deviation **30% worse** |
+| Slazinger Power Iron | Iron | 145-190 | +15 yds over a standard 5-Iron; buffers 20% worse |
+| Slazinger Launch Wood | Wood | 170-215 | Big Strike created by this club grants **max band +10** |
 
 **Nimbus** — *hybrid; covers gaps, no strong opinion*
 
 | Club | Category | Band | Rider |
 |---|---|---|---|
-| Nimbus Hybrid 3 | Iron | 160-215 | Counts as **both Wood and Iron** for set bonuses and Created cards |
-| Nimbus Hybrid 5 | Iron | 130-180 | Counts as both Wood and Iron |
+| Nimbus Hybrid 3 | Iron | 150-205 | Counts as **both Wood and Iron** for set bonuses and Created cards |
+| Nimbus Hybrid 5 | Iron | 125-170 | Counts as both Wood and Iron |
 | Nimbus Utility Wedge | Wedge | 30-80 | May be played from **any** lie with no terrain penalty, once per hole |
-| Nimbus All-Rounder | Iron | 105-165 | Width 60; no rider — pure flexible filler |
+| Nimbus All-Rounder | Iron | 100-155 | Width 55; no rider — pure flexible filler |
 
 ### Limited edition clubs (rare; ability + pair rider)
 
 | Club | Cat / Brand | Band | Created-card ability | Pair rider |
 |---|---|---|---|---|
-| **Gold Cleek** | Iron / Titanist | 145-185 | Once per hole, create a Pure Strike | Titanist Wood in Bag → twice per hole |
-| **The Bulger** (Tour Driver X) | Wood / Slazinger | 210-270 | Create Big Strike when played from rough/bunker | Any Wedge in Bag → no lie requirement |
+| **Gold Cleek** | Iron / Titanist | 140-175 | Once per hole, create a Pure Strike | Titanist Wood in Bag → twice per hole |
+| **The Bulger** (Tour Driver X) | Wood / Slazinger | 185-240 | Create Big Strike when played from rough/bunker | Any Wedge in Bag → no lie requirement |
 | **Old Tom's Niblick** | Wedge / MacGregorian | 30-70 | Creates Flop Shot on bunker landing (passive) | MacGregorian Wood → also Bump and Run on fairway |
 | **The Rutter** | Wedge / Callowell | 35-80 | Purges one bad Form card per hazard (passive) | Callowell Iron → purges two |
 | **Old Reliable Putter** | Putter / Ping-Well | Green | Once per round, create Steady Hands | Another Ping-Well club → once every six holes |
-| **Persimmon Spoon** | Wood / MacGregorian | 175-225 | Playable from rough with no distance penalty | 2nd MacGregorian → playable from any lie, no penalty |
-| **The Equaliser** | Iron / Nimbus | 120-170 | — | Bag holds 3+ brands → counts as **every** brand for sets |
+| **Persimmon Spoon** | Wood / MacGregorian | 155-200 | Playable from rough with no distance penalty | 2nd MacGregorian → playable from any lie, no penalty |
+| **The Equaliser** | Iron / Nimbus | 115-160 | — | Bag holds 3+ brands → counts as **every** brand for sets |
 
 **Roster totals**: 8 standard, 19 branded, 7 limited — 34 distinct clubs. With a per-run pool of 4 brands, roughly 8 standard + 12-13 branded + 7 limited are live in any given run, which is enough to fill 18 drafts with real choices without the pool being so deep that sets never complete.
 
@@ -309,8 +309,8 @@ Clubs modulate how strongly a Form card's effect applies: a forgiving Wedge migh
 |---|---|
 | Hook | Pulls shot left by a known degree, slight distance loss |
 | Slice | Pushes shot right by a known degree, slight distance loss |
-| Top | Ball stays low, big distance loss, no directional change |
-| Chunk/Fat | Hits ground first, major distance loss |
+| Top | Ball stays low, big distance loss, no directional change — runs out 2x, barely touched by wind (0.3x flight) |
+| Chunk/Fat | Hits ground first, major distance loss — runs out half as far, 0.7x flight |
 | Shank | Severe direction error + downgrades your lie |
 | The Yips | Only triggers on the green — see Putting cross-trigger below |
 
@@ -319,11 +319,11 @@ Clubs modulate how strongly a Form card's effect applies: a forgiving Wedge migh
 | Card | Effect |
 |---|---|
 | Pure Strike | Full accurate distance, zero deviation — the reliable baseline |
-| Stinger | Low, controlled flight — minimal deviation, slightly reduced distance |
+| Stinger | Low, controlled flight — minimal deviation, slightly reduced distance, runs out 1.8x, punches under the wind (0.4x flight) |
 | Controlled Draw | Deliberate leftward curve, usable tactically around a left-side dogleg/hazard |
 | Controlled Fade | Same idea, rightward |
-| Flop Shot | High, soft landing — ignores rough/bunker penalty entirely, minimal roll |
-| Bump and Run | Low running shot — extra roll distance |
+| Flop Shot | High, soft landing — ignores rough/bunker penalty entirely, stops dead (0.15x roll), balloons in wind (1.6x flight) |
+| Bump and Run | Low running shot — carries half the aimed distance (0.5x flight, so the wind barely touches it) and runs the rest to the target. The run is judged: struck with the pace the slope asks for, up to 1.6x the planned run — so rough on the way leaves it short, sand or water in its path stops it, and side slope still bends its line. No green check, since a low runner arrives without backspin. |
 | Steady Hands | Widens the sunk band on your next putt, as if the putt were a short one |
 | In the Zone | Cancel any one bad Form card in your hand without playing it |
 
@@ -370,7 +370,9 @@ The Yips card can be drawn in your Form hand approaching the green. You can avoi
 
 ## 5. Terrain Modifiers
 
-**Scope note (2026-09-08):** weather and slope are **cut for now**. Terrain — tee, fairway, rough, bunker, water, green — is the only environmental system in the game. This removes the per-flight weather deck entirely and leaves the round a continuous 18 holes with no flight breaks. Both are re-addable later (weather as a per-flight modifier deck, slope as marked zones biasing rest position and the putt meter), but nothing in the current design depends on either, and the brands were rebalanced so none needs them.
+**Scope note (2026-09-08):** weather and slope were **cut**. Terrain — tee, fairway, rough, bunker, water, green — was the only environmental system in the game. The per-flight weather *deck* stays cut (the round is a continuous run of holes), but **wind is back as of 2026-10-16** — see "Wind" below.
+
+**Update (2026-10-16): elevation and roll are back in** — see "Elevation & roll" below. Slope returns as authored ground on every hole rather than marked zones. It moves the ball through carry and run-out, and the green's tilt reads into the putting meter (Section 6, "Reading the green").
 
 
 | Terrain | Effect on Form draw | Effect on distance | Other effects |
@@ -385,6 +387,32 @@ The Yips card can be drawn in your Form hand approaching the green. You can avoi
 The distance penalty applies to your actual aimed-for distance, not an abstract tier ceiling — aim for 200 yards from rough and the shot flies at 160 (before the Form card's own multiplier/bonus lands on top). A Flop Shot card ignores this penalty entirely (Section 4). Bunker already stacks two penalties at once (forced bad card + a steep distance cut, on top of Driver/Woods being unplayable there at all) — a deliberate "hazards should feel bad" design. Rough currently only affects distance, not card count; **playtest whether rough also needs its own Form-draw penalty** (e.g. dropping the card count by one tier-step) before locking these numbers in.
 
 - **Bad cards from hazards**: landing in rough, bunker, or water carries a chance of adding bad cards directly into the **Form deck** (not your Bag) — see Section 4, Form deck composition & hazards.
+
+### Wind
+
+Each hole has a wind, drawn when the hole starts and **held for the whole hole** — shown on the map (an arrow and mph in the corner), in the shot panel ("Wind 22 mph · into you, from the left"), and in the log. Like everything else in the long game it's known before you commit — but reading it is the player's job: the aim ghost and the yellow hole-out line ignore wind, so you allow for it yourself. Once the aim is committed, every Form-card preview shows where the wind will actually put the ball, to inform the card pick.
+
+- **Strength**: 0-35 mph, skewed toward calm — about one hole in five is calm, the median is ~10 mph, and roughly one in six blows 26+.
+- **Into / downwind**: headwind costs 0.6% of carry per mph; tailwind adds 0.35% per mph. Into the wind hurts more than downwind helps.
+- **Across**: drift of 0.4% of the distance flown per mph — a 220-yard drive in a 15 mph crosswind moves ~12 yds, in a 35 mph gale ~28.
+- **Height scales both**: club loft (Wood 0.9, Iron 1.0, Wedge 1.2) times the Form card's flight (Stinger 0.4, Top 0.3, Bump and Run 0.5, Chunk 0.7, Flop Shot 1.6, everything else 1.0). Low cards become genuinely valuable on a windy hole; a Flop Shot into a gale is a gamble.
+- **Wind affects the flight only** — the run-out after landing is on the ground and ignores it. Putting ignores it entirely.
+- **Online**: one wind seed is rolled per round and sent with the opening decks; each hole's wind is a pure function of that seed and the hole number, so every machine sees the same wind without a roll per hole to sync.
+
+### Elevation & roll
+
+Every hole has ground: a long profile (heights in feet at stations along the hole, eased between them), a sideways cross-fall on the fairway, and a tilted plane for the green. A shot is now a **carry** and then a **run-out**, both fully deterministic and both shown in the Form-card preview — the marker is where the ball *stops*, with the carry spot and the dotted roll path drawn on the way. The known-information rule holds: nothing about the ground is hidden or rolled.
+
+- **Club yardage is carry.** Roll is extra, on top. While aiming, a faint ghost shows where a clean strike of that aim lands in still air — carry only, elevation included, no wind and no run-out. Allowing for the wind is the player's read; the yellow hole-out line ignores wind for the same reason. Once the aim is committed, the Form-card previews show the whole truth (wind, carry and roll), since by then they inform the card pick, not the aim.
+- **Elevation changes carry**: 1 yard of carry lost per yard (3 ft) the landing sits above the launch, gained when it sits below. A raised green plays longer; a drop shot plays shorter.
+- **Run-out on flat fairway** is a share of carry: Woods 12%, Irons 5%, Wedges 2%. Form cards scale it (Stinger 1.8x, Top 2x, Chunk 0.5x, Flop 0.15x). Bump and Run replaces it: half carry, half judged run to the target (see Section 4).
+- **Turf**: rough grabs the ball (3x fairway resistance); sand stops it where it enters; water and out of bounds end the roll with their usual penalties. Greens are quick (0.4x resistance), but a ball that **pitches straight onto the green checks** and keeps only 35% of its run-out — so irons hold greens, and a ball run on from short of the green keeps its pace.
+- **Note**: the MacGregorian Brassie's "+20 yds roll on Bump and Run" rider is card text only — it was never wired into the rules, and Bump and Run no longer has a flat roll bonus to add to. Decide its new meaning (e.g. a longer judged run, RUN_JUDGE_MAX) before implementing it.
+- **Slope** pulls the rolling ball downhill: on fairway, a 12.5% grade is steep enough that the ball never settles. Greens' 1.5-3% tilts visibly bend a run-out.
+- **The cup**: a ball that rolls within 1.2 yds of the pin has found the hole and earns the hole-out d20, the same as one that pitches on it.
+- **On the map**: hillshading over the whole hole, fall-line chevrons on the green, and a side-view elevation strip under the hole plate showing the ball, the flag, and how far above or below you the flag sits.
+
+**Club rebalance (2026-10-16)**: when yardage became carry, every club band was scaled down by its own flat-fairway run-out — carry = old yardage ÷ (1 + roll share), rounded to 5 — so carry plus a normal run-out on flat fairway lands where the old yardage did. Woods dropped ~11% (Driver 200-260 → 180-230), irons ~5% (7-Iron 100-150 → 95-145), wedges and putters are unchanged. The course was designed around the old totals, so par-5 reachability and the coverage budget (Section 3A) are preserved on flat ground; slopes and rough now push the real finish either side of that.
 
 ---
 
@@ -416,7 +444,15 @@ The curve is eased so difficulty ramps hardest over the first stretch — the st
 
 **Termination**: every miss finishes at most as far out as it started, so a putting sequence always walks toward the hole. Inside ~2 feet the putt is **conceded as a gimme** — no drama left to play for, and it guarantees the loop can't grind forever on a short one. In practice a competent player averages 1.1-2.0 putts and even a badly struggling one tops out around 7.
 
-**Still to build**: nothing beyond distance currently biases the meter. Slope was cut along with weather (see below); if putting later needs more texture, green contour is the obvious place to add it back.
+### Reading the green
+
+Every green has a tilt (Section 5, "Elevation & roll"), resolved against the putt line and shown three ways — the chevrons on the green, a one-line read above the meter ("Breaks left to right · downhill — quick, tighter window"), and the meter itself:
+
+- **Break moves the sweet spot.** Side slope shifts the sunk and close bands off centre toward the high side — you aim above the hole. The shift grows with the grade and the length of the putt (bar fraction = grade % × yards ÷ 120, capped at 28% of the bar), so a 3-footer on a tilted green is still nearly straight and a 12-yarder across one is a real read. A faint tick marks where "straight at it" would have been, so the size of the read is visible.
+- **Pace scales the bands.** Downhill putts tighten both bands (6% per 1% of grade, floor 0.7x); uphill putts loosen them slightly (cap 1.15x).
+- **Misses fall to the low side.** How far a miss leaves you is unchanged; which side of the hole it finishes on is now the green's doing, not a coin flip.
+
+Nothing here is hidden: the read is a pure function of the green and the ball's position, so every machine in an online round shows the same meter.
 
 ---
 
@@ -469,6 +505,7 @@ Deck shuffles are deliberately **not** made deterministic. Doing so would need e
 ## 8. Course & Expansion Structure
 
 - **Base game**: 1 full 18-hole course with a fixed, designed layout (yardages and hazard placement fixed), plus the base hazard/bad-card set and the shared club deck (standards + limited editions).
+- **Custom courses (built 2026-10-16)**: an in-game course editor builds courses of 1-18 holes in the same format the base course uses — fairway centreline, green, bunkers, water, elevation and green tilt — and saves them as JSON. Any course can be picked for solo, hot-seat or online play; the host's course travels in the round payload and is sanitised on arrival. Shorter courses simply mean fewer holes and fewer drafts, so the Bag never fills: brand sets are much harder to complete on a 3- or 9-hole course, which is fine for quick games but is not the balance the design targets.
 - **Expansions**: new courses, each introducing:
   - A distinct fixed 18-hole layout with its own identity (signature holes, hazard placement, par).
   - New club cards (standard and limited edition) for the shared club deck.
@@ -518,7 +555,8 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 - How many bad cards enter the Form deck economy per hazard hit, and how fast it should degrade — needs playtesting to avoid a death spiral where one bad hole compounds into an unplayable back nine.
 - **How to create Bag pressure without touching the 14-card cap.** The cap is **fixed at 14** — it's the real rule, players already know it, and an invented number would cost that recognition for nothing. But 14 slots across 18 drafts is loose enough that a player could complete two sets without ever making a painful cut. The pressure must therefore come from the *draft*, not the cap — see "Yardage coverage" in Section 3A. Do not solve this by shrinking the Bag.
 - ~~**Brand set thresholds (2/4/7)** — whether 7 of one brand is reachable inside 18 drafts.~~ **Answered by simulation (2026-09-09, 3,000 runs per strategy):** a player who commits to a brand reaches a 4-set **100%** of the time and a 7-set **74%**; a player drafting without a plan reaches a 4-set **61%** and a 7-set **0.2%**. The thresholds hold as designed — intent is strongly rewarded, and the 7-set is aspirational rather than accidental. Re-run this if the pool size, brand card counts, or draft width change.
-- **Whether terrain alone carries enough variety** now that weather and slope are cut. Terrain is currently the only thing the environment does to you, and two brands (Callowell, MacGregorian) both feed on it. If the round feels flat, weather is the first thing to reconsider — but only after the Form/draft loop is proven.
+- **Whether wind is too swingy at 35 mph** — chosen deliberately "wild". If gale holes feel like they decide rounds rather than test them, lower Wind.MAX_MPH or steepen the calm skew before touching the per-mph effects.
+- **Whether terrain, elevation and wind carry enough variety** (slope and wind came back 2026-10-16). Terrain is currently the only thing the environment does to you, and two brands (Callowell, MacGregorian) both feed on it. If the round feels flat, weather is the first thing to reconsider — but only after the Form/draft loop is proven.
 - **Whether Callowell and MacGregorian are too close** — both answer hazards. The intended split is consequence (Callowell) vs. lie quality (MacGregorian); if that reads as one brand in play, merge them and add a genuinely new axis rather than keeping two hazard brands.
 - **Whether Callowell's 4-set (ignore all terrain penalties) is too strong** — it switches off most of Section 5. Intended as a half-Bag payoff, but it may need to move to the 7-tier if a 4-set is reachable too early.
 - **How many brands should be live per run** — 4 of 6 is the starting guess. 3 makes commitment easier but runs samier; 5 makes the pool noisy and sets hard to complete.

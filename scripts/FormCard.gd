@@ -19,6 +19,9 @@ var degrees: float
 var distance_mult: float
 var ignores_hazard_penalty: bool  # Flop Shot: ignores rough/bunker distance cap
 var extra_roll: float             # Bump and Run: added roll distance
+var roll_mult: float = 1.0        # how much the ball runs after landing (Stinger low, Flop dead)
+var flight: float = 1.0           # how high it flies, so how much the wind gets hold of it
+var run_share: float = 0.0        # share of the shot played along the ground (Bump and Run)
 var downgrades_lie: bool          # Shank: worsens the resulting lie by one step
 var is_yips: bool                 # Only meaningful on the green — see Section 4 cross-trigger
 
@@ -57,8 +60,18 @@ func effect_text() -> String:
 		bits.append("+%d%% distance" % int(round((distance_mult - 1.0) * 100.0)))
 	if ignores_hazard_penalty:
 		bits.append("ignores rough/bunker penalty")
+	if run_share > 0.0:
+		bits.append("lands %d%% of the way and runs the rest to your target" % int(round((1.0 - run_share) * 100.0)))
 	if extra_roll > 0.0:
 		bits.append("+%d yds roll" % int(extra_roll))
+	if flight < 0.8:
+		bits.append("flies low under the wind")
+	elif flight > 1.2:
+		bits.append("flies high into the wind")
+	if roll_mult > 1.001:
+		bits.append("runs out %sx" % _mult_text(roll_mult))
+	elif roll_mult < 0.999:
+		bits.append("stops %s" % ("dead" if roll_mult <= 0.2 else "quickly"))
 	if downgrades_lie:
 		bits.append("downgrades your lie")
 	if is_yips:
@@ -66,6 +79,25 @@ func effect_text() -> String:
 	if bits.is_empty():
 		bits.append("No deviation, standard distance")
 	return "; ".join(bits)
+
+
+func _mult_text(m: float) -> String:
+	return str(snappedf(m, 0.1)).trim_suffix(".0")
+
+
+func with_roll(m: float) -> FormCard:
+	roll_mult = m
+	return self
+
+
+func with_flight(f: float) -> FormCard:
+	flight = f
+	return self
+
+
+func with_run(share: float) -> FormCard:
+	run_share = share
+	return self
 
 
 # --- Card definitions (Section 4 — first-draft list, 6 bad / 8 good) ---
@@ -77,9 +109,9 @@ static func make(card_name: String) -> FormCard:
 		"Slice":
 			return FormCard.new("Slice", false, 1, 15.0, 0.9)
 		"Top":
-			return FormCard.new("Top", false, 0, 0.0, 0.45)
+			return FormCard.new("Top", false, 0, 0.0, 0.45).with_roll(2.0).with_flight(0.3)
 		"Chunk":
-			return FormCard.new("Chunk", false, 0, 0.0, 0.3)
+			return FormCard.new("Chunk", false, 0, 0.0, 0.3).with_roll(0.5).with_flight(0.7)
 		"Shank":
 			return FormCard.new("Shank", false, 1, 35.0, 0.6, false, 0.0, true)
 		"Yips":
@@ -88,15 +120,15 @@ static func make(card_name: String) -> FormCard:
 		"Pure Strike":
 			return FormCard.new("Pure Strike", true, 0, 0.0, 1.0)
 		"Stinger":
-			return FormCard.new("Stinger", true, 0, 0.0, 0.92)
+			return FormCard.new("Stinger", true, 0, 0.0, 0.92).with_roll(1.8).with_flight(0.4)
 		"Controlled Draw":
 			return FormCard.new("Controlled Draw", true, -1, 10.0, 1.0)
 		"Controlled Fade":
 			return FormCard.new("Controlled Fade", true, 1, 10.0, 1.0)
 		"Flop Shot":
-			return FormCard.new("Flop Shot", true, 0, 0.0, 0.85, true)
+			return FormCard.new("Flop Shot", true, 0, 0.0, 0.85, true).with_roll(0.15).with_flight(1.6)
 		"Bump and Run":
-			return FormCard.new("Bump and Run", true, 0, 0.0, 1.0, false, 15.0)
+			return FormCard.new("Bump and Run", true).with_flight(0.5).with_run(0.5)
 		"Steady Hands":
 			return FormCard.new("Steady Hands", true)
 		"In the Zone":

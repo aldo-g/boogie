@@ -339,3 +339,79 @@ static func meta_stat(label_text: String, value_text: String, bg: Color, ink: Co
 	val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	col.add_child(val)
 	return p
+
+
+# ---------------------------------------------------------
+# Controls. Godot's stock grey buttons and fields read as debug UI on the
+# parchment, so screens dress them with these instead.
+# ---------------------------------------------------------
+
+static func _box(bg: Color, border: Color = Color(0, 0, 0, 0), border_w: int = 0, radius: int = 10, pad_x: int = 18, pad_y: int = 10) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = bg
+	s.set_corner_radius_all(radius)
+	s.border_color = border
+	s.set_border_width_all(border_w)
+	s.content_margin_left = pad_x
+	s.content_margin_right = pad_x
+	s.content_margin_top = pad_y
+	s.content_margin_bottom = pad_y
+	return s
+
+
+# Primary = sand fill for the one action a screen wants you to take;
+# secondary = quiet tonal fill for everything else.
+static func style_button(b: Button, primary: bool = false, font_size: int = 15) -> Button:
+	var normal: StyleBoxFlat
+	var hover: StyleBoxFlat
+	var pressed: StyleBoxFlat
+	var ink: Color
+	if primary:
+		normal = _box(BogeyTheme.SAND)
+		hover = _box(BogeyTheme.ACCENT_600)
+		pressed = _box(BogeyTheme.ACCENT_700)
+		ink = BogeyTheme.NEUTRAL_100
+	else:
+		normal = _box(BogeyTheme.NEUTRAL_200, BogeyTheme.NEUTRAL_400, 1)
+		hover = _box(BogeyTheme.NEUTRAL_300, BogeyTheme.NEUTRAL_500, 1)
+		pressed = _box(BogeyTheme.NEUTRAL_400, BogeyTheme.NEUTRAL_500, 1)
+		ink = BogeyTheme.INK
+	var disabled := _box(BogeyTheme.NEUTRAL_200)
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", pressed)
+	b.add_theme_stylebox_override("hover_pressed", pressed)
+	b.add_theme_stylebox_override("disabled", disabled)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	for key in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		b.add_theme_color_override(key, ink)
+	b.add_theme_color_override("font_disabled_color", BogeyTheme.NEUTRAL_500)
+	b.add_theme_font_size_override("font_size", font_size)
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	return b
+
+
+# Text-only button for minor navigation (Credits) — no box at all.
+static func style_link_button(b: Button, font_size: int = 13) -> Button:
+	b.flat = true
+	for key in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(key, StyleBoxEmpty.new())
+	b.add_theme_color_override("font_color", BogeyTheme.SAND_DEEP)
+	b.add_theme_color_override("font_hover_color", BogeyTheme.ACCENT_900)
+	b.add_theme_color_override("font_pressed_color", BogeyTheme.ACCENT_900)
+	b.add_theme_color_override("font_hover_pressed_color", BogeyTheme.ACCENT_900)
+	b.add_theme_font_size_override("font_size", font_size)
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	return b
+
+
+static func style_line_edit(e: LineEdit, font_size: int = 15) -> LineEdit:
+	e.add_theme_stylebox_override("normal", _box(BogeyTheme.NEUTRAL_100, BogeyTheme.NEUTRAL_400, 1, 8, 12, 8))
+	e.add_theme_stylebox_override("focus", _box(Color(0, 0, 0, 0), BogeyTheme.SAND, 2, 8, 12, 8))
+	e.add_theme_color_override("font_color", BogeyTheme.INK)
+	e.add_theme_color_override("font_placeholder_color", BogeyTheme.NEUTRAL_500)
+	e.add_theme_color_override("caret_color", BogeyTheme.SAND_DEEP)
+	e.add_theme_color_override("selection_color", BogeyTheme.ACCENT_200)
+	e.add_theme_color_override("font_selected_color", BogeyTheme.INK)
+	e.add_theme_font_size_override("font_size", font_size)
+	return e

@@ -56,6 +56,23 @@ var preview_landing_from: Vector2 = Vector2.ZERO  # yard-space
 var preview_landing_good: bool = true
 var preview_landing_out: bool = false   # lands off the course — stroke and distance
 var preview_landing_holed: bool = false # on the cup — earns the d20 roll
+var preview_carry_pos: Vector2 = Vector2.ZERO     # where it first touches down
+var preview_roll_path: Array = []                 # carry -> rest, yard-space
+
+# While aiming: where a clean strike of this aim would land and roll to.
+var aim_ghost_active: bool = false
+var aim_ghost_carry: Vector2 = Vector2.ZERO
+var aim_ghost_roll: Array = []
+
+# Slope shading, baked once per hole (see _bake_hillshade()).
+var _hillshade: ImageTexture = null
+
+# The editor pins the framing while a handle is dragged, so the view doesn't
+# rescale under the cursor as the hole's bounds grow. Zero size = follow
+# the hole.
+var fixed_extent: Rect2 = Rect2()
+const HILLSHADE_STEP := 2.0   # yards per texel
+const HILLSHADE_GAIN := 7.0   # slopes are gentle; exaggerate so 3% reads
 
 # True while the live aim crosshair sits on a line that would earn the
 # hole-out roll. Set by Main.gd on every aim change (it owns the club, lie
@@ -78,6 +95,7 @@ var _flight_active: bool = false
 var _flight_pos: Vector2 = Vector2.ZERO
 var _flight_trail: Array = []       # recent yard-space points, most recent last
 var _flight_hop_height: float = 0.0 # current arc height in yards, for the shadow offset
+var _pending_roll: Array = []       # run-out path for the shot being animated
 
 const MARGIN := 16.0
 const COLOR_FAIRWAY := Color(0.596, 0.749, 0.494)   # brighter fairway green
@@ -149,9 +167,38 @@ func _ready() -> void:
 	clip_contents = true
 
 
-func set_hole(p_hole: HoleData) -> void:
-	hole = p_hole
+# `bake` = false skips the slope shading — the course editor rebuilds the
+# hole on every drag step and bakes once when the drag ends.
+func set_hole(p_hole: HoleData, bake: bool = true) -> void:
+	if hole != p_hole:
+		hole = p_hole
+		_hillshade = _bake_hillshade() if (hole and bake) else null
 	queue_redraw()
+
+
+# Light from the upper-left of the screen (toward -x, +y in yard-space):
+# slopes facing it brighten, slopes facing away darken. Baked into a small
+# texture so _draw() just stretches one image over the hole.
+func _bake_hillshade() -> ImageTexture:
+	var b := hole.bounds
+	var w: int = maxi(2, int(ceil(b.size.x / HILLSHADE_STEP)))
+	var h: int = maxi(2, int(ceil(b.size.y / HILLSHADE_STEP)))
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var light := Vector2(-1.0, 1.0).normalized()
+	for j in h:
+		# Row 0 is the top of the picture, which is the far (pin) end.
+		var y: float = b.position.y + b.size.y - (float(j) + 0.5) * HILLSHADE_STEP
+		for i in w:
+			var x: float = b.position.x + (float(i) + 0.5) * HILLSHADE_STEP
+			var g: Vector2 = hole.gradient_at(Vector2(x, y))
+			# Ground facing the light has its downhill direction pointing
+			# away from it, i.e. gradient along the light vector.
+			var lit: float = clampf(g.dot(light) * HILLSHADE_GAIN, -1.0, 1.0)
+			if lit >= 0.0:
+				img.set_pixel(i, j, Color(1.0, 0.98, 0.9, lit * 0.32))
+			else:
+				img.set_pixel(i, j, Color(0.08, 0.12, 0.06, -lit * 0.32))
+	return ImageTexture.create_from_image(img)
 
 
 func set_ball(p_pos: Vector2, p_path: Array) -> void:
@@ -241,18 +288,30 @@ func _draw_tier_bands(club: Dictionary, origin_px: Vector2, scale_px: float,
 # shot uses, so the yellow marks exactly the cards that earn the d20.
 func set_preview_landing(active: bool, from_pos: Vector2 = Vector2.ZERO,
 		landing: Vector2 = Vector2.ZERO, good: bool = true,
-		holed: bool = false) -> void:
+		holed: bool = false, carry_pos: Vector2 = Vector2.INF,
+		roll_path: Array = []) -> void:
 	if preview_landing_active == active \
 			and preview_landing_pos == landing \
 			and preview_landing_from == from_pos \
 			and preview_landing_holed == holed:
 		return
 	preview_landing_active = active
+	preview_carry_pos = landing if carry_pos == Vector2.INF else carry_pos
+	preview_roll_path = roll_path
 	preview_landing_from = from_pos
 	preview_landing_pos = landing
 	preview_landing_good = good
 	preview_landing_out = active and hole != null and hole.is_out_of_bounds(landing)
 	preview_landing_holed = holed and not preview_landing_out
+	queue_redraw()
+
+
+# The clean-strike read while aiming. Main.gd computes it from the same
+# ShotResolver.shot_outcome() the real shot uses.
+func set_aim_ghost(active: bool, carry_pos: Vector2 = Vector2.ZERO, roll_path: Array = []) -> void:
+	aim_ghost_active = active
+	aim_ghost_carry = carry_pos
+	aim_ghost_roll = roll_path
 	queue_redraw()
 
 
@@ -278,6 +337,7 @@ func set_aiming(enabled: bool, min_range: float = 0.0, max_range: float = 999.0,
 		# Leaving the aim step drops the yellow with it — a stale hole-out
 		# highlight next to a ball that has already been played is a lie.
 		aim_can_hole_out = false
+		aim_ghost_active = false
 	queue_redraw()
 
 
@@ -336,7 +396,7 @@ func _gui_input(event: InputEvent) -> void:
 # the ball is visibly traceable across the map rather than teleporting.
 # All distances in yards; base_dir is the player's chosen aim line (from
 # the click-to-aim step), not necessarily toward the pin.
-func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side: int, max_distance: float, on_done: Callable) -> void:
+func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side: int, max_distance: float, on_done: Callable, roll_path: Array = []) -> void:
 	if not hole:
 		on_done.call()
 		return
@@ -349,6 +409,7 @@ func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side:
 		_flight_trail = []
 		on_done.call()
 		return
+	_pending_roll = roll_path
 	# The card that was hovered is the one just played, and its
 	# mouse_exited never fires because the Form row is cleared out from
 	# under the cursor — so the preview has to be dropped here or it would
@@ -386,6 +447,10 @@ func _start_ball_flight(distance: float, degree: float, side: int, on_done: Call
 	var dir := _aim_base_dir.rotated(angle_rad)
 	var start_yard: Vector2 = _aim_origin
 	var end_yard: Vector2 = _aim_origin + dir * distance
+	# The resolved landing (wind and elevation included) is the first point
+	# of the run-out path — fly there, not to the end of the aimed line.
+	if not _pending_roll.is_empty():
+		end_yard = _pending_roll[0]
 
 	_flight_active = true
 	_flight_pos = start_yard
@@ -399,11 +464,51 @@ func _start_ball_flight(distance: float, degree: float, side: int, on_done: Call
 	var tw := create_tween()
 	tw.tween_method(func(t: float): _update_ball_flight(start_yard, end_yard, t),
 		0.0, 1.0, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+	# Then the run-out along the exact path ShotResolver rolled, easing to
+	# a stop so it reads as the ball losing pace.
+	var path: Array = _pending_roll
+	_pending_roll = []
+	var roll_len := _path_length(path)
+	if roll_len >= 1.0:
+		tw.tween_callback(func():
+			_flight_hop_height = 0.0
+			_flight_trail = [_flight_pos])
+		tw.tween_method(func(t: float): _update_ball_roll(path, roll_len, t),
+			0.0, 1.0, clamp(roll_len / 40.0, 0.25, 1.1)) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
 	tw.tween_callback(func():
 		_flight_active = false
 		_flight_trail = []
 		on_done.call()
 	)
+
+
+func _path_length(path: Array) -> float:
+	var total := 0.0
+	for i in range(path.size() - 1):
+		total += (path[i] as Vector2).distance_to(path[i + 1])
+	return total
+
+
+func _update_ball_roll(path: Array, total: float, t: float) -> void:
+	var want: float = total * t
+	var acc := 0.0
+	for i in range(path.size() - 1):
+		var a: Vector2 = path[i]
+		var b: Vector2 = path[i + 1]
+		var seg := a.distance_to(b)
+		if acc + seg >= want:
+			_flight_pos = a.lerp(b, (want - acc) / max(seg, 0.0001))
+			break
+		acc += seg
+		_flight_pos = b
+	_flight_hop_height = 0.0
+	_flight_trail.append(_flight_pos)
+	if _flight_trail.size() > 6:
+		_flight_trail.pop_front()
+	queue_redraw()
 
 
 func _update_ball_flight(start_yard: Vector2, end_yard: Vector2, t: float) -> void:
@@ -431,6 +536,8 @@ func _set_aim_distance(d: float) -> void:
 # margin) into the available Control rect, preserving aspect ratio and
 # flipping Y so "up" on screen is "toward the pin."
 func _yard_extent() -> Rect2:
+	if fixed_extent.has_area():
+		return fixed_extent
 	if not hole:
 		return Rect2(-50, -20, 100, 440)
 	# The drawn extent IS the playable extent: the rough rect painted from
@@ -566,6 +673,14 @@ func _draw() -> void:
 	_draw_green_fringe(hole.green_polygon)
 	_draw_mow_stripes(hole.green_polygon, COLOR_GREEN, COLOR_GREEN_STRIPE)
 
+	# Slope: shading over the whole hole, plus fall-line arrows on the
+	# green, where a yard of break decides a putt.
+	if _hillshade:
+		var top_left := _to_px(Vector2(extent.position.x, extent.position.y + extent.size.y))
+		var bottom_right := _to_px(Vector2(extent.position.x + extent.size.x, extent.position.y))
+		draw_texture_rect(_hillshade, Rect2(top_left, bottom_right - top_left), false)
+	_draw_green_slope()
+
 	# Tee marker: a small pair of tee-box pegs.
 	var tee_px := _to_px(hole.tee_pos)
 	draw_circle(tee_px + Vector2(-3, 0), 2.2, BogeyTheme.INK_SOFT)
@@ -626,6 +741,7 @@ func _draw() -> void:
 	if preview_landing_active:
 		var from_px := _to_px(preview_landing_from)
 		var land_px := _to_px(preview_landing_pos)
+		var carry_px := _to_px(preview_carry_pos)
 		# Out of bounds outranks good/bad: a "good" card that still puts you
 		# off the course costs a stroke, and that is the headline.
 		var col: Color = COLOR_PREVIEW_GOOD if preview_landing_good else COLOR_PREVIEW_BAD
@@ -638,8 +754,9 @@ func _draw() -> void:
 			col = COLOR_AIM_HOLE_OUT
 
 		# Dashed so it reads as a projection rather than the solid trail
-		# used for shots already played.
-		var seg := land_px - from_px
+		# used for shots already played. The flight runs to the carry spot;
+		# the run-out is dotted on from there to the rest marker.
+		var seg := carry_px - from_px
 		var seg_len := seg.length()
 		if seg_len > 1.0:
 			var dir := seg / seg_len
@@ -651,6 +768,9 @@ func _draw() -> void:
 				draw_line(from_px + dir * t, from_px + dir * t2,
 					Color(col, 0.75), 2.0)
 				t = t2 + gap
+		_draw_roll_path(preview_roll_path, col)
+		if carry_px.distance_to(land_px) > 4.0:
+			draw_arc(carry_px, 3.5, 0, TAU, 12, Color(col, 0.8), 1.5)
 
 		# Landing marker: a filled dot inside a ring, so it stays readable
 		# over both light fairway and dark rough.
@@ -671,6 +791,15 @@ func _draw() -> void:
 			draw_line(land_px + Vector2(-d, -d), land_px + Vector2(d, d), col, 2.0)
 			draw_line(land_px + Vector2(-d, d), land_px + Vector2(d, -d), col, 2.0)
 			draw_arc(land_px, 13.0, 0, TAU, 28, Color(col, 0.55), 1.5)
+
+	if aiming and aim_ghost_active:
+		# Where a clean strike of this aim comes down — wind and elevation
+		# move it off the crosshair. Carry only, no run-out: drawn faint,
+		# it's the baseline the Form card will bend.
+		var ghost_col := Color(BogeyTheme.INK, 0.55)
+		var ghost_px := _to_px(aim_ghost_carry)
+		draw_circle(ghost_px, 4.0, Color(COLOR_BALL, 0.7))
+		draw_arc(ghost_px, 4.0, 0, TAU, 14, ghost_col, 1.5)
 
 	if aiming and _hovering:
 		# Live crosshair: follows the cursor continuously; a click commits
@@ -721,6 +850,9 @@ func _draw() -> void:
 		draw_line(origin_px, end_px, COLOR_AIM_LINE, 2.0)
 		draw_circle(end_px, 3.5, COLOR_AIM_LINE)
 
+	if hole.wind != Vector2.ZERO or aiming or preview_landing_active:
+		_draw_wind_dial()
+
 	# Ball in flight: a fading motion trail behind the current flight
 	# position, plus a drop shadow offset from the ball to sell a hop/arc,
 	# so the ball is visibly traceable across the screen mid-shot.
@@ -752,6 +884,29 @@ func _draw() -> void:
 		draw_circle(ball_px + Vector2(0, 2), 3.5, COLOR_BALL_SHADOW)
 		draw_circle(ball_px, 5.0, COLOR_BALL)
 		draw_arc(ball_px, 5.0, 0, TAU, 16, COLOR_BALL_OUTLINE, 1.5)
+
+
+# Wind dial in the top-left corner: an arrow the way it blows, and the
+# speed. Screen-up is toward the pin, so the arrow reads straight off the map.
+func _draw_wind_dial() -> void:
+	var speed := Wind.mph(hole.wind)
+	var c := Vector2(MARGIN + 22, MARGIN + 22)
+	draw_circle(c, 18.0, Color(BogeyTheme.CARD_BG, 0.88))
+	draw_arc(c, 18.0, 0, TAU, 28, Color(BogeyTheme.INK, 0.35), 1.0)
+	var font := get_theme_default_font()
+	if speed < Wind.CALM_MPH:
+		draw_string(font, c + Vector2(-18, 4), "Calm", HORIZONTAL_ALIGNMENT_CENTER, 36, 10, BogeyTheme.INK_SOFT)
+		return
+	var dir_px := Vector2(hole.wind.x, -hole.wind.y).normalized()
+	var col: Color = BogeyTheme.INK if speed < 18 else BogeyTheme.SAND_DEEP
+	var tail := c - dir_px * 11.0
+	var tip := c + dir_px * 11.0
+	draw_line(tail, tip, col, 2.0)
+	var side := Vector2(-dir_px.y, dir_px.x)
+	draw_colored_polygon(PackedVector2Array([tip + dir_px * 2.0, tip - dir_px * 6.0 + side * 4.5,
+		tip - dir_px * 6.0 - side * 4.5]), col)
+	var label := "%d mph" % speed
+	draw_string(font, c + Vector2(-26, 32), label, HORIZONTAL_ALIGNMENT_CENTER, 52, 11, col)
 
 
 func _draw_dashed_line(from_px: Vector2, to_px: Vector2, col: Color, width: float, dash: float, gap: float) -> void:
@@ -908,3 +1063,49 @@ func _draw_green_fringe(green_poly: PackedVector2Array) -> void:
 		var dir := (pt - center)
 		expanded.append(pt + dir.normalized() * 6.0)
 	draw_colored_polygon(_to_px_polygon(expanded), COLOR_GREEN_FRINGE)
+
+
+# Dotted run-out: small beads along the roll path, so roll reads as a
+# different thing from the dashed flight.
+func _draw_roll_path(path: Array, col: Color) -> void:
+	if path.size() < 2:
+		return
+	var spacing := 5.0
+	var carry_over := 0.0
+	for i in range(path.size() - 1):
+		var a := _to_px(path[i])
+		var b := _to_px(path[i + 1])
+		var seg := a.distance_to(b)
+		var t := carry_over
+		while t < seg:
+			draw_circle(a.lerp(b, t / max(seg, 0.0001)), 1.4, col)
+			t += spacing
+		carry_over = t - seg
+
+
+# Fall-line chevrons on the green: point downhill, and only where it's
+# steep enough to matter.
+func _draw_green_slope() -> void:
+	if hole.green_tilt == Vector2.ZERO:
+		return
+	var r: float = hole.green_radius
+	var step: float = max(6.0, r / 2.5)
+	var col := Color(BogeyTheme.FAIRWAY_DEEP, 0.55)
+	var y := -r
+	while y <= r:
+		var x := -r
+		while x <= r:
+			var p: Vector2 = hole.pin_pos + Vector2(x, y)
+			if Geometry2D.is_point_in_polygon(p, hole.green_polygon) and p.distance_to(hole.pin_pos) > 3.0:
+				var g := hole.gradient_at(p)
+				if g.length() > 0.008:
+					var down := -g.normalized()
+					var c := _to_px(p)
+					var tip := _to_px(p + down * 2.0)
+					var dir_px := (tip - c).normalized()
+					var side := Vector2(-dir_px.y, dir_px.x)
+					var s := 3.0 + clampf(g.length() * 80.0, 0.0, 3.0)
+					draw_line(c + dir_px * s - side * 0.0, c - dir_px * s * 0.2 + side * s, col, 1.5)
+					draw_line(c + dir_px * s, c - dir_px * s * 0.2 - side * s, col, 1.5)
+			x += step
+		y += step

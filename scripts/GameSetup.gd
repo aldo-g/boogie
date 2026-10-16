@@ -34,6 +34,10 @@ static var seat_names: Dictionary = {}
 # machines start from different decks. Empty for local rounds.
 static var round_payload: Dictionary = {}
 
+# Set when the course editor launches a test round, so the round's Menu
+# button goes back to the editor instead of the title.
+static var return_to_editor: bool = false
+
 
 # Back to a plain solo round. Called when entering a local game so a
 # previous online session can't leak settings into it.

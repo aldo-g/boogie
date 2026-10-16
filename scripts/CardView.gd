@@ -16,8 +16,11 @@ signal picked(card_view: CardView)
 signal hover_started(card_view: CardView)
 signal hover_ended(card_view: CardView)
 
-const CARD_SIZE := Vector2(150, 190)
-const COMPACT_SIZE := Vector2(132, 168)
+# Sized for the longest content a card carries — a brand badge, a
+# two-line name ("MacGregorian Persimmon Driver"), the art, and the stats —
+# so nothing spills past the frame. Grow these rather than shrinking text.
+const CARD_SIZE := Vector2(164, 208)
+const COMPACT_SIZE := Vector2(142, 188)
 
 const CLUB_ART := {
 	"wood": preload("res://assets/art/clubs/wood.svg"),
@@ -99,11 +102,10 @@ func _build() -> void:
 	style.border_color = accent
 	style.set_border_width_all(_base_border)
 	style.border_width_top = 6 if not compact else 4
-	var margin: int = 10 if not compact else 5
-	style.content_margin_left = margin
-	style.content_margin_right = margin
-	style.content_margin_top = margin
-	style.content_margin_bottom = margin
+	style.content_margin_left = 10
+	style.content_margin_right = 10
+	style.content_margin_top = 8 if compact else 10
+	style.content_margin_bottom = 8 if compact else 10
 	_panel.add_theme_stylebox_override("panel", style)
 	_panel_style = style
 	_accent = accent
@@ -115,10 +117,14 @@ func _build() -> void:
 	_panel.add_child(vbox)
 
 	_header = Label.new()
-	_header.text = card.get("name", "?")
-	_header.add_theme_font_size_override("font_size", 11 if compact else 15)
+	# Non-breaking hyphens, so "7-Iron" never splits across lines as "7-"
+	# and "Iron".
+	_header.text = str(card.get("name", "?")).replace("-", "\u2011")
+	_header.add_theme_font_size_override("font_size", 15)
 	_header.add_theme_color_override("font_color", BogeyTheme.INK)
 	_header.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_header.max_lines_visible = 2
+	_header.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	vbox.add_child(_header)
 
 	if compact:
@@ -126,11 +132,9 @@ func _build() -> void:
 		# category tag and the yardage band. Brand is the read the draft
 		# turns on (Section 3A), so it leads rather than hiding in the
 		# stats line.
-		_header.add_theme_font_size_override("font_size", 17)
-
 		_add_brand_badge(vbox)
 
-		_icon = _make_icon(34)
+		_icon = _make_icon(30)
 		_icon.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		vbox.add_child(_icon)
 
@@ -166,7 +170,7 @@ func _build() -> void:
 
 	# Grows into whatever the stats leave free, so short cards get a bigger
 	# illustration instead of a blank foot.
-	_icon = _make_icon(46)
+	_icon = _make_icon(36)
 	_icon.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(_icon)
 
@@ -180,6 +184,7 @@ func _build() -> void:
 	_stats.add_theme_font_size_override("font_size", 12)
 	_stats.add_theme_color_override("font_color", BogeyTheme.INK_SOFT)
 	_stats.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_stats.max_lines_visible = 2
 	vbox.add_child(_stats)
 
 	if card.get("ability", "") != "":
@@ -188,6 +193,9 @@ func _build() -> void:
 		_ability.add_theme_font_size_override("font_size", 11)
 		_ability.add_theme_color_override("font_color", BogeyTheme.GOLD_800 if limited else accent)
 		_ability.autowrap_mode = TextServer.AUTOWRAP_WORD
+		_ability.max_lines_visible = 2
+		_ability.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		_ability.tooltip_text = card.ability
 		vbox.add_child(_ability)
 
 	if interactive:
@@ -198,18 +206,19 @@ func _build() -> void:
 
 func _stats_text() -> String:
 	var ctype: String = card.get("type", "")
-	return "%d-%d yds\nSweet Spot base: %s" % [
-		int(card.get("min_yard", 0)), int(card.get("max_yard", 0)), _base_width_label(ctype)]
+	return "%s · %d-%d yds\n%s" % [ctype.capitalize(),
+		int(card.get("min_yard", 0)), int(card.get("max_yard", 0)), _forgiveness_label(ctype)]
 
 
-func _base_width_label(ctype: String) -> String:
+# How much of a Form card's deviation the club lets through
+# (ShotResolver.BUFFER_BY_TYPE) — the club's real character now that the
+# old dice-era "Sweet Spot" width is gone.
+func _forgiveness_label(ctype: String) -> String:
 	match ctype:
-		"wood": return "narrow (4)"
-		"iron": return "medium (6)"
-		"wedge": return "wide (10)"
-		# The putter buffers deviation to zero (ShotResolver.BUFFER_BY_TYPE),
-		# so it never pushes the ball offline — its limit is pure distance.
-		"putter": return "no deviation"
+		"wood": return "Takes deviation in full"
+		"iron": return "Takes 75% of deviation"
+		"wedge": return "Halves deviation"
+		"putter": return "Never strays offline"
 	return "—"
 
 
@@ -331,10 +340,9 @@ func _build_detail() -> void:
 	box.add_child(_detail_line("%d-%d yds carry" % [
 		int(card.get("min_yard", 0)), int(card.get("max_yard", 0))],
 		13, BogeyTheme.INK))
-	# The Sweet Spot width is the club's real character — it decides how
-	# forgiving the swing is — and the compact face has no room for it.
-	box.add_child(_detail_line("Sweet Spot: %s" % _base_width_label(ctype),
-		12, BogeyTheme.NEUTRAL_700))
+	# Forgiveness is the club's real character — how much of a bad Form
+	# card's pull reaches the ball — and the compact face has no room for it.
+	box.add_child(_detail_line(_forgiveness_label(ctype), 12, BogeyTheme.NEUTRAL_700))
 	if ctype == "putter":
 		box.add_child(_detail_line(
 			"Playable anywhere. On the green, switches to the putt meter.",
