@@ -66,18 +66,10 @@ func _ready() -> void:
 # ShotResolver.putt_read(), so the meter shows the green, not hides it.
 func begin(dist_yards: float, shift: float = 0.0, band_mult: float = 1.0) -> void:
 	distance_yards = dist_yards
-	var t: float = clampf(
-		(dist_yards - NEAR_YARDS) / (FAR_YARDS - NEAR_YARDS), 0.0, 1.0)
-	# Ease the curve so difficulty ramps hardest over the first stretch —
-	# the jump from a 3-footer to a 12-footer should bite more than the
-	# jump from 25 to 34 yards, where it's already a lag putt either way.
-	var eased: float = sqrt(t)
-	_sunk_half = lerpf(SUNK_HALF_NEAR, SUNK_HALF_FAR, eased)
-	_close_half = lerpf(CLOSE_HALF_NEAR, CLOSE_HALF_FAR, eased)
-	_speed = lerpf(SPEED_NEAR, SPEED_FAR, eased)
-	# Capped so even a Steady Hands tap-in leaves some bar to miss.
-	_sunk_half = minf(_sunk_half * band_mult, 0.4)
-	_close_half = maxf(minf(_close_half * band_mult, 0.48), _sunk_half)
+	var b := bands(dist_yards, band_mult)
+	_sunk_half = b.sunk_half
+	_close_half = b.close_half
+	_speed = b.speed
 	_center = 0.5 + shift
 
 	_pos = randf() * 0.35          # vary the start so it can't be muscle-memoried
@@ -87,6 +79,25 @@ func begin(dist_yards: float, shift: float = 0.0, band_mult: float = 1.0) -> voi
 	active = true
 	set_process(true)
 	queue_redraw()
+
+
+# The meter's geometry for a putt: band half-widths as fractions of the
+# bar, and the sweep speed in bar widths per second. Static so the bot
+# (GreedyBot.gd) putts against the same numbers the player sees.
+static func bands(dist_yards: float, band_mult: float = 1.0) -> Dictionary:
+	var t: float = clampf(
+		(dist_yards - NEAR_YARDS) / (FAR_YARDS - NEAR_YARDS), 0.0, 1.0)
+	# Ease the curve so difficulty ramps hardest over the first stretch —
+	# the jump from a 3-footer to a 12-footer should bite more than the
+	# jump from 25 to 34 yards, where it's already a lag putt either way.
+	var eased: float = sqrt(t)
+	var sunk_half: float = lerpf(SUNK_HALF_NEAR, SUNK_HALF_FAR, eased)
+	var close_half: float = lerpf(CLOSE_HALF_NEAR, CLOSE_HALF_FAR, eased)
+	# Capped so even a Steady Hands tap-in leaves some bar to miss.
+	sunk_half = minf(sunk_half * band_mult, 0.4)
+	close_half = maxf(minf(close_half * band_mult, 0.48), sunk_half)
+	return {"sunk_half": sunk_half, "close_half": close_half,
+		"speed": lerpf(SPEED_NEAR, SPEED_FAR, eased)}
 
 
 func stop_putt() -> void:
