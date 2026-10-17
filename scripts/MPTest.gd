@@ -1,5 +1,7 @@
 extends SceneTree
 
+const TestBags := preload("res://scripts/TestBags.gd")
+
 # ---------------------------------------------------------
 # Headless flow harness for hot-seat rounds — a dev tool, not shipped
 # behaviour. Drives full 18-hole rounds for 1..4 players through the REAL
@@ -61,6 +63,10 @@ func _run_round(count: int) -> bool:
 		return false
 
 	main.map_view.skip_animation = true
+	# Seat 0 keeps the drafted starter bag; the rest carry ability
+	# loadouts, so a group round exercises every club ability too.
+	for i in range(1, main.players.size()):
+		main.players[i].hand = TestBags.loadout(i - 1)
 
 	var ok := true
 	var order_violations := 0
@@ -125,11 +131,18 @@ func _turn_order_holds(main) -> bool:
 # Performs one action for the current state. Returns false if the state
 # offers nothing to do, which means the flow is stuck.
 func _step(main) -> bool:
+	var ability := TestBags.pick_ability(main, 0.3)
+	if ability != "":
+		main.on_ability(ability)
+		return true
+	if TestBags.wants_range(main, 0.15):
+		main.on_range_session()
+		return true
 	match main.state:
 		main.State.CLUB_SELECT:
 			if main.hand.is_empty():
 				return false
-			main.on_club_select(randi() % main.hand.size())
+			main.on_club_select(main.playable_club_indices().pick_random())
 		main.State.AIM:
 			main._on_aim_picked(main.map_view.aim_target)
 		main.State.FORM_DRAW:

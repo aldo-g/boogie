@@ -1,0 +1,88 @@
+{
+	"_comment": "The club roster, loaded by scripts/ClubRoster.gd. Yardage is CARRY (GAME_DESIGN.md Section 5). Each entry becomes a club Dictionary with name, min_yard, max_yard, type, brand, limited and ability; omitted fields default to brandless, not limited, and no ability text. `ability` is the card text; `effects` is what the rules read (see ClubAbilities.gd), so the two must agree.",
+	"_comment_starter": "Bogey-Mart (Section 3A): the starting bag. Never in the draft pool.",
+	"starter": [
+		{"name": "Bogey-Mart Driver", "min_yard": 170, "max_yard": 210, "type": "wood"},
+		{"name": "Bogey-Mart 7-Iron", "min_yard": 90, "max_yard": 135, "type": "iron"},
+		{"name": "Bogey-Mart Putter", "min_yard": 0, "max_yard": 35, "type": "putter"}
+	],
+	"_comment_standards": "Brandless, always in the pool at standard_copies each, so every yardage gap stays covered.",
+	"standard_copies": 3,
+	"standards": [
+		{"name": "Driver", "min_yard": 180, "max_yard": 230, "type": "wood"},
+		{"name": "3-Wood", "min_yard": 160, "max_yard": 195, "type": "wood"},
+		{"name": "5-Iron", "min_yard": 135, "max_yard": 170, "type": "iron"},
+		{"name": "7-Iron", "min_yard": 95, "max_yard": 145, "type": "iron"},
+		{"name": "9-Iron", "min_yard": 75, "max_yard": 105, "type": "iron"},
+		{"name": "Pitching Wedge", "min_yard": 50, "max_yard": 90, "type": "wedge"},
+		{"name": "Sand Wedge", "min_yard": 20, "max_yard": 60, "type": "wedge"},
+		{"name": "Putter", "min_yard": 0, "max_yard": 35, "type": "putter"}
+	],
+	"_comment_brands": "Branded clubs (Section 3C), keyed by brand id. Only the run's live brands enter the pool.",
+	"brands": {
+		"titanist": [
+			{"name": "Titanist Pro Driver", "min_yard": 185, "max_yard": 225, "type": "wood", "ability": "Buffers deviation 20% better; flies only 70% of the aim from rough", "effects": {"buffer": 0.8, "rough_cap": 0.7}},
+			{"name": "Titanist 4-Iron", "min_yard": 150, "max_yard": 180, "type": "iron", "ability": "Buffers deviation 25% better", "effects": {"buffer": 0.75}},
+			{"name": "Titanist 6-Iron", "min_yard": 120, "max_yard": 150, "type": "iron", "ability": "Buffers deviation 25% better", "effects": {"buffer": 0.75}},
+			{"name": "Titanist 8-Iron", "min_yard": 85, "max_yard": 120, "type": "iron", "ability": "Buffers deviation 25% better", "effects": {"buffer": 0.75}},
+			{"name": "Titanist Tour Wedge", "min_yard": 45, "max_yard": 85, "type": "wedge", "ability": "Buffers deviation 25% better", "effects": {"buffer": 0.75}},
+			{"name": "Titanist Blade Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "Once per round, if a putt misses, take it again with no stroke added", "effects": {"power": "putt_retry"}},
+			{"name": "Titanist Fairway 5", "min_yard": 145, "max_yard": 185, "type": "wood", "ability": "Buffers deviation 20% better", "effects": {"buffer": 0.8}}
+		],
+		"callowell": [
+			{"name": "Callowell Big Deal Driver", "min_yard": 175, "max_yard": 230, "type": "wood", "ability": "Chunk and Top played with this club hit at half severity", "effects": {"soft_mishits": true}},
+			{"name": "Callowell 6-Iron", "min_yard": 110, "max_yard": 165, "type": "iron", "ability": "One of the widest irons in the game"},
+			{"name": "Callowell Rescue", "min_yard": 125, "max_yard": 175, "type": "iron", "ability": "No distance penalty from rough", "effects": {"rough_cap": 1.0}},
+			{"name": "Callowell 9-Iron", "min_yard": 70, "max_yard": 115, "type": "iron", "ability": "Wide band"},
+			{"name": "Callowell Gap Wedge", "min_yard": 40, "max_yard": 85, "type": "wedge", "ability": "A Shank played with this club cannot downgrade your lie", "effects": {"no_lie_downgrade": true}},
+			{"name": "Callowell Sand Wedge", "min_yard": 20, "max_yard": 65, "type": "wedge", "ability": "Wide band"},
+			{"name": "Callowell Mallet Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "Putts of 10+ yds get a 20% wider band", "effects": {"putt_long_band": 1.2}}
+		],
+		"pingwell": [
+			{"name": "Ping-Well i-Series 3", "min_yard": 155, "max_yard": 200, "type": "iron", "ability": "Widened Mid tier: the middle half of the band, not the middle third", "effects": {"mid_span": 0.5}},
+			{"name": "Ping-Well i-Series 5", "min_yard": 130, "max_yard": 175, "type": "iron", "ability": "Widened Mid tier: the middle half of the band, not the middle third", "effects": {"mid_span": 0.5}},
+			{"name": "Ping-Well i-Series 8", "min_yard": 80, "max_yard": 125, "type": "iron", "ability": "Widened Mid tier: the middle half of the band, not the middle third", "effects": {"mid_span": 0.5}},
+			{"name": "Ping-Well Driver", "min_yard": 175, "max_yard": 220, "type": "wood", "ability": "Widened Mid tier: the middle half of the band, not the middle third", "effects": {"mid_span": 0.5}},
+			{"name": "Ping-Well Lob Wedge", "min_yard": 15, "max_yard": 55, "type": "wedge", "ability": "Played from rough or sand, adds a Flop Shot to your Form draw", "effects": {"power": "lob_flop"}},
+			{"name": "Ping-Well Gap Wedge", "min_yard": 45, "max_yard": 90, "type": "wedge", "ability": "Widened Mid tier: the middle half of the band, not the middle third", "effects": {"mid_span": 0.5}},
+			{"name": "Ping-Well Mallet Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "Steady Hands widens the sunk band twice as much", "effects": {"steady_mult": 2.0}}
+		],
+		"macgregorian": [
+			{"name": "MacGregorian Persimmon Driver", "min_yard": 165, "max_yard": 220, "type": "wood", "ability": "The only Wood playable from a bunker", "effects": {"bunker_playable": true}},
+			{"name": "MacGregorian Brassie", "min_yard": 150, "max_yard": 190, "type": "wood", "ability": "Bump and Run with this club carries a third and runs the rest", "effects": {"bump_run_share": 0.67}},
+			{"name": "MacGregorian Spoon", "min_yard": 135, "max_yard": 175, "type": "wood", "ability": "No distance penalty from rough", "effects": {"rough_cap": 1.0}},
+			{"name": "MacGregorian Mashie", "min_yard": 115, "max_yard": 155, "type": "iron", "ability": "No distance penalty from rough", "effects": {"rough_cap": 1.0}},
+			{"name": "MacGregorian Mid-Mashie", "min_yard": 135, "max_yard": 175, "type": "iron", "ability": "No distance penalty from rough", "effects": {"rough_cap": 1.0}},
+			{"name": "MacGregorian Niblick", "min_yard": 45, "max_yard": 95, "type": "wedge", "ability": "While in your bag, hazards add no bad cards to your Form deck", "effects": {"blocks_form_decay": true}},
+			{"name": "MacGregorian Jigger", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "While in your bag, a ball on the green's fringe is putted", "effects": {"fringe_putt": true}}
+		],
+		"slazinger": [
+			{"name": "Slazinger Cannon Driver", "min_yard": 190, "max_yard": 255, "type": "wood", "ability": "Longest in the game; buffers deviation 30% worse", "effects": {"buffer": 1.3}},
+			{"name": "Slazinger Launch Wood", "min_yard": 170, "max_yard": 215, "type": "wood", "ability": "Big Strike with this club flies its max carry +10 yds", "effects": {"big_strike_bonus": 10}},
+			{"name": "Slazinger Power Iron", "min_yard": 145, "max_yard": 190, "type": "iron", "ability": "Long for an iron; buffers 20% worse", "effects": {"buffer": 1.2}},
+			{"name": "Slazinger Deep Iron", "min_yard": 120, "max_yard": 165, "type": "iron", "ability": "Buffers 20% worse", "effects": {"buffer": 1.2}},
+			{"name": "Slazinger Blast Wedge", "min_yard": 35, "max_yard": 90, "type": "wedge", "ability": "Flies 75% of the aim out of sand, not 50%", "effects": {"bunker_cap": 0.75}},
+			{"name": "Slazinger Long Iron", "min_yard": 165, "max_yard": 215, "type": "iron", "ability": "Buffers 20% worse", "effects": {"buffer": 1.2}},
+			{"name": "Slazinger Heavy Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "Putts of 10+ yds: 25% wider band. Under 4 yds: 20% narrower", "effects": {"putt_long_band": 1.25, "putt_short_band": 0.8}}
+		],
+		"nimbus": [
+			{"name": "Nimbus Hybrid 3", "min_yard": 150, "max_yard": 205, "type": "iron", "ability": "Counts as both Wood and Iron for club riders", "effects": {"categories": ["wood", "iron"]}},
+			{"name": "Nimbus Hybrid 5", "min_yard": 125, "max_yard": 170, "type": "iron", "ability": "Counts as both Wood and Iron for club riders", "effects": {"categories": ["wood", "iron"]}},
+			{"name": "Nimbus Hybrid 7", "min_yard": 100, "max_yard": 150, "type": "iron", "ability": "Counts as both Wood and Iron for club riders", "effects": {"categories": ["wood", "iron"]}},
+			{"name": "Nimbus All-Rounder", "min_yard": 100, "max_yard": 155, "type": "iron", "ability": "Wide band, no rider"},
+			{"name": "Nimbus Driver", "min_yard": 175, "max_yard": 225, "type": "wood", "ability": "Counts as both Wood and Iron for club riders", "effects": {"categories": ["wood", "iron"]}},
+			{"name": "Nimbus Utility Wedge", "min_yard": 30, "max_yard": 80, "type": "wedge", "ability": "Once per hole, plays from rough or sand as though from the fairway", "effects": {"power": "utility_any_lie"}},
+			{"name": "Nimbus Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "No rider — pure flexible filler"}
+		]
+	},
+	"_comment_limited": "Limited editions: one copy each, in the pool only when their brand is live.",
+	"limited": [
+		{"name": "Gold Cleek", "min_yard": 140, "max_yard": 175, "type": "iron", "brand": "titanist", "limited": true, "ability": "Once per hole, create a Pure Strike. With a Titanist Wood in bag: twice per hole", "effects": {"power": "gold_cleek"}},
+		{"name": "The Bulger", "min_yard": 185, "max_yard": 240, "type": "wood", "brand": "slazinger", "limited": true, "ability": "Create a Big Strike when playing a Wood from rough/bunker, once per hole. With any Wedge in bag: from any lie", "effects": {"power": "bulger"}},
+		{"name": "Old Tom's Niblick", "min_yard": 30, "max_yard": 70, "type": "wedge", "brand": "macgregorian", "limited": true, "ability": "Landing in a bunker adds a Flop Shot to your next draw. With a MacGregorian Wood: once per hole, landing on the fairway adds a Bump and Run", "effects": {"power": "old_tom"}},
+		{"name": "The Rutter", "min_yard": 35, "max_yard": 80, "type": "wedge", "brand": "callowell", "limited": true, "ability": "Each hazard purges a bad card from your Form deck. With a Callowell Iron in bag: purges two", "effects": {"power": "rutter"}},
+		{"name": "Old Reliable Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "brand": "pingwell", "limited": true, "ability": "Once per round, Steady Hands on a putt. With another Ping-Well club: once every six holes", "effects": {"power": "old_reliable"}},
+		{"name": "Persimmon Spoon", "min_yard": 155, "max_yard": 200, "type": "wood", "brand": "macgregorian", "limited": true, "ability": "No distance penalty from rough. With a 2nd MacGregorian: plays from any lie, sand included, as though from the fairway", "effects": {"rough_cap": 1.0, "power": "persimmon_spoon"}},
+		{"name": "The Equaliser", "min_yard": 115, "max_yard": 160, "type": "iron", "brand": "nimbus", "limited": true, "ability": "With 3+ distinct brands in your bag, counts as EVERY brand for set purposes", "effects": {"power": "equaliser"}}
+	]
+}

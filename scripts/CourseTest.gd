@@ -183,7 +183,7 @@ func _play_round(main) -> bool:
 		actions += 1
 		match main.state:
 			main.State.CLUB_SELECT:
-				main.on_club_select(randi() % main.hand.size())
+				main.on_club_select(main.playable_club_indices().pick_random())
 			main.State.AIM:
 				main._on_aim_picked(main.map_view.aim_target)
 			main.State.FORM_DRAW:

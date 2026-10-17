@@ -1,4 +1,4 @@
-# Bogey — Game Design Document (Working Title)
+# Pars and Chars — Game Design Document
 
 *A mid-weight golf deckbuilder. 60-90 min per round. Solo vs. par or head-to-head. Video game (Steam target), built as a card-resolution deckbuilder in the spirit of Slay the Spire — no dice, and no timing checks anywhere in the tee-to-green game. Putting is the deliberate exception: it's a timing meter whose difficulty scales with distance (Section 6).*
 
@@ -230,7 +230,7 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 | Club | Category | Band | Rider |
 |---|---|---|---|
 | MacGregorian Persimmon Driver | Wood | 165-220 | The only Wood **playable from a bunker** |
-| MacGregorian Brassie | Wood | 150-190 | Bump and Run played with this gains **+20 yds roll** |
+| MacGregorian Brassie | Wood | 150-190 | Bump and Run played with this carries **a third** and runs the rest (instead of half and half) |
 | MacGregorian Mashie | Iron | 115-155 | Ignores the rough's distance penalty |
 | MacGregorian Niblick | Wedge | 45-95 | Landing in a hazard with this in your Bag adds **no** bad card to the Form deck |
 
@@ -318,20 +318,21 @@ Clubs modulate how strongly a Form card's effect applies: a forgiving Wedge migh
 
 | Card | Effect |
 |---|---|
-| Pure Strike | Full accurate distance, zero deviation — the reliable baseline |
+| Pure Strike | Full accurate distance, zero deviation — the reliable baseline. **Created only** (never in the deck) |
+| Big Strike | Flies the club's full carry, dead straight, ignoring the rough/bunker cut. **Created only** |
 | Stinger | Low, controlled flight — minimal deviation, slightly reduced distance, runs out 1.8x, punches under the wind (0.4x flight) |
 | Controlled Draw | Deliberate leftward curve, usable tactically around a left-side dogleg/hazard |
 | Controlled Fade | Same idea, rightward |
 | Flop Shot | High, soft landing — ignores rough/bunker penalty entirely, stops dead (0.15x roll), balloons in wind (1.6x flight) |
 | Bump and Run | Low running shot — carries half the aimed distance (0.5x flight, so the wind barely touches it) and runs the rest to the target. The run is judged: struck with the pace the slope asks for, up to 1.6x the planned run — so rough on the way leaves it short, sand or water in its path stops it, and side slope still bends its line. No green check, since a low runner arrives without backspin. |
-| Steady Hands | Widens the sunk band on your next putt, as if the putt were a short one |
-| In the Zone | Cancel any one bad Form card in your hand without playing it |
+| Steady Hands | Widens the putt meter's bands on this putt (+60%; Ping-Well Mallet doubles that). **Created only**, used on the green |
+| In the Zone | Plays straight at standard distance, and removes the worst bad card from your Form deck |
 
 ### Form deck composition & hazards
 
-- Starts weighted toward good cards (~65% good / 35% bad) so early holes feel encouraging.
+- Starts weighted toward good cards — 24 good / 12 bad (67%): Stinger, Controlled Draw, Controlled Fade, Flop Shot, Bump and Run and In the Zone ×4, and the six bad cards ×2 — so early holes feel encouraging.
 - Every hazard hit adds bad Form cards into the **Form deck** (not directly into your Bag) — this degrades the quality of future draws for the rest of the round rather than permanently cluttering your Bag. A rough patch of holes genuinely makes your swing worse as the round goes on.
-- A "range session" action (costs a turn, or usable between holes) purges bad cards from the Form deck.
+- **Range session (decided 2026-10-17)**: at the end of any hole, instead of drafting a club, remove the 2 worst bad cards from your Form deck. It costs bag progress rather than strokes, and it's the way back from a death spiral.
 
 ### Created cards ("exhaust" resources, not draws)
 
@@ -348,6 +349,14 @@ To stop top-tier good cards (like Pure Strike) from being either "always in the 
 
 **The design principle**: Passive fits abilities that reward good *positional play* (reaching for the right club in a bad lie); Active fits abilities meant to be *saved for a clutch moment* (the timing decision itself is the interesting choice).
 
+**As built (2026-10-17) — charges, spent in the moment.**
+- **Sources**: only clubs whose text says so create cards — the limited editions below and a few branded riders (the Ping-Well Lob Wedge's Flop Shot). The category table above is the *flavour* each type's creators follow, not a rule every club gets; a bag of standard clubs creates nothing. That keeps created cards scarce enough to be worth drafting for.
+- **Actives** are buttons in an Abilities box under the shot panel, each with a charge per hole, per round, or per six holes. Pressing one puts the card straight into the current Form hand. There is no reserve: the decision is which shot of the hole (or round) to spend the charge on.
+- **Passives** add their card to the player's *next* Form draw (Old Tom's Niblick after a bunker) or to the club's own draw (the Lob Wedge from rough or sand).
+- **A created card always exhausts**, played or not. That includes the bad card a bunker or an Extreme Finesse shot forces on you, so that card never reaches the discard pile.
+- **A created card turns a forced draw into a choice**: in sand the club still forces a bad card, but a created card beside it is the bail-out.
+- Activated set bonuses (Titanist 7 re-draw, MacGregorian 7 improve lie, Nimbus 2 tier boost, Nimbus 7 ideal club) sit in the same box with the same charges. **Slazinger 7** was "created cards don't exhaust", which means nothing once nothing is held, so it became **once-per-round abilities recharge every hole**.
+
 **Limited Edition club abilities:**
 
 | Card | Ability | Trigger |
@@ -357,6 +366,9 @@ To stop top-tier good cards (like Pure Strike) from being either "always in the 
 | The Rutter | Automatically purges one bad Form card whenever you're in a hazard | Passive |
 | Old Tom's Niblick | Creates a Flop Shot card whenever you land in a bunker | Passive |
 | Old Reliable Putter | Once per round, you may create a Steady Hands card | Active |
+| Persimmon Spoon | No rough penalty; with a 2nd MacGregorian, plays from any lie (sand included) as the fairway | Passive |
+| Nimbus Utility Wedge | Once per hole, plays from rough or sand as though from the fairway | Passive |
+| Titanist Blade Putter | Once per round, a missed putt is taken again with no stroke added | Active |
 
 ### Putting cross-trigger (the Yips)
 
@@ -407,7 +419,7 @@ Every hole has ground: a long profile (heights in feet at stations along the hol
 - **Elevation changes carry**: 1 yard of carry lost per yard (3 ft) the landing sits above the launch, gained when it sits below. A raised green plays longer; a drop shot plays shorter.
 - **Run-out on flat fairway** is a share of carry: Woods 12%, Irons 5%, Wedges 2%. Form cards scale it (Stinger 1.8x, Top 2x, Chunk 0.5x, Flop 0.15x). Bump and Run replaces it: half carry, half judged run to the target (see Section 4).
 - **Turf**: rough grabs the ball (3x fairway resistance); sand stops it where it enters; water and out of bounds end the roll with their usual penalties. Greens are quick (0.4x resistance), but a ball that **pitches straight onto the green checks** and keeps only 35% of its run-out — so irons hold greens, and a ball run on from short of the green keeps its pace.
-- **Note**: the MacGregorian Brassie's "+20 yds roll on Bump and Run" rider is card text only — it was never wired into the rules, and Bump and Run no longer has a flat roll bonus to add to. Decide its new meaning (e.g. a longer judged run, RUN_JUDGE_MAX) before implementing it.
+- **Note**: the MacGregorian Brassie's old "+20 yds roll on Bump and Run" had nothing left to add to once Bump and Run became a judged run. As of 2026-10-17 it changes the split instead: a Brassie Bump and Run carries a third of the way and runs two thirds.
 - **Slope** pulls the rolling ball downhill: on fairway, a 12.5% grade is steep enough that the ball never settles. Greens' 1.5-3% tilts visibly bend a run-out.
 - **The cup**: a ball that rolls within 1.2 yds of the pin has found the hole and earns the hole-out d20, the same as one that pitches on it.
 - **On the map**: hillshading over the whole hole, fall-line chevrons on the green, and a side-view elevation strip under the hole plate showing the ball, the flag, and how far above or below you the flag sits.
@@ -496,6 +508,8 @@ Clients send intent ("club 3, aiming here, Form card 2"); the host resolves with
 
 Deck shuffles are deliberately **not** made deterministic. Doing so would need every peer's generator in lockstep for the whole session, which is the coupling host authority exists to avoid. Instead the shuffled order *is* the message: a Form deck travels as a list of card names.
 
+**Drafts run at once (2026-10-17).** The drafts are independent, so online every player drafts simultaneously on their own machine and the next hole starts when the last pick is in; a player who's done sees who is still choosing. The host accepts a draft action from any seat that still owes one. Each machine shows its own seat's draft, so mid-draft the "active seat" and phase differ between machines by design — what they must agree on is every player's draft stage, and they do, because every machine replays the same picks in the same order.
+
 **Disconnects:** a departed player's seat is retired, their hole conceded, and the round continues. Turn order skips them — necessary, since they would otherwise stay "furthest from the pin" forever and the hole would never end. If the host leaves, the round ends; there is no migration, which would be weeks of work against a problem friends solve socially.
 
 **One accepted cheat surface:** the putting meter is a real-time timing check on the putting player's own machine, and the host cannot verify the reported result. Trusting the client is the right call for a friends-only game; the alternative makes the one timing moment in the game feel laggy. Hardening it later means the host owning the meter clock.
@@ -520,7 +534,7 @@ These are the game's actual feel — everything else is dressing:
 
 1. **Full Form card list** (currently a first draft of 6 bad / 8 good) — needs expansion to a real deck-sized set.
 2. **Swing-tier draw-bias percentages** — exact numbers for how much full swing vs. finesse shifts your odds.
-3. **Created card sources and exhaust economy** — how often players should realistically have a Pure Strike/Big Strike available.
+3. **Created card sources and exhaust economy** — how often players should realistically have a Pure Strike/Big Strike available. *Sources and spending are now decided (Section 4, "As built"); how often a typical bag actually gets one is still to measure.*
 4. **Putting meter difficulty curve** — band widths and marker speed across the distance range. Distance is currently the only input.
 5. **Whether brand sets actually get completed** — the single riskiest new assumption. If a typical 18-draft run never reaches a 4-set, the whole synergy layer is decoration. Measure this before tuning any individual bonus.
 6. **The coverage-vs-sets budget** — how many of the 14 slots a course's distance spread genuinely demands. Target ~8-9 for coverage, leaving 5-6 discretionary (Section 3A). Measure it on a real layout rather than guessing, but **keep the set bonuses themselves course-independent** so the measurement only tunes the budget, never the bonuses.
@@ -564,8 +578,9 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 - **Whether the four live brands should be revealed pre-round** (current stance: yes, Section 3B) or discovered — the reveal fits the game's known-information stance, but discovery may make the early draft more exciting.
 - In multiplayer, whether to **introduce** club-deck contention at all. As built, each player drafts from their own pool, so sniping cannot happen (Section 7). The open question is whether the draft feels inert without it — and if so, whether a shared pool with sequential picks is good tension or just a feel-bad.
 - Whether downtime is acceptable at 4 players, hot-seat or online, or whether the per-shot turn handover needs to batch somehow. Online makes simultaneous declaration buildable if it isn't — that's the escape hatch.
-- Whether the end-of-hole draft should stay sequential online. It is one player drafting while three watch, 18 times a round, and the drafts are independent so they *could* run at once. Kept sequential deliberately to preserve the ceremony; revisit if it drags.
+- ~~Whether the end-of-hole draft should stay sequential online~~ **Decided 2026-10-17:** online, everyone drafts at once (see "Online play — as built"). Hot-seat stays sequential — one screen, one picker.
 - Whether Form cards should differ between clubs (e.g. a Driver-specific bad card set vs. a universal pool) or stay universal for simplicity.
 - Full Form card list is still a first draft (6 bad / 8 good) — needs expansion to a real deck-sized set before implementation.
-- How many Created-card sources should exist across the full club list (standard clubs too, or Limited Edition only?) — needs deciding before the full club list is finalized.
-- Whether "Active" abilities need an explicit UI/UX moment (a visible button/prompt) versus being framed as "you may" in the moment of club selection.
+- ~~How many Created-card sources should exist across the full club list~~ **Decided 2026-10-17:** only clubs whose text says so (limited editions and a few branded riders). Standard clubs create nothing.
+- ~~Whether "Active" abilities need an explicit UI/UX moment~~ **Decided 2026-10-17:** yes — a button with its charges shown, in an Abilities box under the shot panel.
+- Whether the Bulger, Gold Cleek and Old Reliable charges are the right size. Gold Cleek in particular hands out a Pure Strike every hole; if it decides rounds, make it once per round with the Titanist Wood rider raising it to once every six holes.

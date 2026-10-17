@@ -14,7 +14,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
-config/name="Bogey Prototype"
+config/name="Pars and Chars"
 run/main_scene="res://scenes/Title.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 

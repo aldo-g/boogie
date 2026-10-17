@@ -24,6 +24,12 @@ var flight: float = 1.0           # how high it flies, so how much the wind gets
 var run_share: float = 0.0        # share of the shot played along the ground (Bump and Run)
 var downgrades_lie: bool          # Shank: worsens the resulting lie by one step
 var is_yips: bool                 # Only meaningful on the green — see Section 4 cross-trigger
+var to_max_band: bool = false     # Big Strike: flies the club's full carry, whatever the aim
+var purges_bad: int = 0           # In the Zone: bad cards it removes from your Form deck
+# Created by a club ability rather than drawn (Section 4 "Created cards").
+# A created card exhausts: played or not, it never goes back into the
+# Form deck.
+var created: bool = false
 
 
 func _init(p_name: String, p_good: bool, p_side: int = 0, p_degrees: float = 0.0,
@@ -58,6 +64,8 @@ func effect_text() -> String:
 		bits.append("%d%% distance" % int(round(distance_mult * 100.0)))
 	elif distance_mult > 1.001:
 		bits.append("+%d%% distance" % int(round((distance_mult - 1.0) * 100.0)))
+	if to_max_band:
+		bits.append("flies the club's full carry, whatever you aimed")
 	if ignores_hazard_penalty:
 		bits.append("ignores rough/bunker penalty")
 	if run_share > 0.0:
@@ -76,6 +84,8 @@ func effect_text() -> String:
 		bits.append("downgrades your lie")
 	if is_yips:
 		bits.append("taints your next putt if played")
+	if purges_bad > 0:
+		bits.append("removes a bad card from your Form deck")
 	if bits.is_empty():
 		bits.append("No deviation, standard distance")
 	return "; ".join(bits)
@@ -100,7 +110,12 @@ func with_run(share: float) -> FormCard:
 	return self
 
 
-# --- Card definitions (Section 4 — first-draft list, 6 bad / 8 good) ---
+func as_created() -> FormCard:
+	created = true
+	return self
+
+
+# --- Card definitions (Section 4) ---
 static func make(card_name: String) -> FormCard:
 	match card_name:
 		# --- Bad ---
@@ -130,13 +145,30 @@ static func make(card_name: String) -> FormCard:
 		"Bump and Run":
 			return FormCard.new("Bump and Run", true).with_flight(0.5).with_run(0.5)
 		"Steady Hands":
+			# Created only, and on the green only (Old Reliable Putter): it
+			# widens the putt meter's sunk band rather than shaping a shot.
 			return FormCard.new("Steady Hands", true)
 		"In the Zone":
-			return FormCard.new("In the Zone", true)
+			var zone := FormCard.new("In the Zone", true)
+			zone.purges_bad = 1
+			return zone
+		"Big Strike":
+			# Created only (The Bulger). Dead straight, the club's full
+			# carry, and the lie takes no cut.
+			var big := FormCard.new("Big Strike", true, 0, 0.0, 1.0, true)
+			big.to_max_band = true
+			return big
 	push_error("FormCard.make(): unknown card '%s'" % card_name)
 	return FormCard.new(card_name, true)
 
 
 const BAD_NAMES := ["Hook", "Slice", "Top", "Chunk", "Shank", "Yips"]
 const GOOD_NAMES := ["Pure Strike", "Stinger", "Controlled Draw", "Controlled Fade",
-	"Flop Shot", "Bump and Run", "Steady Hands", "In the Zone"]
+	"Flop Shot", "Bump and Run", "Steady Hands", "In the Zone", "Big Strike"]
+
+# The good cards the Form deck is built from. Pure Strike, Big Strike and
+# Steady Hands are deliberately absent: they only ever come from a club's
+# ability (Section 4 "Created cards"), so they're a resource you spend
+# rather than a lucky draw.
+const DECK_GOOD_NAMES := ["Stinger", "Controlled Draw", "Controlled Fade",
+	"Flop Shot", "Bump and Run", "In the Zone"]

@@ -75,8 +75,9 @@ func begin(dist_yards: float, shift: float = 0.0, band_mult: float = 1.0) -> voi
 	_sunk_half = lerpf(SUNK_HALF_NEAR, SUNK_HALF_FAR, eased)
 	_close_half = lerpf(CLOSE_HALF_NEAR, CLOSE_HALF_FAR, eased)
 	_speed = lerpf(SPEED_NEAR, SPEED_FAR, eased)
-	_sunk_half *= band_mult
-	_close_half *= band_mult
+	# Capped so even a Steady Hands tap-in leaves some bar to miss.
+	_sunk_half = minf(_sunk_half * band_mult, 0.4)
+	_close_half = maxf(minf(_close_half * band_mult, 0.48), _sunk_half)
 	_center = 0.5 + shift
 
 	_pos = randf() * 0.35          # vary the start so it can't be muscle-memoried

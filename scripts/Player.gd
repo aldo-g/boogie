@@ -50,6 +50,23 @@ var putt_dist: float = 0.0
 var putt_dir: Vector2 = Vector2(0, 1)
 var yips_pending: bool = false         # Section 4 putting cross-trigger
 
+# --- Club abilities (ClubAbilities.gd) ---
+# Charges spent this round: ability id -> the hole numbers it was used on.
+var ability_log: Dictionary = {}
+# Abilities switched on for the shot or putt in hand (id -> true). Cleared
+# once that shot or putt is played.
+var armed: Dictionary = {}
+# Created cards waiting to join this player's next Form draw (names).
+var created_next: Array = []
+
+# Where this player is in an online end-of-hole draft, where everyone
+# drafts at once: "pick", "discard" (bag full), "done", or "" outside one.
+var draft_stage: String = ""
+
+# The last shot taken apart (ShotRules.breakdown_text), for the shot panel:
+# {club, text}. Empty at the start of each hole.
+var last_shot: Dictionary = {}
+
 # --- Mid-turn selections (never outlive this player's own turn) ---
 var pending_club: Dictionary = {}
 var pending_new_card = null
@@ -107,3 +124,6 @@ func start_hole(tee_pos: Vector2) -> void:
 	current_draft_options = []
 	current_form_options = []
 	current_form_forced = false
+	armed = {}
+	created_next = []
+	last_shot = {}

@@ -15,7 +15,7 @@ extends RefCounted
 # Form card" or "ignore terrain penalties" mean the same thing on a
 # 7,200-yard parkland and a 6,100-yard links. "+15 yards on Woods" does
 # not, and would need rebalancing with every course that ships. Yardage
-# stays on individual club cards (Main.build_club_pool); sets bend rules.
+# stays on individual club cards (assets/data/clubs.json); sets bend rules.
 #
 # Tiers are 2 / 4 / 7. Seven is half the 14-card Bag, so a 7-set is an
 # identity rather than a bonus: it leaves only 7 slots to cover a whole
@@ -96,12 +96,12 @@ const BONUS_TEXT := {
 	"slazinger": {
 		2: "Draw +1 Form card, but bad cards you play hit at +25% severity",
 		4: "Draw +2 Form cards, same penalty",
-		7: "Created cards no longer exhaust — they return at the end of each hole",
+		7: "Your once-per-round club abilities recharge every hole",
 	},
 	"nimbus": {
-		2: "Any club may be played one tier better, once per hole",
-		4: "Your clubs count as every category for set and ability purposes",
-		7: "Once per hole, play any shot as though you held the ideal club",
+		2: "Once per hole, play a shot one swing tier better",
+		4: "Every club counts as every type (wood, iron, wedge) for club riders",
+		7: "Once per hole, play a shot as though with the ideal club: Mid tier, a wedge's buffering",
 	},
 }
 
@@ -125,13 +125,23 @@ static func color(brand: String) -> Color:
 # means no downstream effect — has(), active_bonuses(), or any mechanic
 # built on them — can accidentally award the starter brand a bonus for the
 # three clubs you were given for free.
+#
+# The Equaliser (limited edition): while the Bag holds 3+ distinct brands,
+# it counts as every brand — a scattered draft's rescue.
 static func counts(bag: Array) -> Dictionary:
 	var out := {}
+	var equaliser := false
 	for club in bag:
 		var b: String = club.get("brand", NONE)
 		if b == NONE or b == STARTER:
 			continue
 		out[b] = int(out.get(b, 0)) + 1
+		if (club.get("effects", {}) as Dictionary).get("power", "") == "equaliser":
+			equaliser = true
+	if equaliser and out.size() >= 3:
+		for b in DRAFTABLE:
+			if b != "nimbus":  # the Equaliser is already counted as Nimbus
+				out[b] = int(out.get(b, 0)) + 1
 	return out
 
 
@@ -217,15 +227,17 @@ static func severity_mult(bag: Array) -> float:
 
 
 # Callowell 2: bad cards from rough lose half their deviation.
-# Callowell 7: Chunk and Top hit at half severity anywhere.
 static func deviation_mult(bag: Array, lie: String, card: FormCard) -> float:
-	var mult := 1.0
-	if card != null and not card.good:
-		if has(bag, "callowell", 2) and lie == "rough":
-			mult *= 0.5
-		if has(bag, "callowell", 7) and (card.name == "Chunk" or card.name == "Top"):
-			mult *= 0.5
-	return mult
+	if card != null and not card.good and has(bag, "callowell", 2) and lie == "rough":
+		return 0.5
+	return 1.0
+
+
+# Callowell 7: Chunk and Top hit at half severity anywhere. They have no
+# deviation, so their severity is their distance loss — see
+# ShotRules.resolve().
+static func softens_mishits(bag: Array) -> bool:
+	return has(bag, "callowell", 7)
 
 
 # Callowell 4 / MacGregorian 4 / Nimbus: terrain stops taking its cut.
@@ -274,12 +286,35 @@ static func abolishes_extreme_finesse(bag: Array) -> bool:
 	return has(bag, "pingwell", 7)
 
 
-# Nimbus 4: your clubs count as every category for set and ability
-# purposes — the reason Nimbus is the "safe" brand.
+# Nimbus 4: every club counts as every type for club riders ("while a
+# Titanist Wood is in your bag") — the reason Nimbus is the "safe" brand.
 static func counts_as_all_categories(bag: Array) -> bool:
 	return has(bag, "nimbus", 4)
 
 
-# Slazinger 7: Created cards stop exhausting, returning at each hole's end.
-static func created_cards_return(bag: Array) -> bool:
+# Slazinger 7: once-per-round club abilities recharge every hole.
+static func round_abilities_per_hole(bag: Array) -> bool:
 	return has(bag, "slazinger", 7)
+
+
+# --- Once-per-hole set abilities ----------------------------------------
+# Activated by the player; ClubAbilities.gd lists and charges them.
+
+# Titanist 7: re-draw the whole Form hand.
+static func can_redraw(bag: Array) -> bool:
+	return has(bag, "titanist", 7)
+
+
+# MacGregorian 7: improve the lie one step before playing.
+static func can_improve_lie(bag: Array) -> bool:
+	return has(bag, "macgregorian", 7)
+
+
+# Nimbus 2: play one shot a swing tier better.
+static func can_boost_tier(bag: Array) -> bool:
+	return has(bag, "nimbus", 2)
+
+
+# Nimbus 7: play one shot as though with the ideal club.
+static func can_play_ideal(bag: Array) -> bool:
+	return has(bag, "nimbus", 7)

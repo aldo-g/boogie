@@ -1,7 +1,7 @@
 extends Control
 
 # ---------------------------------------------------------
-# BOGEY PROTOTYPE
+# PARS AND CHARS PROTOTYPE
 # Single hole, single player. Tests the core loop (Section 4, Form Card
 # System):
 #   club draft: draw 3 / pick 1 (permanent growing hand, 14-card cap)
@@ -12,18 +12,20 @@ extends Control
 #      scaled by distance to the pin)
 # ---------------------------------------------------------
 
-enum State { AIM, FORM_DRAW, DRAFT, DISCARD_FOR_DRAFT, CLUB_SELECT, DISCARD_FOR_HAZARD, PUTTING, DONE }
+# WAITING: this machine's player has drafted and the others haven't
+# (online, where everyone drafts at once). Appended so the existing values,
+# which travel in snapshots, keep their numbers.
+enum State { AIM, FORM_DRAW, DRAFT, DISCARD_FOR_DRAFT, CLUB_SELECT, DISCARD_FOR_HAZARD, PUTTING, DONE, WAITING }
 
 const HAND_CAP := 14
 
-# Inside this distance a putt is conceded rather than played (about 2 feet).
-const GIMME_YARDS := 0.7
 
 # On-screen width of the putt meter. Deliberately wide: the hardest putt's
 # sunk band is 12% of the bar, which needs the room to stay aimable.
 const METER_WIDTH := 620
 
 const Palette := preload("res://scripts/BogeyTheme.gd")
+const Caddy := preload("res://scripts/Caddy.gd")
 
 # Parchment / fairway theme, shared with Title.gd via BogeyTheme.
 const COLOR_BG := Palette.PARCHMENT
@@ -70,9 +72,15 @@ var _net_trace: bool = false
 # animation is done — see on_peer_dropped().
 var _pending_drops: Array = []
 
-# Players still owing an end-of-hole draft, in order. Drafts run one player
-# at a time because each is a choice made on one screen.
+# Players still owing an end-of-hole draft, in order. On one screen drafts
+# run one player at a time, because each is a choice made at that screen.
 var _draft_queue: Array = []
+
+# Online, everyone drafts at once instead: each machine shows its own
+# player's draft, and the next hole starts when the last pick is in. Each
+# player's progress is Player.draft_stage. Shared round state — every
+# machine agrees on it.
+var _simul_draft: bool = false
 
 # ---------------------------------------------------------
 # RANDOMNESS GATING
@@ -240,8 +248,11 @@ var turn_banner: PanelContainer     # "Player 2 to play" — hot-seat only
 var turn_banner_label: Label
 var standings_rack: HFlowContainer  # per-player score chips — hot-seat only
 var shot_outlook: VBoxContainer
+var ability_box: VBoxContainer      # club abilities and set powers for this moment — under the shot panel
 var form_deck_popup: PopupPanel
 var form_deck_list: VBoxContainer
+var caddy: Caddy                   # the arctic char who pops up with advice — see Caddy.gd
+var _caddy_card: String = ""       # the Form card behind the shot in flight, for him to remark on
 
 
 func _ready() -> void:
@@ -386,6 +397,16 @@ func build_ui() -> void:
 	# every state — mid-aim, mid-putt, or sitting on the scorecard. Kept
 	# out of header_meta (which reflows with the run's brand chips) so it
 	# never drifts to a second line or moves under the cursor.
+	# Settings, in a popup over the round — the same panel as the title's.
+	var settings_btn := Button.new()
+	settings_btn.text = "Settings"
+	settings_btn.tooltip_text = "Volume, shot speed and the putt key"
+	settings_btn.custom_minimum_size = Vector2(84, 32)
+	settings_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	settings_btn.focus_mode = Control.FOCUS_NONE
+	settings_btn.pressed.connect(_on_header_settings_pressed)
+	header_row.add_child(settings_btn)
+
 	var restart_btn := Button.new()
 	restart_btn.text = "Restart"
 	restart_btn.tooltip_text = "Abandon this round and start a new one from hole 1"
@@ -475,9 +496,19 @@ func build_ui() -> void:
 	var this_shot := BogeyUI.make_panel(BogeyUI.ruled_panel(false, false, false, true, 20))
 	shot_col.add_child(this_shot)
 
+	var this_shot_col := VBoxContainer.new()
+	this_shot_col.add_theme_constant_override("separation", 12)
+	this_shot.add_child(this_shot_col)
+
 	shot_outlook = VBoxContainer.new()
 	shot_outlook.add_theme_constant_override("separation", 12)
-	this_shot.add_child(shot_outlook)
+	this_shot_col.add_child(shot_outlook)
+
+	# Kept apart from shot_outlook, which rebuilds on every mouse move
+	# while aiming — a button rebuilt under the cursor can't be clicked.
+	ability_box = VBoxContainer.new()
+	ability_box.add_theme_constant_override("separation", 6)
+	this_shot_col.add_child(ability_box)
 
 	var log_wrap := BogeyUI.make_panel(BogeyUI.ruled_panel(false, false, false, false, 20))
 	log_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -590,6 +621,11 @@ func build_ui() -> void:
 
 	build_form_deck_popup()
 
+	# Added last so he swims over everything else. He sits on the bag strip.
+	caddy = Caddy.new()
+	caddy.anchor_above = strip
+	add_child(caddy)
+
 
 # A browsable list of every Form card currently in the deck or discard
 # pile, grouped by name with counts — opened from the "FORM DECK" chip in
@@ -660,6 +696,17 @@ func rebuild_form_deck_list() -> void:
 func _on_form_deck_chip_pressed() -> void:
 	rebuild_form_deck_list()
 	form_deck_popup.popup_centered()
+
+
+# Hands the caddy an event to maybe comment on. Online, he only talks to
+# the player at this machine: advice about someone else's ball is noise.
+# `everyone` is for news that applies to the whole group, like the wind.
+func caddy_says(kind: String, ctx: Dictionary = {}, everyone: bool = false) -> void:
+	if caddy == null:
+		return
+	if not everyone and not is_my_turn():
+		return
+	caddy.react(kind, ctx)
 
 
 # Play-by-play entries. Callers still pass the same bbcode-ish strings
@@ -734,46 +781,20 @@ func clear_container(c: Container) -> void:
 # ---------------------------------------------------------
 # CARD HELPERS
 # ---------------------------------------------------------
-func make_club(cname: String, min_y: float, max_y: float, ctype: String,
-		brand: String = Brands.NONE, limited: bool = false, ability: String = "") -> Dictionary:
-	return {
-		"name": cname,
-		"min_yard": min_y,
-		"max_yard": max_y,
-		"type": ctype,          # "wood" / "iron" / "wedge" / "putter"
-		"brand": brand,         # Brands.NONE for standards — see Brands.gd
-		"limited": limited,
-		"ability": ability
-	}
-
-
-# Keeps the bag in the order a real golfer racks it: longest club first,
-# putter always last. Every view renders `hand` by index and every pick
-# callback captures that same index, so sorting the array itself — rather
-# than sorting a copy at draw time — keeps the bag row, the discard row,
-# and the click handlers in agreement for free. Called after any change
-# to the bag.
+# Keeps the bag racked longest-first, putter last — see ClubRoster.sort_bag().
+# Called after any change to the bag.
 func sort_hand() -> void:
-	sort_bag(hand)
+	ClubRoster.sort_bag(hand)
 
 
-# The bag comparator, usable on any player's bag (not just the active
-# one's) — needed when setting up the other seats at the start of a run.
-func sort_bag(bag: Array) -> void:
-	bag.sort_custom(func(a, b):
-		# The putter has a 0-0 band and would otherwise sort to the front.
-		var a_putter: bool = a.type == "putter"
-		var b_putter: bool = b.type == "putter"
-		if a_putter != b_putter:
-			return b_putter
-		if a.max_yard != b.max_yard:
-			return a.max_yard > b.max_yard
-		# Same reach: the club that also carries further at the bottom of
-		# its band is the longer stick, and name is a stable last resort so
-		# two identical bands never swap places between redraws.
-		if a.min_yard != b.min_yard:
-			return a.min_yard > b.min_yard
-		return a.name < b.name)
+# Indices into `hand` of the clubs the active player may play from their
+# current lie. Never empty: the putter is playable from anywhere.
+func playable_club_indices() -> Array:
+	var out: Array = []
+	for i in range(hand.size()):
+		if ShotRules.club_playable(hand, hand[i], current_lie):
+			out.append(i)
+	return out
 
 
 # ---------------------------------------------------------
@@ -843,18 +864,26 @@ func apply_round_payload(payload: Dictionary) -> void:
 
 
 # A FormCard is fully described by its name — every card in the game comes
-# from FormCard.make() — so decks travel as name lists.
+# from FormCard.make() — plus whether a club created it, so decks travel
+# as name lists with created cards marked by a leading "+".
+const CREATED_MARK := "+"
+
+
 func form_card_names(cards: Array) -> Array:
 	var names: Array = []
 	for c in cards:
-		names.append(c.name)
+		names.append((CREATED_MARK if c.created else "") + c.name)
 	return names
 
 
 func form_cards_from_names(names: Array) -> Array:
 	var cards: Array = []
 	for n in names:
-		cards.append(FormCard.make(str(n)))
+		var s := str(n)
+		if s.begins_with(CREATED_MARK):
+			cards.append(FormCard.make(s.substr(CREATED_MARK.length())).as_created())
+		else:
+			cards.append(FormCard.make(s))
 	return cards
 
 
@@ -868,186 +897,21 @@ func default_player_name(index: int) -> String:
 
 # Builds one player at the start of a run: the Bogey-Mart starter bag, an
 # independently shaped draft pool (Section 3B), and that player's own Form
-# deck.
+# deck. The clubs themselves come from ClubRoster (assets/data/clubs.json).
 #
 # Pool and Form deck are per player because the draft is independent (no
 # sniping) and because hazard decay must land on the player who hit the
 # hazard rather than on the table.
 func make_player(player_name: String) -> Player:
 	var p := Player.new(player_name)
-
-	# The starting set is Bogey-Mart (Section 3A): a cheap supermarket
-	# three-piece, deliberately the worst gear in the game. Shorter bands,
-	# and — the sharper penalty — NARROWER ones, which drops you into the
-	# 2-card Form draw far more often than a real club would. Escaping this
-	# set is the run's first goal.
-	p.hand = [
-		make_club("Bogey-Mart Driver", 170, 210, "wood", Brands.STARTER),
-		make_club("Bogey-Mart 7-Iron", 90, 135, "iron", Brands.STARTER),
-		make_club("Bogey-Mart Putter", 0, 35, "putter", Brands.STARTER)
-	]
-
-	p.live_brands = roll_live_brands()
-	var pool: Array = build_club_pool(p.live_brands)
+	p.hand = ClubRoster.starter_bag()
+	p.live_brands = ClubRoster.roll_live_brands()
+	var pool: Array = ClubRoster.build_pool(p.live_brands)
 	pool.shuffle()
 	p.club_deck = pool
 	p.club_discard = []
-
 	p.form_deck = FormDeck.new()
-	sort_bag(p.hand)
 	return p
-
-
-# Section 3B — picks this run's 4 live brands, under the pairing rule:
-# at least two distinct axes must be represented. Four brands all
-# attacking the same axis would collapse the run into a single strategy,
-# so the constraint guarantees every run offers two real directions to
-# commit to. Retries rather than repairs — the pool is tiny and a valid
-# draw is overwhelmingly likely, so a simple reroll is clearer than
-# patching a bad set.
-func roll_live_brands() -> Array:
-	var all: Array = Brands.DRAFTABLE.duplicate()
-	for attempt in range(32):
-		all.shuffle()
-		var pick: Array = all.slice(0, 4)
-		var axes := {}
-		for b in pick:
-			axes[Brands.AXIS.get(b, "")] = true
-		if axes.size() >= 2:
-			return pick
-	# Unreachable in practice (any 4 of these 6 already span 2+ axes), but
-	# return something valid rather than an empty pool if it ever is.
-	return all.slice(0, 4)
-
-
-# The shared club deck (Section 3C). Standards are brandless and always
-# present, so the deck always covers every yardage gap and is never
-# unplayable. Branded clubs sit on top of that base and are the draft's
-# real content — but only the run's live brands are included (Section 3B).
-#
-# Yardage lives here, on individual cards, where it's a local stat the
-# player reads. Set bonuses never touch yardage — see Brands.gd.
-func build_club_pool(brands: Array) -> Array:
-	var pool: Array = []
-
-	# --- Standards: brandless, always in the pool, 3 copies each ---
-	for i in range(3):
-		pool.append(make_club("Driver", 180, 230, "wood"))
-		pool.append(make_club("3-Wood", 160, 195, "wood"))
-		pool.append(make_club("5-Iron", 135, 170, "iron"))
-		pool.append(make_club("7-Iron", 95, 145, "iron"))
-		pool.append(make_club("9-Iron", 75, 105, "iron"))
-		pool.append(make_club("Pitching Wedge", 50, 90, "wedge"))
-		pool.append(make_club("Sand Wedge", 20, 60, "wedge"))
-		pool.append(make_club("Putter", 0, 35, "putter"))
-
-	# --- Branded: only this run's live brands (Section 3B) ---
-	for brand in brands:
-		pool.append_array(branded_clubs(brand))
-
-	# --- Limited editions: rare, one copy each, live brands only ---
-	for card in limited_clubs():
-		if card.brand == Brands.NONE or brands.has(card.brand):
-			pool.append(card)
-
-	return pool
-
-
-# Section 3C limited editions: one copy each, a Created-card ability, and
-# a pair rider that keys off a specific partner in the Bag rather than a
-# count. These are the draft's "I need one more thing" hooks.
-func limited_clubs() -> Array:
-	return [
-		make_club("Gold Cleek", 140, 175, "iron", "titanist", true,
-			"Once per hole, create a Pure Strike. With a Titanist Wood in bag: twice per hole"),
-		make_club("The Bulger", 185, 240, "wood", "slazinger", true,
-			"Create a Big Strike from rough/bunker. With any Wedge in bag: no lie requirement"),
-		make_club("Old Tom's Niblick", 30, 70, "wedge", "macgregorian", true,
-			"Creates a Flop Shot on landing in a bunker. With a MacGregorian Wood: also Bump and Run on fairway"),
-		make_club("The Rutter", 35, 80, "wedge", "callowell", true,
-			"Purges a bad Form card on each hazard. With a Callowell Iron in bag: purges two"),
-		make_club("Old Reliable Putter", 0, 35, "putter", "pingwell", true,
-			"Once per round, create Steady Hands. With another Ping-Well club: once every six holes"),
-		make_club("Persimmon Spoon", 155, 200, "wood", "macgregorian", true,
-			"Playable from rough with no penalty. With a 2nd MacGregorian: playable from any lie"),
-		make_club("The Equaliser", 115, 160, "iron", "nimbus", true,
-			"With 3+ distinct brands in your bag, counts as EVERY brand for set purposes"),
-	]
-
-
-# Every club belonging to one brand. Each brand spans enough categories
-# and enough cards to actually reach a 7-set, and each carries riders that
-# express its axis locally — the set bonus expresses the same idea as a
-# rule (Brands.gd).
-func branded_clubs(brand: String) -> Array:
-	match brand:
-		"titanist":
-			# Tour precision: tight bands, strong buffering, unforgiving.
-			return [
-				make_club("Titanist Pro Driver", 185, 225, "wood", brand, false, "Buffers deviation 20% better; -30% distance from rough"),
-				make_club("Titanist 4-Iron", 150, 180, "iron", brand, false, "Buffers deviation 25% better"),
-				make_club("Titanist 6-Iron", 120, 150, "iron", brand, false, "Buffers deviation 25% better"),
-				make_club("Titanist 8-Iron", 85, 120, "iron", brand, false, "Buffers deviation 25% better"),
-				make_club("Titanist Tour Wedge", 45, 85, "wedge", brand, false, "Buffers deviation 25% better"),
-				make_club("Titanist Blade Putter", 0, 35, "putter", brand, false, "Once per round, a second putt attempt"),
-				make_club("Titanist Fairway 5", 145, 185, "wood", brand, false, "Buffers deviation 20% better"),
-			]
-		"callowell":
-			# Forgiveness: wide bands, blunts bad cards, low ceiling.
-			return [
-				make_club("Callowell Big Deal Driver", 175, 230, "wood", brand, false, "Chunk and Top hit at half severity"),
-				make_club("Callowell 6-Iron", 110, 165, "iron", brand, false, "The widest iron in the game"),
-				make_club("Callowell Rescue", 125, 175, "iron", brand, false, "Playable from rough with no distance penalty"),
-				make_club("Callowell 9-Iron", 70, 115, "iron", brand, false, "Wide band"),
-				make_club("Callowell Gap Wedge", 40, 85, "wedge", brand, false, "Shank cannot downgrade your lie"),
-				make_club("Callowell Sand Wedge", 20, 65, "wedge", brand, false, "Wide band"),
-				make_club("Callowell Mallet Putter", 0, 35, "putter", brand, false, "Forgiving on long putts"),
-			]
-		"pingwell":
-			# Fitted feel: rewards playing a club at its comfortable middle.
-			return [
-				make_club("Ping-Well i-Series 3", 155, 200, "iron", brand, false, "Widened Mid tier"),
-				make_club("Ping-Well i-Series 5", 130, 175, "iron", brand, false, "Widened Mid tier"),
-				make_club("Ping-Well i-Series 8", 80, 125, "iron", brand, false, "Widened Mid tier"),
-				make_club("Ping-Well Driver", 175, 220, "wood", brand, false, "Widened Mid tier"),
-				make_club("Ping-Well Lob Wedge", 15, 55, "wedge", brand, false, "Creates Flop Shot on any hazard lie"),
-				make_club("Ping-Well Gap Wedge", 45, 90, "wedge", brand, false, "Widened Mid tier"),
-				make_club("Ping-Well Mallet Putter", 0, 35, "putter", brand, false, "Steady Hands widens the sunk band twice as much"),
-			]
-		"macgregorian":
-			# Heritage: low running ball, built for scrappy lies.
-			return [
-				make_club("MacGregorian Persimmon Driver", 165, 220, "wood", brand, false, "The only Wood playable from a bunker"),
-				make_club("MacGregorian Brassie", 150, 190, "wood", brand, false, "Bump and Run gains +20 yds roll"),
-				make_club("MacGregorian Spoon", 135, 175, "wood", brand, false, "Ignores the rough's distance penalty"),
-				make_club("MacGregorian Mashie", 115, 155, "iron", brand, false, "Ignores the rough's distance penalty"),
-				make_club("MacGregorian Mid-Mashie", 135, 175, "iron", brand, false, "Ignores the rough's distance penalty"),
-				make_club("MacGregorian Niblick", 45, 95, "wedge", brand, false, "Landing in a hazard adds no bad card to the Form deck"),
-				make_club("MacGregorian Jigger", 0, 35, "putter", brand, false, "Putts from the fringe as though on the green"),
-			]
-		"slazinger":
-			# Distance at a price: long, and worse at buffering.
-			return [
-				make_club("Slazinger Cannon Driver", 190, 255, "wood", brand, false, "Longest in the game; buffers deviation 30% worse"),
-				make_club("Slazinger Launch Wood", 170, 215, "wood", brand, false, "Big Strike grants max band +10"),
-				make_club("Slazinger Power Iron", 145, 190, "iron", brand, false, "Long for an iron; buffers 20% worse"),
-				make_club("Slazinger Deep Iron", 120, 165, "iron", brand, false, "Buffers 20% worse"),
-				make_club("Slazinger Blast Wedge", 35, 90, "wedge", brand, false, "Extra distance out of bunkers"),
-				make_club("Slazinger Long Iron", 165, 215, "iron", brand, false, "Buffers 20% worse"),
-				make_club("Slazinger Heavy Putter", 0, 35, "putter", brand, false, "Strong on long putts, wild on short ones"),
-			]
-		"nimbus":
-			# Hybrid tech: covers gaps, no strong opinion.
-			return [
-				make_club("Nimbus Hybrid 3", 150, 205, "iron", brand, false, "Counts as both Wood and Iron"),
-				make_club("Nimbus Hybrid 5", 125, 170, "iron", brand, false, "Counts as both Wood and Iron"),
-				make_club("Nimbus Hybrid 7", 100, 150, "iron", brand, false, "Counts as both Wood and Iron"),
-				make_club("Nimbus All-Rounder", 100, 155, "iron", brand, false, "Wide band, no rider"),
-				make_club("Nimbus Driver", 175, 225, "wood", brand, false, "Counts as both Wood and Iron"),
-				make_club("Nimbus Utility Wedge", 30, 80, "wedge", brand, false, "Once per hole, playable from any lie with no penalty"),
-				make_club("Nimbus Putter", 0, 35, "putter", brand, false, "No rider — pure flexible filler"),
-			]
-	return []
 
 
 # Draws the top card, reshuffling the discard pile back in when the deck
@@ -1089,6 +953,10 @@ func start_hole() -> void:
 		Wind.describe(hole.wind, hole.pin_pos - hole.tee_pos)])
 	if is_multiplayer():
 		log_msg("[i]%s to play.[/i]" % me.name)
+	var has_water := hole.hazards.any(func(h): return h.get("type", "") == "water")
+	caddy_says("tee", {"par": hole_par, "yards": hole_yardage, "wind": hole.wind,
+		"dir": hole.pin_pos - hole.tee_pos, "water": has_water,
+		"last_hole": current_hole_index >= Course.hole_count()}, true)
 	sync_map_to_active()
 	# Clears any aim line left over from the previous hole's last shot —
 	# otherwise it points at wherever that old target was, which is
@@ -1211,9 +1079,7 @@ func aim_line_can_hole_out() -> bool:
 	var aimed_distance: float = ball_pos.distance_to(aim_target)
 	# The terrain cut the shot will actually take, so aiming out of a
 	# bunker doesn't light up yellow for a shot that lands half way there.
-	var cap: float = 1.0
-	if not (Brands.ignores_terrain_penalty(hand) or Brands.plays_as_fairway(hand)):
-		cap = ShotResolver.TERRAIN_DISTANCE_CAP.get(current_lie, 1.0)
+	var cap := ShotRules.lie_distance_cap(hand, play_lie(), pending_club)
 	var aim_dir: Vector2 = (aim_target - ball_pos).normalized()
 	if aim_dir.length_squared() < 0.0001:
 		return false
@@ -1242,9 +1108,7 @@ func refresh_aim_ghost() -> void:
 	if aim_dir.length_squared() < 0.0001:
 		map_view.set_aim_ghost(false)
 		return
-	var cap: float = 1.0
-	if not (Brands.ignores_terrain_penalty(hand) or Brands.plays_as_fairway(hand)):
-		cap = ShotResolver.TERRAIN_DISTANCE_CAP.get(current_lie, 1.0)
+	var cap := ShotRules.lie_distance_cap(hand, play_lie(), pending_club)
 	var clean := clean_strike_outcome(ball_pos.distance_to(aim_target) * cap, aim_dir)
 	# Carry only: where a clean strike comes down. The run-out is left to
 	# the Form-card preview, once there's a real card to read.
@@ -1274,78 +1138,117 @@ func _on_aim_picked(target: Vector2) -> void:
 	begin_form_draw()
 
 
-# Which swing tier this declared shot represents: where the aim distance
-# falls in the club's own yardage band (Section 4 "Club suitability").
+# Which swing tier the declared shot represents (Section 4 "Club
+# suitability") — see ShotRules.swing_tier().
 func swing_tier_for_shot() -> int:
-	var dist: float = ball_pos.distance_to(aim_target)
-	var lo: float = pending_club.min_yard
-	var hi: float = pending_club.max_yard
-	if lo <= 0.0 and hi <= 0.0:
-		return ShotResolver.Tier.MID
-	if dist < lo:
-		return upgrade_tier(ShotResolver.Tier.EXTREME_FINESSE)
-	var span := hi - lo
-	if span <= 0.0:
-		return ShotResolver.Tier.MID
-	# Ping-Well 2 widens the Mid band from the middle third to the middle
-	# half, so more shots land on the comfortable 3-card draw.
-	var mid_span: float = Brands.mid_tier_span(hand)
-	var mid_lo: float = 0.5 - mid_span / 2.0
-	var mid_hi: float = 0.5 + mid_span / 2.0
-
-	var frac: float = (dist - lo) / span
-	var tier: int = ShotResolver.Tier.MID
-	if frac >= mid_hi:
-		tier = ShotResolver.Tier.FULL
-	elif frac < mid_lo:
-		tier = ShotResolver.Tier.FINESSE
-	return upgrade_tier(tier)
+	return ShotRules.swing_tier(hand, pending_club, ball_pos.distance_to(aim_target), me.armed)
 
 
-# Ping-Well 4 plays every club one tier better than its distance implies;
-# Ping-Well 7 abolishes Extreme Finesse outright. Both are applied here so
-# every caller (draw count, UI text, outlook panel) sees the same tier.
-func upgrade_tier(tier: int) -> int:
-	if tier == ShotResolver.Tier.EXTREME_FINESSE and Brands.abolishes_extreme_finesse(hand):
-		return ShotResolver.Tier.FINESSE
-	if Brands.tier_upgrade_steps(hand) <= 0:
-		return tier
-	# "One tier better" means toward MID, the most repeatable swing —
-	# never past it, since MID is already the best draw in the game.
-	match tier:
-		ShotResolver.Tier.EXTREME_FINESSE:
-			return ShotResolver.Tier.FINESSE
-		ShotResolver.Tier.FINESSE, ShotResolver.Tier.FULL:
-			return ShotResolver.Tier.MID
-	return tier
+# The lie the club in hand plays from: the real one, unless a club's
+# ability plays it clean from rough or sand (ClubAbilities.plays_clean).
+# Once the draw is made that decision is held on the shot ("clean_lie"),
+# since a once-per-hole charge reads as spent from then on.
+func play_lie() -> String:
+	if me.armed.has("clean_lie") or clean_lie_ability() != "":
+		return "fairway"
+	return current_lie
+
+
+func clean_lie_ability() -> String:
+	return ClubAbilities.plays_clean(hand, pending_club, current_lie,
+		me.ability_log, current_hole_index)
+
+
+# Everything ClubAbilities.actives() needs to know about this moment.
+func ability_context() -> Dictionary:
+	return {
+		"lie": current_lie, "club": pending_club, "forced": current_form_forced,
+		"options": current_form_options, "armed": me.armed,
+		"charges": me.ability_log, "hole": current_hole_index,
+	}
+
+
+# The phase name ClubAbilities.actives() takes, or "" when no ability
+# can be used.
+func ability_phase() -> String:
+	match state:
+		State.CLUB_SELECT:
+			return "club_select"
+		State.AIM:
+			return "aim"
+		State.FORM_DRAW:
+			return "form"
+		State.PUTTING:
+			return "putting"
+	return ""
+
+
+func available_abilities() -> Array:
+	var phase := ability_phase()
+	if phase == "":
+		return []
+	return ClubAbilities.actives(hand, phase, ability_context())
 
 
 func begin_form_draw() -> void:
-	var tier := swing_tier_for_shot()
-	# MacGregorian 4 plays you OUT of rough/bunker as though you were on the
-	# fairway, which removes the bunker's forced-card treatment entirely.
-	var force_extreme: bool = current_lie == "bunker" and not Brands.plays_as_fairway(hand)
-	var result := form_deck.draw_for_shot(tier, force_extreme,
-		Brands.bonus_draw_cards(hand), Brands.drops_worst_draw(hand))
+	# A club playing clean from a bad lie spends its charge now, at the
+	# moment it changes the draw.
+	var clean := clean_lie_ability()
+	var lie := play_lie()
+	if clean == "utility_any_lie":
+		ClubAbilities.record(me.ability_log, clean, current_hole_index)
+	if clean != "":
+		me.armed["clean_lie"] = true
+		log_msg("[i]%s plays from the %s as though from the fairway.[/i]" % [pending_club.name, current_lie])
+	for id in ["boost_tier", "ideal_club"]:
+		if me.armed.has(id):
+			ClubAbilities.record(me.ability_log, id, current_hole_index)
+
+	# Created cards waiting from the last landing, plus any the club
+	# brings to its own draw.
+	var created: Array = me.created_next + ClubAbilities.draw_extras(pending_club, current_lie)
+	me.created_next = []
+	var result := ShotRules.draw_form(form_deck, hand, pending_club,
+		ball_pos.distance_to(aim_target), lie, me.armed, created)
+	var tier: int = result.tier
 	current_form_options = result.cards
 	current_form_forced = result.forced
 
 	if current_form_forced:
-		var reason := "playing from the sand" if force_extreme and tier != ShotResolver.Tier.EXTREME_FINESSE else "below this club's range"
+		var reason := "playing from the sand" if result.from_lie else "below this club's range"
 		log_msg("\n[b]Playing %s[/b] (%s) — %s creates a bad Form card. No choice, you're forced to play it." % [
 			pending_club.name, ShotResolver.tier_name(tier), reason.capitalize()])
+	elif result.had_forced_card:
+		log_msg("\n[b]Playing %s[/b] (%s) — a bad Form card is forced on you, but you hold %s instead." % [
+			pending_club.name, ShotResolver.tier_name(tier), " and ".join(PackedStringArray(created))])
 	else:
 		log_msg("\n[b]Playing %s[/b] (%s) — drawing %d Form card%s." % [
 			pending_club.name, ShotResolver.tier_name(tier), current_form_options.size(),
 			"" if current_form_options.size() == 1 else "s"])
+		if not created.is_empty():
+			log_msg("[i]Created for this draw: %s.[/i]" % ", ".join(PackedStringArray(created)))
 	state = State.FORM_DRAW
 	Sound.play("card_draw")
+	caddy_says("form_draw", {"forced": current_form_forced})
 	refresh_ui()
 
 
 # --- Draft phase: draw 3, pick 1, permanently into hand ---
 func begin_draft_phase() -> void:
 	state = State.DRAFT
+	if not _draw_draft_options():
+		# Nothing left to offer at all — skip the draft and move on, so the
+		# round can still finish instead of stalling on an empty pick.
+		log_msg("[i]The club deck is exhausted — no draft this hole.[/i]")
+		begin_next_draft()
+		return
+	Sound.play("card_draw")
+	refresh_ui()
+
+
+# Deals the active player's three draft options. False if their club deck
+# has nothing left to offer.
+func _draw_draft_options() -> bool:
 	var owned_names := {}
 	for c in hand:
 		owned_names[c.name] = true
@@ -1362,16 +1265,7 @@ func begin_draft_phase() -> void:
 		# Also exclude this hole's other options from the remaining draws,
 		# so the 3 offers can't repeat a name amongst themselves either.
 		owned_names[card.name] = true
-
-	if not current_draft_options.is_empty():
-		Sound.play("card_draw")
-	if current_draft_options.is_empty():
-		# Nothing left to offer at all — skip the draft and move on, so the
-		# round can still finish instead of stalling on an empty pick.
-		log_msg("[i]The club deck is exhausted — no draft this hole.[/i]")
-		begin_next_draft()
-		return
-	refresh_ui()
+	return not current_draft_options.is_empty()
 
 
 # Draws a club whose name isn't in owned_names, setting aside (not
@@ -1429,7 +1323,7 @@ func _roll(kind: String, generate: Callable) -> Variant:
 	if not _injected_rolls.is_empty():
 		var entry = _injected_rolls.pop_front()
 		if entry is Dictionary and entry.get("kind", kind) != kind:
-			push_warning("Bogey: roll order mismatch — expected '%s', got '%s'" % [
+			push_warning("Pars and Chars: roll order mismatch — expected '%s', got '%s'" % [
 				kind, entry.get("kind", "?")])
 		return entry.value if entry is Dictionary else entry
 	var value = generate.call()
@@ -1515,6 +1409,8 @@ func _on_peer_joined(peer_id: int) -> void:
 func is_my_turn() -> bool:
 	if not online:
 		return true
+	if _simul_draft:
+		return owes_draft(my_seat)
 	return active_index == my_seat
 
 
@@ -1534,7 +1430,7 @@ func is_authority() -> bool:
 
 
 func _reject(what: String, why: String) -> void:
-	push_warning("Bogey: refused %s — %s" % [what, why])
+	push_warning("Pars and Chars: refused %s — %s" % [what, why])
 
 
 # True when `index` is a valid position in `arr`.
@@ -1597,6 +1493,85 @@ func on_discard_pick(index: int) -> void:
 	refresh_ui()
 
 
+# --- Club abilities and set powers (ClubAbilities.gd) ---
+# One entry point for every activated ability. Toggles arm an effect for
+# the shot or putt in hand and are charged once it's used; everything else
+# is charged and applied now.
+func on_ability(id: String) -> void:
+	if _animating:
+		_reject("ability", "a shot is in flight")
+		return
+	var entry := {}
+	for e in available_abilities():
+		if e.id == id:
+			entry = e
+	if entry.is_empty():
+		_reject("ability", "'%s' isn't available now" % id)
+		return
+
+	if entry.toggle:
+		if me.armed.has(id):
+			me.armed.erase(id)
+			log_msg("[i]%s — switched off.[/i]" % entry.source)
+		else:
+			me.armed[id] = true
+			log_msg("[color=#%s]%s — %s.[/color]" % [COLOR_ACCENT.to_html(false), entry.source, entry.label.to_lower()])
+		Sound.play("card_slide")
+		if state == State.AIM:
+			map_view.set_aim_can_hole_out(aim_line_can_hole_out())
+			refresh_aim_ghost()
+		refresh_ui()
+		return
+
+	ClubAbilities.record(me.ability_log, id, current_hole_index)
+	match id:
+		"gold_cleek", "bulger":
+			var card := FormCard.make(ClubAbilities.creates(id)).as_created()
+			current_form_options.append(card)
+			# A created card is always a real choice, even beside a forced one.
+			current_form_forced = false
+			log_msg("[color=#%s]%s — creates a %s in your hand. It exhausts whether you play it or not.[/color]" % [
+				COLOR_ACCENT.to_html(false), entry.source, card.name])
+		"redraw":
+			var kept: Array = []
+			var drawn: Array = []
+			for c in current_form_options:
+				if c.created:
+					kept.append(c)
+				else:
+					drawn.append(c)
+			form_deck.return_unpicked(drawn, -1)
+			current_form_options = form_deck.draw_cards(drawn.size()) + kept
+			log_msg("[color=#%s]%s — the whole hand goes back; %d fresh card%s.[/color]" % [
+				COLOR_ACCENT.to_html(false), entry.source, drawn.size(), "" if drawn.size() == 1 else "s"])
+		"improve_lie":
+			var was := current_lie
+			current_lie = ClubAbilities.lie_improved(current_lie)
+			log_msg("[color=#%s]%s — the lie improves from %s to %s.[/color]" % [
+				COLOR_ACCENT.to_html(false), entry.source, was, current_lie])
+	Sound.play("card_draw")
+	refresh_ui()
+
+
+# End of hole: skip the draft to purge bad cards from the Form deck — the
+# way back from a run of bad holes (Section 4 "range session").
+func on_range_session() -> void:
+	if state != State.DRAFT:
+		_reject("range session", "not in the draft phase")
+		return
+	if form_deck.bad_count() == 0:
+		_reject("range session", "no bad cards to work out")
+		return
+	club_discard.append_array(current_draft_options)
+	current_draft_options = []
+	var purged := form_deck.purge_bad(ShotRules.RANGE_SESSION_PURGE)
+	Sound.play("card_discard")
+	log_msg("[color=#%s]Range session — no club this hole, but %s leave%s your Form deck.[/color]" % [
+		COLOR_ACCENT.to_html(false), " and ".join(PackedStringArray(purged)), "s" if purged.size() == 1 else ""])
+	begin_next_draft()
+	refresh_ui()
+
+
 # --- Club select -> aim (crosshair, locked to the club's range) -> Form draw -> pick -> resolve ---
 func on_club_select(hand_index: int) -> void:
 	if state != State.CLUB_SELECT:
@@ -1604,6 +1579,11 @@ func on_club_select(hand_index: int) -> void:
 		return
 	if not _valid_index(hand_index, hand):
 		_reject("club select", "index %d outside 0..%d" % [hand_index, hand.size() - 1])
+		return
+	if not ShotRules.club_playable(hand, hand[hand_index], current_lie):
+		# The bag row already greys these out; this stops one arriving
+		# from another peer.
+		_reject("club select", "%s can't be played from the %s" % [hand[hand_index].name, current_lie])
 		return
 	pending_club = hand[hand_index]
 	Sound.play("card_slide")
@@ -1638,48 +1618,54 @@ func on_form_pick(index: int) -> void:
 
 
 func play_shot(club: Dictionary, card: FormCard) -> void:
-	if card.is_yips:
-		# Callowell 7 also stops a bad card tainting a putt.
-		if Brands.blocks_yips(hand):
+	match ShotRules.yips_effect(hand, card):
+		ShotRules.Yips.BLOCKED:
 			log_msg("[color=#%s]Yips — shrugged off (Callowell).[/color]" % COLOR_TEXT_SOFT.to_html(false))
-		else:
+		ShotRules.Yips.TAINTS_PUTT:
 			log_msg("[color=#%s]Yips! Taints your next putt if you're forced to play it near the green.[/color]" % COLOR_FLAG.to_html(false))
 			yips_pending = true
 			Sound.play("ui_error")
+			caddy_says("yips")
 
 	var aimed_distance: float = ball_pos.distance_to(aim_target)
-	var result := ShotResolver.resolve_shot(club, aimed_distance, current_lie, card,
-		Brands.ignores_terrain_penalty(hand) or Brands.plays_as_fairway(hand),
-		Brands.deviation_mult(hand, current_lie, card),
-		Brands.severity_mult(hand))
+	var result := ShotRules.resolve(hand, club, aimed_distance, play_lie(), card, me.armed)
+	# The shot's toggles are spent (charged when the draw was made).
+	for id in ["boost_tier", "ideal_club", "clean_lie"]:
+		me.armed.erase(id)
 
 	strokes += 1
 	var before_pos := ball_pos
+	_caddy_card = card.name
 
 	log_msg("[b]Stroke %d[/b] — played %s with %s (lie: %s)" % [strokes, card.name, club.name, current_lie])
 	log_msg("%s: %s" % [card.name, card.effect_text()])
+	if card.created:
+		log_msg("[i]%s was created by a club — it exhausts now it's played.[/i]" % card.name)
+	if card.purges_bad > 0:
+		var purged := form_deck.purge_bad(card.purges_bad)
+		if not purged.is_empty():
+			log_msg("[color=#%s]In the Zone — a %s card leaves your Form deck.[/color]" % [
+				COLOR_ACCENT.to_html(false), ", ".join(PackedStringArray(purged))])
 
 	pending_club = {}
 	_animating = true
 	clear_container(options_container)
+	clear_container(ability_box)
 	Sound.swing(club.type)
 
-	var aim_dir: Vector2 = (aim_target - before_pos).normalized()
-	if aim_dir.length_squared() < 0.0001:
-		aim_dir = (hole.pin_pos - before_pos).normalized()
-	if aim_dir.length_squared() < 0.0001:
-		aim_dir = Vector2.UP
+	var aim_dir := ShotRules.aim_direction(before_pos, aim_target, hole.pin_pos)
 
 	# Carry and run-out, decided now from the ground — the animation plays
 	# out exactly this, and the landing below acts on exactly this.
 	var outcome := ShotResolver.shot_outcome(hole, before_pos, aim_dir, result, club)
 
 	map_view.play_aim_animation(aim_dir, outcome.carry, float(result.degree), result.side, club.max_yard, func():
-		_resolve_shot_landing(before_pos, aim_dir, result, outcome)
+		_resolve_shot_landing(before_pos, aim_dir, result, outcome, club)
 	, outcome.roll_path)
 
 
-func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictionary, outcome: Dictionary) -> void:
+func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictionary,
+		outcome: Dictionary, club: Dictionary = {}) -> void:
 	_animating = false
 	# A peer may have dropped mid-flight; it is safe to act on that now
 	# that this closure has finished writing through `me`.
@@ -1700,6 +1686,12 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 	else:
 		log_msg("Carried %d yards -> landed in %s, %d yards from the pin." % [
 			int(round(outcome.carry)), lie_result, int(landing_pos.distance_to(hole.pin_pos))])
+	# What the wind and the ground did to it, kept on the shot panel until
+	# the next shot so the player can read it while choosing the next club.
+	if not club.is_empty():
+		var breakdown := ShotRules.shot_breakdown(hole, before_pos, aim_dir, result, club, outcome)
+		me.last_shot = {"club": club.name, "text": ShotRules.breakdown_text(breakdown)}
+		log_msg("[color=#%s]%s[/color]" % [COLOR_TEXT_SOFT.to_html(false), me.last_shot.text])
 
 	# A shot that finishes on the cup earns a d20, and only a natural 20
 	# actually drops (see ShotResolver — the aim and the card are fully
@@ -1720,26 +1712,16 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 			log_msg("[color=#%s][b]d20: %d — IN THE HOLE, from %d yards![/b][/color]" % [
 				COLOR_ACCENT.to_html(false), roll, int(before_pos.distance_to(hole.pin_pos))])
 			Sound.play("cup")
+			caddy_says("hole_out", {"strokes": strokes})
 			finish_hole()
 			return
-		# Rimmed out. Deliberately left OUTSIDE gimme range: a rim-out
-		# conceded as a tap-in ends the hole the same instant a made one
-		# does, which makes the die invisible — the player sees the ball
-		# vanish either way and cannot tell a 20 from a 3. Leaving a short
-		# putt to actually play is what makes the miss land, and the higher
-		# the roll the closer it finishes, so the number on the die is
-		# visible in where the ball ends up.
+		# Rimmed out, leaving a short putt to actually play — see
+		# ShotRules.rim_out_position() for why it's never a gimme.
 		log_msg("[color=#%s]d20: %d — rattles the cup and stays out.[/color]" % [
 			COLOR_FLAG.to_html(false), roll])
 		Sound.play("rim_out")
-		var rim_dir: Vector2 = (landing_pos - hole.pin_pos)
-		if rim_dir.length_squared() < 0.0001:
-			rim_dir = Vector2(0, 1)
-		# A 19 lips out to ~1 yard, a 1 pulls up ~3 — always beyond the
-		# gimme, so there is always a putt.
-		var rim_leave: float = lerpf(3.0, 1.0,
-			float(roll - 1) / float(ShotResolver.HOLE_OUT_DIE - 1))
-		ball_pos = hole.pin_pos + rim_dir.normalized() * rim_leave
+		caddy_says("rim_out")
+		ball_pos = ShotRules.rim_out_position(hole.pin_pos, landing_pos, roll)
 		current_lie = "green"
 		shot_path.append(ball_pos)
 		map_view.set_ball(ball_pos, shot_path)
@@ -1747,47 +1729,23 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 		advance_after_shot()
 		return
 
-	var hazard_hit := false
-	if lie_result == "out":
-		# Rule 18 — stroke and distance: a penalty stroke, and the ball is
-		# replayed from where the shot was struck. Same shape as the water
-		# case, which is already stroke-and-distance in all but name.
-		strokes += 1
-		ball_pos = before_pos
-		current_lie = hole.terrain_at(before_pos)
-		if current_lie == "out":
-			# The previous spot can itself be off the course only if the
-			# ball was already OB, which cannot happen — but never leave
-			# the lie in a state no club can be played from.
-			current_lie = "rough"
-		log_msg("[color=#%s]Out of bounds! +1 penalty stroke, replayed from your previous position.[/color]" % COLOR_FLAG.to_html(false))
-		hazard_hit = true
-	elif lie_result == "water":
-		strokes += 1
-		ball_pos = before_pos
-		current_lie = "rough" if hole.terrain_at(before_pos) != "fairway" else "fairway"
-		log_msg("[color=#%s]Splash! Water hazard — +1 penalty stroke, dropped back near your previous position.[/color]" % COLOR_WATER.to_html(false))
-		hazard_hit = true
-	elif lie_result == "bunker":
-		ball_pos = landing_pos
-		current_lie = "bunker"
-		log_msg("[color=#%s]In the sand.[/color]" % COLOR_SAND.to_html(false))
-		hazard_hit = true
-	elif lie_result == "rough":
-		ball_pos = landing_pos
-		current_lie = "rough"
-	elif lie_result == "green":
-		ball_pos = landing_pos
-		current_lie = "green"
-	else:
-		ball_pos = landing_pos
-		current_lie = "fairway"
-
-	# Callowell 7: bad cards can no longer downgrade your lie.
-	if result.downgrades_lie and current_lie != "green" and not Brands.blocks_lie_downgrade(hand):
-		current_lie = ShotResolver.lie_downgrade(current_lie)
+	# Penalties, drops and lie changes — see ShotRules.settle().
+	var settled := ShotRules.settle(hole, before_pos, landing_pos, result.downgrades_lie, hand, club)
+	strokes += int(settled.penalty)
+	ball_pos = settled.ball_pos
+	current_lie = settled.lie
+	match lie_result:
+		"out":
+			log_msg("[color=#%s]Out of bounds! +1 penalty stroke, replayed from your previous position.[/color]" % COLOR_FLAG.to_html(false))
+		"water":
+			log_msg("[color=#%s]Splash! Water hazard — +1 penalty stroke, dropped back near your previous position.[/color]" % COLOR_WATER.to_html(false))
+		"bunker":
+			log_msg("[color=#%s]In the sand.[/color]" % COLOR_SAND.to_html(false))
+	if settled.lie_downgraded:
 		log_msg("[color=#%s]Shank — lie downgraded to %s.[/color]" % [COLOR_FLAG.to_html(false), current_lie])
-		hazard_hit = true
+	if lie_result == "rough" and current_lie == "green":
+		log_msg("[i]On the fringe — the Jigger putts it from here.[/i]")
+	var hazard_hit: bool = settled.hazard
 
 	Sound.landing(lie_result)
 	shot_path.append(ball_pos)
@@ -1799,19 +1757,39 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 
 	if hazard_hit:
 		maybe_add_bad_card_to_form_deck(lie_result)
+	apply_landing_abilities(lie_result, hazard_hit)
+	caddy_says("landing", {"terrain": lie_result, "card": _caddy_card, "carry": outcome.carry,
+		"distance_cap": ShotRules.lie_distance_cap(hand, current_lie)})
 
 	advance_after_shot()
+
+
+# The bag's passives once a shot has settled (ClubAbilities.on_landing):
+# cards created for the next draw, and bad cards purged. Runs after Form
+# decay so a purge can take back the card a hazard just added.
+func apply_landing_abilities(terrain: String, hazard: bool) -> void:
+	var fx := ClubAbilities.on_landing(hand, terrain, hazard, me.ability_log, current_hole_index)
+	for id in fx.used:
+		ClubAbilities.record(me.ability_log, id, current_hole_index)
+	var by := ", ".join(PackedStringArray(fx.by))
+	if not fx.create.is_empty():
+		me.created_next.append_array(fx.create)
+		log_msg("[color=#%s]%s — your next draw includes %s.[/color]" % [
+			COLOR_ACCENT.to_html(false), by, " and ".join(PackedStringArray(fx.create))])
+	if fx.purge > 0:
+		var purged := form_deck.purge_bad(fx.purge)
+		if not purged.is_empty():
+			log_msg("[color=#%s]%s — purged %s from your Form deck.[/color]" % [
+				COLOR_ACCENT.to_html(false), by, ", ".join(PackedStringArray(purged))])
 
 
 # Section 5 "Bad cards from hazards": landing in rough/bunker/water carries
 # a chance of adding a bad Form card into the shared Form deck (not the
 # Bag) — degrading future draws for the rest of the round.
 func maybe_add_bad_card_to_form_deck(lie_result: String) -> void:
-	# MacGregorian 2: hazards stop feeding bad cards into the Form deck, so
-	# a rough patch no longer compounds for the rest of the round.
-	if Brands.blocks_form_decay(hand):
+	if not ShotRules.hazard_can_decay_form(hand):
 		return
-	if _roll("decay_chance", func(): return randf()) < (1.0 / 3.0):
+	if _roll("decay_chance", func(): return randf()) < ShotRules.FORM_DECAY_CHANCE:
 		# Which bad card it is also has to match across machines, so pick
 		# the name here (add_bad_card_to_deck already takes one) rather
 		# than letting the deck roll it internally.
@@ -1821,6 +1799,7 @@ func maybe_add_bad_card_to_form_deck(lie_result: String) -> void:
 		Sound.play("ui_error")
 		log_msg("[color=#%s](The %s left a %s card in your Form deck.)[/color]" % [
 			COLOR_TEXT_SOFT.to_html(false), lie_result, card.name])
+		caddy_says("bad_card")
 
 
 # Called when the active player's shot is fully resolved and they are still
@@ -1862,7 +1841,7 @@ func start_putting() -> void:
 	# the putt meter (a rattled hole-out does exactly that), and asking for
 	# a timing check on a 2-foot putt the game concedes everywhere else
 	# would be a check the player cannot meaningfully fail.
-	if putt_dist <= GIMME_YARDS:
+	if ShotRules.is_gimme(putt_dist):
 		strokes += 1
 		putt_dist = 0.0
 		sync_ball_to_putt()
@@ -1870,6 +1849,7 @@ func start_putting() -> void:
 		finish_hole()
 		return
 	log_msg("\n[b]On the green.[/b] %s to the pin — stop the marker in the green band to hole it." % putt_distance_text())
+	caddy_says("putt", {"dist": putt_dist, "dist_text": putt_distance_text()})
 	refresh_ui()
 
 
@@ -1892,13 +1872,33 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 	# would throw the ball to a nonsense spot rather than crash. Clamp it
 	# to the 0..1 the meter is documented to emit.
 	accuracy = clampf(accuracy, 0.0, 1.0)
+
+	# The Titanist Blade Putter: a putt that stays out is taken again, no
+	# stroke added. Covers a Yips-tainted putt too — that's the mulligan.
+	if me.armed.has("putt_retry") and (result != "sunk" or yips_pending):
+		me.armed.erase("putt_retry")
+		ClubAbilities.record(me.ability_log, "putt_retry", current_hole_index)
+		if yips_pending:
+			yips_pending = false
+			log_msg("[color=#%s]The Yips strike — but the Blade Putter takes it again.[/color]" % COLOR_TEXT_SOFT.to_html(false))
+		else:
+			log_msg("[color=#%s]Missed — the Blade Putter takes it again, no stroke added.[/color]" % COLOR_TEXT_SOFT.to_html(false))
+		Sound.play("rim_out")
+		refresh_ui()
+		return
+
 	strokes += 1
+	# Steady Hands is spent on the putt that actually counts.
+	if me.armed.has("old_reliable"):
+		me.armed.erase("old_reliable")
+		ClubAbilities.record(me.ability_log, "old_reliable", current_hole_index)
+		log_msg("[i]Steady Hands (Old Reliable Putter).[/i]")
 
 	if yips_pending:
 		yips_pending = false
 		log_msg("[color=#%s]The Yips strike — the putt misses regardless of how well you struck it.[/color]" % COLOR_FLAG.to_html(false))
 		Sound.play("ui_error")
-		putt_dist = maxf(1.0, putt_dist * 0.35)
+		putt_dist = ShotRules.yips_putt_leave(putt_dist)
 		sync_ball_to_putt(_roll("putt_offline_yips", func(): return randf_range(-0.8, 0.8)))
 		continue_after_putt()
 		return
@@ -1912,19 +1912,14 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 			finish_hole()
 			return
 		"close":
-			# A good-but-not-perfect strike leaves a short one. The better
-			# the timing, the closer it finishes.
-			putt_dist = minf(lerpf(2.2, 0.6, accuracy), maxf(putt_dist * 0.5, GIMME_YARDS))
+			# A good-but-not-perfect strike leaves a short one.
+			putt_dist = ShotRules.putt_leave(result, accuracy, putt_dist)
 			sync_ball_to_putt(_roll("putt_offline_close", func(): return randf_range(-0.5, 0.5)))
 			log_msg("Good pace — slides by, leaving %s." % putt_distance_text())
 		_:
-			# A miss scales with how wild the timing was, and with how long
-			# the putt was to begin with: badly struck lag putts can race
-			# well past, short ones only ever dribble off line. Each miss is
-			# still capped at the distance it came from, so a putt can never
-			# get longer — the sequence always walks toward the hole.
-			var leave: float = lerpf(0.25, 0.06, accuracy) * maxf(putt_dist, 3.0)
-			putt_dist = clampf(leave, GIMME_YARDS, minf(putt_dist, 12.0))
+			# Capped at the distance it came from, so a putt can never get
+			# longer — the sequence always walks toward the hole.
+			putt_dist = ShotRules.putt_leave(result, accuracy, putt_dist)
 			sync_ball_to_putt(_roll("putt_offline_miss", func(): return randf_range(-1.2, 1.2)))
 			log_msg("[color=#%s]Mishit — pushed off line, %s left.[/color]" % [
 				COLOR_FLAG.to_html(false), putt_distance_text()])
@@ -1933,7 +1928,7 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 	# play for, so it's conceded rather than asking for another timing check
 	# the player cannot meaningfully fail. Also guarantees the putting loop
 	# terminates instead of grinding on a very short putt forever.
-	if putt_dist <= GIMME_YARDS:
+	if ShotRules.is_gimme(putt_dist):
 		strokes += 1
 		putt_dist = 0.0
 		sync_ball_to_putt()
@@ -1941,6 +1936,7 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 		finish_hole()
 		return
 
+	caddy_says("putt_result", {"result": result})
 	continue_after_putt()
 
 
@@ -2006,7 +2002,7 @@ func build_putt_controls() -> void:
 	col.add_child(putt_meter)
 
 	var strike_btn := Button.new()
-	strike_btn.text = "Strike  (Space)"
+	strike_btn.text = "Strike  (%s)" % Settings.putt_key_name()
 	strike_btn.custom_minimum_size = Vector2(0, 42)
 	strike_btn.pressed.connect(_on_strike_pressed)
 	col.add_child(strike_btn)
@@ -2019,7 +2015,8 @@ func build_putt_controls() -> void:
 	col.move_child(read_label, 0)
 
 	options_container.add_child(col)
-	putt_meter.begin(putt_dist, read.shift, read.band_mult)
+	putt_meter.begin(putt_dist, read.shift,
+		read.band_mult * ShotRules.putt_band_mult(hand, putt_dist, me.armed))
 
 
 func _on_strike_pressed() -> void:
@@ -2034,7 +2031,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if state != State.PUTTING:
 		return
 	if event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode == KEY_SPACE:
+			and event.keycode == Settings.putt_key():
 		_on_strike_pressed()
 		get_viewport().set_input_as_handled()
 
@@ -2105,6 +2102,11 @@ func finish_hole() -> void:
 	me.holed_out = true
 	Sound.jingle(diff)
 	round_scores.append({"hole": current_hole_index, "par": hole_par, "strokes": strokes})
+	if records_this_seat(active_index):
+		var prev_best := Records.record_hole(current_hole_index, strokes)
+		if prev_best > 0 and strokes < prev_best:
+			log_msg("[color=#%s]Your best on this hole — beats %d.[/color]" % [COLOR_ACCENT.to_html(false), prev_best])
+	caddy_says("holed", {"diff": diff})
 
 	if is_multiplayer():
 		log_msg("\n[b]%s holed out![/b] %d strokes (par %d) — %s" % [
@@ -2137,15 +2139,101 @@ func begin_end_of_hole() -> void:
 				log_msg("  %s — %d strokes (%s)" % [
 					p.name, int(entry.strokes), score_name(int(entry.strokes) - int(entry.par))])
 
+	if online:
+		begin_simultaneous_draft()
+		return
 	_draft_queue = []
 	for i in range(players.size()):
 		_draft_queue.append(i)
 	begin_next_draft()
 
 
+# --- Everyone drafts at once (online) ---------------------------------
+# Drafts are independent — every player draws from their own pool — so
+# nothing is lost by running them together, and at four players it saves
+# three players watching each pick. Hot-seat keeps them one at a time:
+# there, everyone shares the one screen.
+const DRAFT_PICK := "pick"
+const DRAFT_DISCARD := "discard"
+const DRAFT_DONE := "done"
+
+
+func begin_simultaneous_draft() -> void:
+	_simul_draft = true
+	_draft_queue = []
+	log_msg("\n[b]Everyone drafts at once.[/b] Draw 3, pick 1 — the next hole starts when the last pick is in.")
+	for i in range(players.size()):
+		active_index = i
+		if me.abandoned or not _draw_draft_options():
+			me.draft_stage = DRAFT_DONE
+		else:
+			me.draft_stage = DRAFT_PICK
+	Sound.play("card_draw")
+	if not _finish_simultaneous_draft_if_done():
+		view_seat(my_seat)
+		refresh_ui()
+
+
+func owes_draft(seat: int) -> bool:
+	return seat >= 0 and seat < players.size() \
+		and (players[seat].draft_stage == DRAFT_PICK or players[seat].draft_stage == DRAFT_DISCARD)
+
+
+# Points this machine's view — and so `me` and `state` — at one seat's
+# draft. In a simultaneous draft, `state` describes the seat being viewed.
+func view_seat(seat: int) -> void:
+	active_index = clampi(seat, 0, players.size() - 1)
+	match me.draft_stage:
+		DRAFT_PICK:
+			state = State.DRAFT
+		DRAFT_DISCARD:
+			state = State.DISCARD_FOR_DRAFT
+		_:
+			state = State.WAITING
+
+
+# Runs a draft action for `seat`, then returns the view to this machine's
+# own seat. Every machine replays the same actions in the same order, so
+# they agree on every player's stage — and on the moment the last pick
+# starts the next hole.
+func apply_as_seat(seat: int, kind: String, payload: Dictionary) -> void:
+	view_seat(seat)
+	_apply_action(kind, payload)
+	if not _simul_draft:
+		return  # that was the last pick, and the next hole has begun
+	if state == State.DISCARD_FOR_DRAFT:
+		me.draft_stage = DRAFT_DISCARD
+	view_seat(my_seat)
+
+
+func _finish_simultaneous_draft_if_done() -> bool:
+	for i in range(players.size()):
+		if owes_draft(i):
+			return false
+	_simul_draft = false
+	for p in players:
+		p.draft_stage = ""
+	finish_hole_done()
+	return true
+
+
+func waiting_on_names() -> Array:
+	var out: Array = []
+	for i in range(players.size()):
+		if owes_draft(i):
+			out.append(players[i].name)
+	return out
+
+
 # Runs the next queued player's end-of-hole draft, or moves on to the next
 # hole once every player has drafted.
 func begin_next_draft() -> void:
+	if _simul_draft:
+		# This player's draft is done; the hole moves on once everyone's is.
+		me.draft_stage = DRAFT_DONE
+		state = State.WAITING
+		_finish_simultaneous_draft_if_done()
+		return
 	if _draft_queue.is_empty():
 		finish_hole_done()
 		return
@@ -2175,6 +2263,7 @@ func finish_round() -> void:
 	log_entries.clear()
 	rebuild_log()
 	log_msg("[b]Round Complete — %s[/b]\n" % Course.active_name)
+	record_finished_round()
 
 	if is_multiplayer():
 		# Leaderboard first — in a group round the result is the comparison,
@@ -2218,12 +2307,78 @@ func finish_round() -> void:
 		log_msg("Hole %2d — Par %d — %d strokes — %s" % [entry.hole, entry.par, entry.strokes, score_name(entry.strokes - entry.par)])
 	var diff := total_strokes - total_par
 	log_msg("\n[b]Total: %d (%s)[/b]" % [total_strokes, score_diff_text(diff)])
+	caddy_says("round", {"diff": diff, "holes": round_scores.size()})
 	refresh_ui()
 
 
 # The actual reset, shared by the header button and the end-of-round
 # "Restart Round" button. init_game() rebuilds the bag, brands, Form deck
 # and draft pools, so a new run inherits nothing from the last one.
+# --- Records and settings ---------------------------------------------
+
+# Records are kept for players on this machine: every seat in solo and
+# hot-seat, only your own online. A test round from the course editor is
+# a course being built, not one being played, so it records nothing.
+func records_this_seat(seat: int) -> bool:
+	if GameSetup.return_to_editor:
+		return false
+	if online and seat != my_seat:
+		return false
+	return seat < players.size() and not players[seat].abandoned
+
+
+func round_mode() -> String:
+	if online:
+		return "online"
+	return "hot-seat" if is_multiplayer() else "solo"
+
+
+# Saves each local player's finished round and says how it stands.
+func record_finished_round() -> void:
+	for i in range(players.size()):
+		if not records_this_seat(i):
+			continue
+		var p: Player = players[i]
+		if p.round_scores.size() < Course.hole_count():
+			continue
+		var r := Records.record_round(p.name, p.total_strokes(), p.total_par(), round_mode())
+		var who := "" if not is_multiplayer() else "%s — " % p.name
+		var prev: Dictionary = r.previous_best
+		if prev.is_empty():
+			log_msg("[color=#%s][b]%sFirst round on %s — that's the record to beat.[/b][/color]" % [
+				COLOR_ACCENT.to_html(false), who, Course.active_name])
+		elif r.new_best:
+			log_msg("[color=#%s][b]%sNew course record! %d beats %d.[/b][/color]" % [
+				COLOR_ACCENT.to_html(false), who, p.total_strokes(), int(prev.strokes)])
+		else:
+			log_msg("[i]%sCourse record: %d (%s), by %s.[/i]" % [
+				who, int(prev.strokes), Records.diff_text(int(prev.diff)), str(prev.player)])
+	log_msg("")
+
+
+var _settings_popup: PopupPanel
+
+
+func _on_header_settings_pressed() -> void:
+	Sound.play("ui_click")
+	if _settings_popup == null:
+		_settings_popup = PopupPanel.new()
+		var style := BogeyUI.panel(BogeyTheme.PARCHMENT_RAISED, 20, 10)
+		style.border_color = BogeyTheme.NEUTRAL_400
+		style.set_border_width_all(1)
+		_settings_popup.add_theme_stylebox_override("panel", style)
+		var settings := SettingsPanel.new()
+		settings.custom_minimum_size = Vector2(460, 0)
+		settings.closed.connect(func(): _settings_popup.hide())
+		_settings_popup.add_child(settings)
+		add_child(_settings_popup)
+		# Pick up a new putt key once the popup closes.
+		_settings_popup.popup_hide.connect(func():
+			if state == State.PUTTING:
+				refresh_ui())
+	_settings_popup.popup_centered()
+
+
 func _on_header_menu_pressed() -> void:
 	Sound.play("ui_back")
 	var target := "res://scenes/CourseEditor.tscn" if GameSetup.return_to_editor else "res://scenes/Title.tscn"
@@ -2382,6 +2537,7 @@ func refresh_ui() -> void:
 		return
 
 	rebuild_shot_outlook()
+	rebuild_ability_box()
 	clear_container(options_container)
 	clear_container(form_container)
 
@@ -2430,7 +2586,17 @@ func refresh_ui() -> void:
 			for i in range(current_draft_options.size()):
 				var cv := make_card_view(current_draft_options[i])
 				cv.picked.connect(_make_draft_pick_callback(i))
-				options_container.add_child(cv)
+				options_container.add_child(card_with_notes(cv,
+					DraftAdvisor.gains(hand, current_draft_options[i], HAND_CAP)))
+			var bad := form_deck.bad_count()
+			if bad > 0:
+				var range_btn := Button.new()
+				range_btn.text = "Range session\nSkip the club —\nremove %d bad\nForm cards\n(%d in deck)" % [
+					mini(ShotRules.RANGE_SESSION_PURGE, bad), bad]
+				range_btn.custom_minimum_size = Vector2(150, 0)
+				BogeyUI.style_button(range_btn, false, 13)
+				range_btn.pressed.connect(func(): submit("range", {}))
+				options_container.add_child(range_btn)
 			build_form_placeholders("No Form draw between holes")
 
 		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
@@ -2441,8 +2607,18 @@ func refresh_ui() -> void:
 			for i in range(hand.size()):
 				var cv := make_card_view(hand[i])
 				cv.picked.connect(_make_discard_callback(i))
-				options_container.add_child(cv)
+				# What cutting it would cost, so the cut is a read, not a guess.
+				var losses: Array = DraftAdvisor.losses(hand, hand[i])
+				options_container.add_child(card_with_notes(cv, losses) if not losses.is_empty() \
+					else card_with_notes(cv, [{"text": "No set, rider or yardage depends on it", "strong": false}]))
 			build_form_placeholders("No Form draw while you're cutting the bag")
+
+		State.WAITING:
+			step_num = "·"
+			step_hint = "Drafted — waiting for the others"
+			hand_label.text = "YOUR BAG %d/%d" % [hand.size(), HAND_CAP]
+			options_label.text = "Still drafting: %s." % ", ".join(PackedStringArray(waiting_on_names()))
+			build_form_placeholders("The next hole starts when the last pick is in")
 
 		State.CLUB_SELECT:
 			step_num = "1"
@@ -2495,11 +2671,8 @@ func build_form_placeholders(note: String) -> void:
 
 	var count := 3
 	if state == State.AIM and not pending_club.is_empty():
-		var tier := swing_tier_for_shot()
-		if current_lie == "bunker" or tier == ShotResolver.Tier.EXTREME_FINESSE:
-			count = 1
-		else:
-			count = FormDeck.TIER_DRAW_COUNT.get(tier, 3)
+		var created: int = me.created_next.size() + ClubAbilities.draw_extras(pending_club, current_lie).size()
+		count = ShotRules.form_choice_count(hand, swing_tier_for_shot(), play_lie(), created)
 		form_hint.text = "This swing draws %d" % count
 	elif state != State.CLUB_SELECT:
 		count = 0
@@ -2589,7 +2762,11 @@ func refresh_turn_ui() -> void:
 			turn_banner_label.add_theme_color_override("font_color", BogeyTheme.INK)
 			turn_banner.add_theme_stylebox_override("panel",
 				BogeyUI.panel(seat, 6, 3))
-			if state == State.DRAFT or state == State.DISCARD_FOR_DRAFT:
+			if _simul_draft:
+				turn_banner_label.text = "%s — draft a club (everyone drafts at once)" % me.name \
+					if owes_draft(active_index) else "Waiting for %s to draft" % \
+					", ".join(PackedStringArray(waiting_on_names()))
+			elif state == State.DRAFT or state == State.DISCARD_FOR_DRAFT:
 				turn_banner_label.text = "%s — draft a club" % me.name
 			elif state == State.DONE:
 				turn_banner_label.text = "Round complete"
@@ -2631,6 +2808,9 @@ func rebuild_shot_outlook() -> void:
 	stats.add_child(BogeyUI.stat_block("Lie", current_lie.capitalize()))
 	stats.add_child(BogeyUI.stat_block("Strokes", str(strokes)))
 	stats.add_child(BogeyUI.stat_block("Par", str(hole_par) if hole else "—"))
+	var hole_best := Records.hole_best(current_hole_index)
+	if hole_best > 0:
+		stats.add_child(BogeyUI.stat_block("Your best", str(hole_best)))
 	if hole:
 		var calm := Wind.mph(hole.wind) < Wind.CALM_MPH
 		stats.add_child(BogeyUI.stat_block("Wind", "Calm" if calm else "%d mph" % Wind.mph(hole.wind),
@@ -2665,6 +2845,12 @@ func rebuild_shot_outlook() -> void:
 			and aim_target.distance_to(ball_pos) > 1.0 else (hole.pin_pos - ball_pos)
 		shot_outlook.add_child(BogeyUI.body("Wind %s — high shots ride it, low ones punch under." % \
 			Wind.describe(hole.wind, line), 13, BogeyTheme.NEUTRAL_700))
+
+	# The last shot, taken apart — what to learn before choosing the next.
+	if not me.last_shot.is_empty() and (state == State.CLUB_SELECT or state == State.PUTTING):
+		shot_outlook.add_child(BogeyUI.note_box(
+			"Last shot (%s): %s" % [me.last_shot.club, me.last_shot.text],
+			BogeyTheme.NEUTRAL_100, BogeyTheme.NEUTRAL_300, BogeyTheme.NEUTRAL_800))
 
 	# Club-specific read, only once a club is actually in hand.
 	if (state == State.AIM or state == State.FORM_DRAW) and not pending_club.is_empty():
@@ -2710,10 +2896,46 @@ func rebuild_shot_outlook() -> void:
 				"★ On the cup — struck straight and full, this one earns a d20 at the hole. Only a natural 20 drops; anything else finishes stone dead for a tap-in.",
 				BogeyTheme.OLIVE_100, BogeyTheme.OLIVE_300, BogeyTheme.OLIVE_900))
 
-		if current_lie == "bunker" and tier != ShotResolver.Tier.EXTREME_FINESSE:
+		if ShotRules.lie_forces_card(hand, play_lie()) and tier != ShotResolver.Tier.EXTREME_FINESSE:
 			shot_outlook.add_child(BogeyUI.body(
 				"⚠ Playing from the sand — forces the same treatment as Extreme Finesse: no draw, a bad Form card is created and you must play it.",
 				12, BogeyTheme.ACCENT_700))
+
+
+# The abilities the active player can use right now, as buttons, plus a
+# note of any created cards waiting for their next draw.
+func rebuild_ability_box() -> void:
+	if ability_box == null:
+		return
+	clear_container(ability_box)
+	var list := available_abilities()
+	var waiting: Array = me.created_next
+	var show_waiting := not waiting.is_empty() and (state == State.CLUB_SELECT or state == State.AIM)
+	ability_box.visible = not list.is_empty() or show_waiting
+	if not ability_box.visible:
+		return
+	ability_box.add_child(BogeyUI.hairline(0.14))
+	ability_box.add_child(BogeyUI.kicker("Abilities", BogeyTheme.ACCENT_700))
+	if show_waiting:
+		ability_box.add_child(BogeyUI.body("Your next Form draw includes %s (created)." % \
+			" and ".join(PackedStringArray(waiting)), 12, BogeyTheme.OLIVE_900))
+	for e in list:
+		var b := Button.new()
+		var left := "%d left %s" % [e.left, ClubAbilities.period_text(e.period)]
+		if e.toggle and e.armed:
+			b.text = "✓ %s — on (tap to switch off)" % e.label
+		else:
+			b.text = "%s  ·  %s" % [e.label, left]
+		b.tooltip_text = e.source
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		BogeyUI.style_button(b, e.toggle and e.armed, 13)
+		b.pressed.connect(_on_ability_pressed.bind(e.id))
+		ability_box.add_child(b)
+		ability_box.add_child(BogeyUI.body(e.source, 11, BogeyTheme.NEUTRAL_600))
+
+
+func _on_ability_pressed(id: String) -> void:
+	submit("ability", {"id": id})
 
 
 # Builds the bag row for CLUB_SELECT: every card in the bag, longest
@@ -2721,14 +2943,8 @@ func rebuild_shot_outlook() -> void:
 func rebuild_bag_row() -> void:
 	var playable := {}
 	for i in range(hand.size()):
-		var c = hand[i]
-		# The putter is playable from anywhere — its 0-35 band is what
-		# limits it, not a rule about where you're standing. Off the green
-		# it resolves as a normal Form-card shot; on the green, picking it
-		# hands over to the putt meter (see on_club_select).
-		if current_lie == "bunker" and c.type == "wood":
-			continue
-		playable[i] = true
+		if ShotRules.club_playable(hand, hand[i], current_lie):
+			playable[i] = true
 
 	for i in range(hand.size()):
 		var card = hand[i]
@@ -2746,8 +2962,7 @@ func rebuild_bag_row() -> void:
 # mutating game state, so the pick still reads as a deliberate action. ---
 func _on_draft_card_picked(cv: CardView, index: int) -> void:
 	_animating = true
-	for other in options_container.get_children():
-		other.play_fade_out()
+	_fade_out_options()
 
 	get_tree().create_timer(0.25).timeout.connect(func():
 		_animating = false
@@ -2758,13 +2973,41 @@ func _on_draft_card_picked(cv: CardView, index: int) -> void:
 # --- Form pick: same pop-then-fade treatment as a draft pick. ---
 func _on_form_card_picked(fv: FormCardView, index: int) -> void:
 	_animating = true
-	for other in options_container.get_children():
-		other.play_fade_out()
+	_fade_out_options()
 
 	get_tree().create_timer(0.25).timeout.connect(func():
 		_animating = false
 		submit("form", {"index": index})
 	)
+
+
+# Fades every card in the options row. A card may sit inside a column
+# with its draft notes, and the row also holds plain buttons (the range
+# session), which simply fade.
+func _fade_out_options() -> void:
+	for other in options_container.get_children():
+		if other.has_method("play_fade_out"):
+			other.play_fade_out()
+		else:
+			create_tween().tween_property(other, "modulate:a", 0.0, 0.18)
+
+
+# A card with what it would change written underneath — see DraftAdvisor.
+func card_with_notes(cv: CardView, notes: Array) -> Control:
+	if notes.is_empty():
+		return cv
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 4)
+	col.add_child(cv)
+	for n in notes.slice(0, 3):
+		var l := BogeyUI.body(("★ " if n.strong else "") + str(n.text), 11,
+			BogeyTheme.OLIVE_900 if n.strong else BogeyTheme.NEUTRAL_600)
+		l.custom_minimum_size = Vector2(CardView.CARD_SIZE.x, 0)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		col.add_child(l)
+	if notes.size() > 3:
+		cv.tooltip_text = "\n".join(PackedStringArray(notes.map(func(n): return str(n.text))))
+	return col
 
 
 # --- Callback factories (needed so each card view captures the right index) ---
@@ -2792,18 +3035,10 @@ func _on_form_hover_start(fv: FormCardView) -> void:
 		return
 
 	var aimed_distance: float = ball_pos.distance_to(aim_target)
-	var result := ShotResolver.resolve_shot(pending_club, aimed_distance,
-		current_lie, card,
-		Brands.ignores_terrain_penalty(hand) or Brands.plays_as_fairway(hand),
-		Brands.deviation_mult(hand, current_lie, card),
-		Brands.severity_mult(hand))
+	var result := ShotRules.resolve(hand, pending_club, aimed_distance, play_lie(), card, me.armed)
 
 	# Same fallback chain the real shot uses when the aim sits on the ball.
-	var aim_dir: Vector2 = (aim_target - ball_pos).normalized()
-	if aim_dir.length_squared() < 0.0001:
-		aim_dir = (hole.pin_pos - ball_pos).normalized()
-	if aim_dir.length_squared() < 0.0001:
-		aim_dir = Vector2.UP
+	var aim_dir := ShotRules.aim_direction(ball_pos, aim_target, hole.pin_pos)
 
 	var outcome := ShotResolver.shot_outcome(hole, ball_pos, aim_dir, result, pending_club)
 	map_view.set_preview_landing(true, ball_pos, outcome.rest, card.good,
@@ -2890,7 +3125,14 @@ func req_action(kind: String, payload: Dictionary) -> void:
 # The authoritative step: point the game at the acting seat, record the
 # rolls the action consumes, run it, then tell everyone.
 func _host_apply(seat: int, kind: String, payload: Dictionary) -> void:
-	if seat != active_index:
+	var simul := _simul_draft
+	if simul:
+		# Everyone drafts at once: any seat still owing a draft may act, but
+		# only with a draft action.
+		if not owes_draft(seat) or not ["draft", "discard", "range"].has(kind):
+			_reject(kind, "seat %d has no draft to make" % seat)
+			return
+	elif seat != active_index:
 		# Out of turn. Expected occasionally — a client can click as the
 		# turn passes — so refuse quietly rather than treating it as an
 		# error.
@@ -2898,7 +3140,11 @@ func _host_apply(seat: int, kind: String, payload: Dictionary) -> void:
 		return
 
 	begin_roll_capture()
-	_apply_action(kind, payload)
+	if simul:
+		apply_as_seat(seat, kind, payload)
+		refresh_ui()
+	else:
+		_apply_action(kind, payload)
 	var rolls: Array = take_captured_rolls()
 
 	if _net_trace:
@@ -2915,9 +3161,12 @@ func net_action_applied(seat: int, kind: String, payload: Dictionary,
 		rolls: Array, decks: Dictionary) -> void:
 	if _net_trace:
 		print("  [client] received %s seat=%d" % [kind, seat])
-	active_index = clampi(seat, 0, players.size() - 1)
 	inject_rolls(rolls)
-	_apply_action(kind, payload)
+	if _simul_draft:
+		apply_as_seat(seat, kind, payload)
+	else:
+		active_index = clampi(seat, 0, players.size() - 1)
+		_apply_action(kind, payload)
 	apply_deck_snapshot(decks)
 	refresh_ui()
 
@@ -2938,6 +3187,10 @@ func _apply_action(kind: String, payload: Dictionary) -> void:
 		"putt":
 			on_putt_stopped(str(payload.get("result", "")),
 				float(payload.get("accuracy", 0.0)))
+		"ability":
+			on_ability(str(payload.get("id", "")))
+		"range":
+			on_range_session()
 		_:
 			_reject("action", "unknown kind '%s'" % kind)
 
@@ -2962,9 +3215,14 @@ func snapshot_decks() -> Dictionary:
 			"draft_options": p.current_draft_options.duplicate(true),
 			"pending_club": p.pending_club.duplicate(true),
 			"pending_new_card": p.pending_new_card,
+			"ability_log": p.ability_log.duplicate(true),
+			"armed": p.armed.duplicate(),
+			"created_next": p.created_next.duplicate(),
+			"draft_stage": p.draft_stage,
 		})
 	return {"players": out, "active_index": active_index, "state": state,
-		"hole": current_hole_index, "draft_queue": _draft_queue.duplicate()}
+		"hole": current_hole_index, "draft_queue": _draft_queue.duplicate(),
+		"simul_draft": _simul_draft}
 
 
 func apply_deck_snapshot(decks: Dictionary) -> void:
@@ -2982,14 +3240,24 @@ func apply_deck_snapshot(decks: Dictionary) -> void:
 		p.current_draft_options = (e.get("draft_options", []) as Array).duplicate(true)
 		p.pending_club = (e.get("pending_club", {}) as Dictionary).duplicate(true)
 		p.pending_new_card = e.get("pending_new_card", null)
+		p.ability_log = (e.get("ability_log", {}) as Dictionary).duplicate(true)
+		p.armed = (e.get("armed", {}) as Dictionary).duplicate()
+		p.created_next = (e.get("created_next", []) as Array).duplicate()
+		p.draft_stage = str(e.get("draft_stage", ""))
 
 	# The host's turn and phase are authoritative. next_to_play() compares
 	# float distances, so recomputing them locally could tie differently —
 	# cheaper and safer to be told.
-	if decks.has("active_index"):
-		active_index = clampi(int(decks["active_index"]), 0, players.size() - 1)
-	if decks.has("state"):
-		state = int(decks["state"])
+	_simul_draft = bool(decks.get("simul_draft", false))
+	if _simul_draft:
+		# Mid-draft the host's turn and phase are the host's own view; this
+		# machine shows its own seat's draft instead.
+		view_seat(my_seat)
+	else:
+		if decks.has("active_index"):
+			active_index = clampi(int(decks["active_index"]), 0, players.size() - 1)
+		if decks.has("state"):
+			state = int(decks["state"])
 	if decks.has("draft_queue"):
 		_draft_queue = (decks["draft_queue"] as Array).duplicate()
 	# A hole change has to be adopted too, since start_hole() may have run
@@ -3055,6 +3323,12 @@ func _retire_seat(seat: int) -> void:
 
 	# They may have been mid-draft, which would otherwise stall the queue.
 	_draft_queue = _draft_queue.filter(func(i): return int(i) != seat)
+	if _simul_draft:
+		p.draft_stage = DRAFT_DONE
+		if not _finish_simultaneous_draft_if_done():
+			view_seat(my_seat)
+			refresh_ui()
+		return
 
 	if active_index == seat:
 		# They were up. Hand over, or finish the hole if nobody is left.

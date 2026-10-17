@@ -2,8 +2,8 @@ class_name CardView
 extends Control
 
 # ---------------------------------------------------------
-# Reusable visual card for a club/bad-card dictionary (see Main.gd's
-# make_club()). Draws a card-shaped panel with a type-colored header,
+# Reusable visual card for a club/bad-card dictionary (see
+# ClubRoster.make_club()). Draws a card-shaped panel with a type-colored header,
 # a club illustration, and stat text — plus hover lift and a pick
 # "pop" animation. The illustrations are 1920s printer's cuts (see
 # assets/art/CREDITS.md), stored white so they can be tinted to the club

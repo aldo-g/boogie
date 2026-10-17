@@ -40,10 +40,10 @@ func _init() -> void:
 
 static func build_starting_deck() -> Array:
 	var cards: Array = []
-	# ~65% good / 35% bad. 8 good names x2 = 16, 6 bad names x~2 = 12 -> 16/28 = 57%;
-	# bump good copies to 3 each to land closer to 65/35 (21 good / 12 bad = 64%).
-	for good_name in FormCard.GOOD_NAMES:
-		for i in range(3):
+	# 24 good / 12 bad = 67%: six drawable good cards x4, six bad x2. Pure
+	# Strike, Big Strike and Steady Hands are created by clubs, never drawn.
+	for good_name in FormCard.DECK_GOOD_NAMES:
+		for i in range(4):
 			cards.append(FormCard.make(good_name))
 	for bad_name in FormCard.BAD_NAMES:
 		for i in range(2):
@@ -70,12 +70,13 @@ func _draw_one() -> FormCard:
 # Creates a fresh bad Form card directly (not drawn from the shared deck at
 # all) for Extreme Finesse and bunker lies — the same Created-card
 # mechanism as Section 4's Pure Strike/Big Strike, just bad instead of
-# good. The shared Form deck's own contents/odds are untouched by this.
+# good. The shared Form deck's own contents/odds are untouched by this —
+# it exhausts like any created card, so it never reaches the discard pile.
 func create_forced_bad_card(card_name: String = "") -> FormCard:
 	var name: String = card_name
 	if name == "":
 		name = FormCard.BAD_NAMES[randi_range(0, FormCard.BAD_NAMES.size() - 1)]
-	return FormCard.make(name)
+	return FormCard.make(name).as_created()
 
 
 # Draws the Form card options for this shot. force_extreme (a bunker lie)
@@ -129,10 +130,50 @@ func _card_rank(card: FormCard) -> float:
 	return score
 
 
+# Created cards exhaust — they never join the discard pile.
 func return_unpicked(cards: Array, picked_index: int) -> void:
 	for i in range(cards.size()):
-		if i != picked_index:
+		if i != picked_index and not cards[i].created:
 			discard.append(cards[i])
+
+
+# `n` plain draws, for a re-draw (Titanist 7).
+func draw_cards(n: int) -> Array:
+	var drawn: Array = []
+	for i in range(n):
+		drawn.append(_draw_one())
+	return drawn
+
+
+func bad_count() -> int:
+	var n := 0
+	for c in deck + discard:
+		if not c.good:
+			n += 1
+	return n
+
+
+# Removes up to `n` bad cards from the deck and discard — the worst first
+# (by _card_rank), discard before deck on a tie so the next draws are the
+# last thing touched. Returns the removed cards' names.
+func purge_bad(n: int) -> Array:
+	var removed: Array = []
+	for k in range(n):
+		var best_pile: Array = []
+		var best_i := -1
+		var best_rank := INF
+		for pile in [discard, deck]:
+			for i in range(pile.size()):
+				var c: FormCard = pile[i]
+				if not c.good and _card_rank(c) < best_rank:
+					best_rank = _card_rank(c)
+					best_pile = pile
+					best_i = i
+		if best_i < 0:
+			break
+		removed.append(best_pile[best_i].name)
+		best_pile.remove_at(best_i)
+	return removed
 
 
 func add_bad_card_to_deck(card_name: String = "") -> FormCard:

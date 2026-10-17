@@ -1,8 +1,8 @@
-# Bogey
+# Pars and Chars
 
 A golf-themed **card** game — currently being prototyped digitally in Godot 4
 to test whether the core mechanics are fun before committing to physical
-production. Working title "Bogey."
+production. Working title "Pars and Chars."
 
 > **Note on the design:** this project pivoted away from dice. Shot
 > resolution is now the **Form Card System** — fully deterministic, no hidden
@@ -43,6 +43,28 @@ par; **2-4 players** can share a screen in hot-seat.
 - **Limited-edition clubs** are mixed into the same pool at lower odds — the
   same club types with better stats or a bonus ability.
 
+**Club abilities — every card's text does what it says**
+- Many clubs carry a **rider** that changes how that club plays: better or
+  worse buffering, no rough penalty, a wider Mid tier, a wood that plays
+  from sand. These live as `effects` beside the card text in
+  `assets/data/clubs.json`.
+- Some clubs **create** Form cards. An *active* ability is a button in the
+  Abilities box under the shot panel, with a charge per hole or per round
+  ("Gold Cleek: create a Pure Strike · 1 left per hole"). Pressing it puts
+  the card straight into the current Form hand. A *passive* one fires on
+  its own (land in sand with Old Tom's Niblick and your next draw holds a
+  Flop Shot). A created card exhausts whether you play it or not, so the
+  decision is which shot to spend it on, not whether to hoard it.
+- A created card always makes a forced draw a real choice: in a bunker the
+  club still forces a bad card on you, but a created card beside it is the
+  bail-out.
+- Activated set bonuses sit in the same box: Titanist 7 re-draws the hand,
+  MacGregorian 7 improves your lie, Nimbus 2 plays a shot one tier better,
+  Nimbus 7 plays it as the ideal club.
+- **Range session**: at the end of any hole you can skip the draft to
+  remove 2 bad cards from your Form deck. It's the way back from a run of
+  bad holes, paid for in bag progress.
+
 **Shot resolution — the Form Card System**
 - Each club has a yardage band (min–max) and a type that determines
   *buffering*: how much of a Form card's deviation actually reaches the ball.
@@ -53,10 +75,12 @@ par; **2-4 players** can share a screen in hot-seat.
   - **Full swing / Finesse** → draw 2, pick 1 *(less room to dodge a bad card)*
   - **Extreme Finesse** → no draw at all; a bad card is created and forced on you
 - Form cards are **fully known before you pick** — degrees of deviation,
-  distance multiplier, side. Good cards include Pure Strike, Stinger,
-  Controlled Draw/Fade, Flop Shot; bad ones are Hook, Slice, Top, Chunk, Shank
-  and Yips.
-- The shared Form deck starts at 24 good / 12 bad (67% good). **Landing in a
+  distance multiplier, side. The deck's good cards are Stinger, Controlled
+  Draw/Fade, Flop Shot, Bump and Run and In the Zone (which also removes a
+  bad card from your deck); bad ones are Hook, Slice, Top, Chunk, Shank and
+  Yips. Pure Strike, Big Strike and Steady Hands are never drawn — only
+  clubs create them.
+- The Form deck starts at 24 good / 12 bad (67% good). **Landing in a
   hazard can add a bad card into that deck**, so a rough patch degrades your
   draws for the rest of the round.
 
@@ -84,6 +108,24 @@ par; **2-4 players** can share a screen in hot-seat.
   marker's speed, so a tap-in is nearly free and a long lag putt is a real
   nerve test.
 - Putts inside 0.7 yards (about 2 feet) are conceded as a gimme.
+
+## Records and settings
+
+**Records** are kept per course in `user://records.json`: your best
+round (strokes, vs par, who and when), rounds played, the last 20 rounds,
+and your best score on every hole. The title screen's course box shows
+the course record, **Records** on the title opens the full card, the shot
+panel shows "Your best" on the hole you're playing, and the end of a round
+says whether you've set a new course record. Solo and every hot-seat seat
+are recorded; online, only your own seat. A course is identified by its
+contents, so editing a custom course starts its record afresh, and
+editor test rounds record nothing.
+
+**Settings** (title screen, or the header's **Settings** mid-round) are
+kept in `user://settings.cfg` and apply as you change them: master, music
+and effects volume; shot animation (Normal, Fast, or Instant, which skips
+straight to where the ball stops); and the putt strike key (Space by
+default).
 
 ## Multiplayer (2-4 players)
 
@@ -144,6 +186,20 @@ nobody can take the card you wanted. Whether that lack of contention makes
 the draft feel inert is an open playtesting question; see
 [GAME_DESIGN.md](GAME_DESIGN.md) Section 7.
 
+Because the drafts are independent, **online everyone drafts at once** —
+each on their own machine — and the next hole starts when the last pick
+is in. Hot-seat drafts stay one at a time, since everyone shares the
+screen.
+
+Every draft card says **what it would change**: a set tier it completes,
+a club rider it switches on, a yardage gap it fills, or how far it moves
+a brand toward its next set. When the bag is full, each club you might
+cut says what cutting it would break.
+
+After every shot the log and the shot panel take it apart — **how far it
+carried and rolled, and what the wind and the slope added or cost** — so
+the wind and elevation are something you can learn, not just suffer.
+
 Simultaneous/secret shot declaration (in the original design note) is not
 implemented and isn't buildable on one shared screen — it needs networked
 multiplayer. Sequential turns are the hot-seat equivalent.
@@ -155,6 +211,9 @@ Bogey/
 ├── project.godot          Godot project config
 ├── GAME_DESIGN.md         Full design document (source of truth)
 ├── assets/
+│   ├── data/clubs.json    The club roster — every club's band, type, brand and text
+│   ├── data/caddy_lines.json  Everything Charlie the caddy says, by situation
+│   ├── art/caddy/         Charlie, the arctic char caddy
 │   ├── fonts/             AlexBrush (title wordmark)
 │   └── maps/              Reference course layout (18 holes)
 ├── scenes/
@@ -165,9 +224,17 @@ Bogey/
 │   └── Capture.tscn       Screenshot capture helper
 └── scripts/
     ├── Main.gd            Game loop, state machine, UI construction
+    ├── ShotRules.gd       The rules of a stroke — tier, Form draw, lies, penalties, putt leaves
+    ├── ClubAbilities.gd   What club text does: riders, created cards, charges, passives
+    ├── Records.gd         Per-course bests and history, saved between sessions
+    ├── DraftAdvisor.gd    What a draft pick would change, and what a cut would cost
+    ├── Settings.gd        Volume, shot speed and putt key, saved between sessions
+    ├── SettingsPanel.gd   The settings controls (title page and in-game popup)
+    ├── ClubRoster.gd      Loads the club roster; starter bag, draft pool, live brands
     ├── Player.gd          One player's state (bag, ball, score, Form deck)
     ├── Net.gd             The multiplayer connection (autoload)
     ├── Credits.gd         Attributions shown on the credits screen
+    ├── Caddy.gd           Charlie the caddy: when he pops up and what he says
     ├── GameSetup.gd       Round setup carried between scenes
     ├── MPTest.gd          Headless flow harness (dev tool, see below)
     ├── DetTest.gd         Determinism harness (dev tool)
@@ -175,6 +242,9 @@ Bogey/
     ├── NetTest.gd         Two-peer networked harness (dev tool)
     ├── CreditsCheck.gd    Checks required attributions reach the screen
     ├── CourseTest.gd      Custom-course harness (dev tool)
+    ├── RulesTest.gd       Rules and roster harness, no screen (dev tool)
+    ├── TestBags.gd        Ability loadouts the flow harnesses play with (dev tool)
+    ├── RecordsTest.gd     Records and settings persistence harness (dev tool)
     ├── ShotResolver.gd    Shot math — distance, deviation, cup radius
     ├── FormCard.gd        A single Form card and its known effect
     ├── FormDeck.gd        The shared Form deck and per-tier draws
@@ -221,8 +291,22 @@ resolve.
 Headless harnesses, all dev tools:
 
 ```sh
+# The rules and the club roster on their own, no screen: swing tiers,
+# Form draw counts, brand bonuses, lies and penalties, putt leaves, and
+# every club ability against its card text
+godot --headless --script res://scripts/RulesTest.gd
+
+# Records and settings: bests only improve, history caps, an edited course
+# starts fresh, settings survive a reload and survive a bad file. Uses
+# scratch files — never your own records
+godot --headless --script res://scripts/RecordsTest.gd
+
 # Full 18-hole rounds for 1-4 players: turn order, hole flow, bag caps
 godot --headless --script res://scripts/MPTest.gd
+
+# The caddy's line file: every situation has lines, no typo'd keys or
+# placeholders
+godot --headless --script res://scripts/CaddyTest.gd
 
 # Malformed and out-of-turn actions are refused rather than crashing
 godot --headless --script res://scripts/GuardTest.gd
@@ -251,7 +335,7 @@ hole map; set par, green size and tilt, and elevation in the side panel.
 **Test play** runs a solo round on the course in progress and its
 **Editor** button brings you back. Saved courses are JSON in
 `user://courses/` (on macOS,
-`~/Library/Application Support/Godot/app_userdata/Bogey Prototype/courses/`)
+`~/Library/Application Support/Godot/app_userdata/Pars and Chars/courses/`)
 and appear in the title screen's course picker. A hosted online round
 sends its course to everyone who joins, so other players don't need the
 file.
@@ -264,7 +348,10 @@ test before trusting a change.
 Add `MPTEST_COUNTS=3,4` to run a subset. It plays randomly rather than
 well, so the stroke totals are meaningless — it checks that the flow never
 stalls, never skips a player, keeps every bag within the 14-club cap, and
-finishes 18 holes for everyone. It sets `CourseMapView.skip_animation` so
+finishes 18 holes for everyone. In group rounds every seat after the first
+plays an ability loadout from `TestBags.gd`, and the bots press abilities
+and take range sessions at random, so every ability gets played; DetTest
+and NetTest do the same. It sets `CourseMapView.skip_animation` so
 shots resolve with no tween; a full 4-player round is ~1,200 actions and
 takes a few seconds.
 
@@ -278,6 +365,9 @@ takes a few seconds.
   forced discard when full)
 - **Brands, set bonuses at 2/4/7, per-run draft pools, and limited-edition
   clubs**
+- **Club abilities** — per-club riders, created cards (Pure Strike, Big
+  Strike, Flop Shot, Bump and Run, Steady Hands) with per-hole and
+  per-round charges, passives, activated set bonuses, and range sessions
 - **Form Card shot resolution** — deterministic, tier-based draw counts, club
   buffering
 - Click-to-aim on a drawn hole map with swing-tier bands and a live landing
@@ -295,7 +385,6 @@ takes a few seconds.
 - Host migration if the host leaves
 - Simultaneous/secret shot declaration
 - Mid-round join
-- Slope on the greens
 
 ## Numbers worth tuning
 
@@ -307,11 +396,21 @@ takes a few seconds.
 - **Club buffering** — `BUFFER_BY_TYPE` in `ShotResolver.gd`.
 - **Form deck good/bad ratio** — `build_starting_deck()` in `FormDeck.gd`
   (currently 24 good / 12 bad = 67%).
-- **Hazard → bad card odds** — `maybe_add_bad_card_to_form_deck()` in
-  `Main.gd` (currently 1 in 3).
+- **Hazard → bad card odds** — `FORM_DECAY_CHANCE` in `scripts/ShotRules.gd`
+  (currently 1 in 3). A range session removes `RANGE_SESSION_PURGE` (2).
+- **Club abilities** — riders are `effects` in `assets/data/clubs.json`;
+  charges (per hole / round / six holes) are in `allowance()` in
+  `scripts/ClubAbilities.gd`, and Steady Hands' widening is
+  `STEADY_HANDS_WIDEN` there.
 - **Putting difficulty** — the `SUNK_HALF_*` / `CLOSE_HALF_*` / `SPEED_*`
   constants in `PuttMeter.gd`.
-- **Bag cap and gimme range** — `HAND_CAP` and `GIMME_YARDS` at the top of
-  `Main.gd`.
-- **Club yardage bands and brands** — `build_club_pool()` in `Main.gd`.
+- **Bag cap and gimme range** — `HAND_CAP` at the top of `Main.gd`;
+  `GIMME_YARDS` in `scripts/ShotRules.gd`.
+- **Club yardage bands, brands and card text** — `assets/data/clubs.json`.
+  Standards appear `standard_copies` times in each run's pool; branded
+  clubs only when their brand is live. `RulesTest` checks the file is
+  well-formed.
+- **Caddy lines** — `assets/data/caddy_lines.json` (see its `_comment` for
+  placeholders). How often he talks is `CHANCE` and `COOLDOWN_SEC` in
+  `scripts/Caddy.gd`. `CaddyTest` checks the file after editing.
 - **Hole layouts** — the `HOLES` centreline table in `HoleData.gd` (line ~104).

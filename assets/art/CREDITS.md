@@ -1,8 +1,14 @@
 # Art credits and licenses
 
-All art under `assets/art/` is free to use in this game. Each file has been
-recoloured to plain white (and some icons mirrored) so the game can tint it
-at runtime; nothing else about the artwork has been changed.
+All art under `assets/art/` is free to use in this game. The club and Form
+icons have been recoloured to plain white (and some mirrored) so the game can
+tint them at runtime; nothing else about the artwork has been changed.
+
+## caddy — Charlie, the arctic char
+`char.png` is the arctic char (*röding*) illustration from the Swedish
+cookbook *Iduns kokbok*, via Wikimedia Commons:
+[Röding, Iduns kokbok.jpg](https://commons.wikimedia.org/wiki/File:R%C3%B6ding,_Iduns_kokbok.jpg).
+**Public domain.** Kept in full colour; the white background was cut away.
 
 ## clubs — club card illustrations
 Golf printer's cuts by the American Type Founders Company, 1920s, via

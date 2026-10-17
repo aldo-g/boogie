@@ -1,7 +1,7 @@
 extends Control
 
 # ---------------------------------------------------------
-# BOGEY TITLE SCREEN + LOBBY
+# PARS AND CHARS TITLE SCREEN + LOBBY
 # Course map fills the entire background, washed to parchment on the
 # left where the menu card sits.
 #
@@ -27,7 +27,7 @@ const CARD_WIDTH := 560
 const COLOR_DARK_GREEN := Palette.FAIRWAY_DEEP
 const COLOR_FADED_WHITE := Palette.PARCHMENT
 
-enum Mode { MENU, HOSTING, JOINING, CREDITS }
+enum Mode { MENU, HOSTING, JOINING, CREDITS, SETTINGS, RECORDS }
 
 var mode: int = Mode.MENU
 var panel: VBoxContainer          # the part that changes per mode
@@ -105,9 +105,9 @@ func build_ui() -> void:
 	card.add_child(vbox)
 
 	var title := Label.new()
-	title.text = "Bogey!"
+	title.text = "Pars and Chars"
 	title.add_theme_font_override("font", TITLE_FONT)
-	title.add_theme_font_size_override("font_size", 104)
+	title.add_theme_font_size_override("font_size", 84)
 	title.add_theme_color_override("font_color", COLOR_DARK_GREEN)
 	vbox.add_child(title)
 
@@ -187,6 +187,10 @@ func _rebuild_panel() -> void:
 			_build_lobby()
 		Mode.CREDITS:
 			_build_credits()
+		Mode.SETTINGS:
+			_build_settings()
+		Mode.RECORDS:
+			_build_records()
 
 
 func _build_menu() -> void:
@@ -251,11 +255,13 @@ func _build_menu() -> void:
 
 	var footer := HBoxContainer.new()
 	panel.add_child(footer)
-	var credits_btn := BogeyUI.style_link_button(Button.new())
-	credits_btn.text = "Credits"
-	credits_btn.focus_mode = Control.FOCUS_NONE
-	credits_btn.pressed.connect(_on_credits_pressed)
-	footer.add_child(credits_btn)
+	for link in [["Records", _on_records_pressed], ["Settings", _on_settings_pressed],
+			["Credits", _on_credits_pressed]]:
+		var b := BogeyUI.style_link_button(Button.new())
+		b.text = link[0]
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(link[1])
+		footer.add_child(b)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(spacer)
@@ -306,6 +312,7 @@ func _build_course_picker() -> void:
 	name_l.clip_text = true
 	col.add_child(name_l)
 	col.add_child(BogeyUI.body(Course.summary(Course.active()), 12, BogeyTheme.NEUTRAL_600))
+	col.add_child(BogeyUI.body(Records.summary_line(), 12, BogeyTheme.OLIVE_900))
 
 	var next := _button("›")
 	next.custom_minimum_size = Vector2(46, 46)
@@ -481,6 +488,87 @@ func _on_credits_pressed() -> void:
 	Sound.play("ui_click")
 	mode = Mode.CREDITS
 	status.text = "Credits"
+	_rebuild_panel()
+
+
+# The settings page — the same controls as the in-game popup.
+func _build_settings() -> void:
+	var settings := SettingsPanel.new()
+	settings.closed.connect(_on_credits_back_pressed)
+	panel.add_child(settings)
+
+
+func _on_settings_pressed() -> void:
+	Sound.play("ui_click")
+	mode = Mode.SETTINGS
+	status.text = "Settings"
+	_rebuild_panel()
+
+
+# The selected course's records: the best round, how you've been playing
+# it lately, and your best on each hole.
+func _build_records() -> void:
+	panel.add_child(_kicker(Course.active_name))
+	var best := Records.best_round()
+	if best.is_empty():
+		panel.add_child(BogeyUI.body("No rounds finished on this course yet. Your first one sets the record.", 14))
+	else:
+		var stats := HBoxContainer.new()
+		stats.add_theme_constant_override("separation", 8)
+		panel.add_child(stats)
+		stats.add_child(BogeyUI.stat_block("Best", "%d (%s)" % [int(best.strokes), Records.diff_text(int(best.diff))]))
+		stats.add_child(BogeyUI.stat_block("Rounds", str(Records.rounds_played())))
+		stats.add_child(BogeyUI.stat_block("Average", "%.1f" % Records.average()))
+		panel.add_child(BogeyUI.body("Best set by %s on %s (%s)." % [
+			str(best.player), str(best.date), str(best.mode)], 12, BogeyTheme.NEUTRAL_600))
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 300)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(scroll)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 2)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(col)
+
+	# Hole by hole: the best you've managed on each, against par.
+	col.add_child(BogeyUI.heading("Best on each hole", 16))
+	var any_hole := false
+	for n in range(1, Course.hole_count() + 1):
+		var b := Records.hole_best(n)
+		if b == 0:
+			continue
+		any_hole = true
+		var par := int(HoleData.hole(n).par)
+		var l := BogeyUI.body("Hole %d — par %d — best %d (%s)" % [n, par, b, Records.diff_text(b - par)], 13)
+		l.autowrap_mode = TextServer.AUTOWRAP_OFF
+		col.add_child(l)
+	if not any_hole:
+		col.add_child(BogeyUI.body("No holes finished yet.", 13, BogeyTheme.NEUTRAL_600))
+
+	var history := Records.history()
+	if not history.is_empty():
+		col.add_child(_gap(10))
+		col.add_child(BogeyUI.heading("Recent rounds", 16))
+		for e in history:
+			var l := BogeyUI.body("%s — %s — %d (%s)%s" % [
+				str(e.date), str(e.player), int(e.strokes), Records.diff_text(int(e.diff)),
+				"" if str(e.mode) == "solo" else "  · %s" % str(e.mode)], 13)
+			l.autowrap_mode = TextServer.AUTOWRAP_OFF
+			col.add_child(l)
+
+	panel.add_child(_gap(4))
+	var back := _button("Back")
+	back.custom_minimum_size.x = 140
+	back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	back.pressed.connect(_on_credits_back_pressed)
+	panel.add_child(back)
+
+
+func _on_records_pressed() -> void:
+	Sound.play("ui_click")
+	mode = Mode.RECORDS
+	status.text = "Records"
 	_rebuild_panel()
 
 

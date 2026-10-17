@@ -1,0 +1,337 @@
+{
+	"_comment": "Everything Charlie the caddy can say, loaded by scripts/Caddy.gd. Each key is a situation and holds a list of lines; one is picked at random. Placeholders filled in from the game: {name} caddy's name, {mph} wind speed, {yards} hole length, {par} hole par, {pct} distance the rough takes off, {dist} putt length ('12 yds' / '9 ft'), {carry} yards carried, {score} round score ('3 over'), {holes} holes played. Keys listed in _forced are always spoken; every other line is only spoken sometimes, and never straight after another one. Add lines freely; a key with no lines just keeps him quiet.",
+
+	"_forced": [
+		"intro", "land_water", "land_out", "land_bunker", "rim_out", "hole_out", "hole_in_one",
+		"holed_eagle", "holed_birdie", "round_under", "round_level", "round_over"
+	],
+
+	"intro": [
+		"Name's {name}. Arctic char, professional caddy. I carry the bag, you carry the blame.",
+		"Alright? I'm {name}. Yes, I'm a fish. No, I won't be taking questions. Let's play.",
+		"{name}, at your service. Coldest fins on the course. I'll keep you right.",
+		"I'm {name}, your caddy for the day. I've read every green and most of the lakes."
+	],
+
+	"tee_calm": [
+		"Not a breath of wind. No excuses on this one.",
+		"Dead calm. The water's like glass. My favourite kind of day.",
+		"No wind at all. Hit the number on the club and trust it.",
+		"Still as a frozen loch. Just swing."
+	],
+	"tee_into": [
+		"{mph} mph straight in our faces. Take more club than you think.",
+		"Wind's against us, {mph} mph. Swimming upstream, this. Club up.",
+		"Into the wind. High shots will balloon. Keep it low, a Stinger loves this.",
+		"{mph} mph headwind. It'll knock yards off. Don't be koi about taking the bigger club."
+	],
+	"tee_helping": [
+		"{mph} mph at our backs. It'll fly, so club down a touch.",
+		"Tailwind! We're going with the current. Less club.",
+		"Wind's helping, {mph} mph. Get it up in the air and let it ride.",
+		"Downwind. Higher shots will catch the breeze, so they'll go further than the card says."
+	],
+	"tee_from_left": [
+		"Breeze from the left. Aim a bit left and let it drift back.",
+		"Wind's coming in from the left. It'll push you right, so start it left.",
+		"Left-to-right wind. A Controlled Draw would hold its line nicely in this.",
+		"Crosswind from the left. Allow for it, or we'll be fishing it out of the right rough."
+	],
+	"tee_from_right": [
+		"Breeze from the right. Start it right and let the wind bring it home.",
+		"Wind from the right. It'll push you left, so aim right of where you want it.",
+		"Right-to-left wind. A Controlled Fade will hold against it.",
+		"Crosswind from the right. Allow for it, or we'll be in the left rough."
+	],
+	"tee_gale": [
+		"It's a gale out here, {mph} mph. Keep it low and don't get greedy.",
+		"{mph} mph. That's not wind, that's weather. Low shots only, if you can.",
+		"Blowing a hoolie, {mph} mph. Anything high is going for a swim.",
+		"I've seen calmer seas in a storm. {mph} mph. Play the percentages."
+	],
+	"tee_water": [
+		"There's water on this one. I'd know. Keep it dry.",
+		"Water out there. Lovely for me, a stroke for you. Give it plenty of room.",
+		"Mind the water. If you visit my relatives, it costs you a stroke.",
+		"I can smell the water on this hole. Don't make me go and fetch it.",
+		"Water in play. Aim away from it. Nobody ever won a hole by being brave near a pond."
+	],
+	"tee_par3": [
+		"Par 3, {yards} yards. One good swing and we're putting.",
+		"Short one, {yards} yards. Pick the club that gets there without trying.",
+		"Par 3. Fin-esse, not force.",
+		"{yards} yards to the flag. Hit the green and let the putter do the rest."
+	],
+	"tee_par4": [
+		"Par 4, {yards} yards. Fairway first, then think about the flag.",
+		"{yards} yards. Two good shots and we're on. No heroics.",
+		"Par 4. Put it on the short grass and the rest gets easy."
+	],
+	"tee_par5": [
+		"Par 5. Three sensible shots beat one heroic one.",
+		"{yards} yards. It's a long swim, so pace yourself.",
+		"Par 5. Get it out there, lay up somewhere nice, and go for the flag with a short club.",
+		"Long hole. Don't go for broke, go for the fairway."
+	],
+	"tee_last_hole": [
+		"Last hole. Let's finish strong.",
+		"Final hole. Stay focused and let's fin-ish this properly.",
+		"Last one. Whatever happened out there, this hole doesn't know about it."
+	],
+
+	"tips": [
+		"Tip: don't use a club well short of its range. Babying it forces a bad Form card on you.",
+		"Tip: clubs of the same brand work together. Get two, four or seven of a set for bonuses.",
+		"Tip: your bag holds 14 clubs. After each hole you draft one more, so choose with a plan.",
+		"Tip: landing in rough, sand or water can slip a bad card into your Form deck. Keep it clean.",
+		"Tip: In the Zone throws bad cards out of your Form deck. Worth its weight in roe.",
+		"Tip: a Stinger flies low and the wind barely touches it. Bump and Run goes along the ground.",
+		"Tip: a Flop Shot goes up high and stops dead. Good for getting over trouble near the green.",
+		"Tip: finish a shot on the cup and you roll a d20. A natural 20 and it drops in.",
+		"Tip: the rough takes about a fifth off your distance and sand takes half. Club up to make up for it.",
+		"Tip: the Form deck chip up top shows every card in your deck. Have a look if it's getting murky.",
+		"Tip: hover over a brand chip in your bag to see what the next club of that set unlocks.",
+		"Tip: Yips is sneaky. It can follow you onto the green and ruin a putt.",
+		"Tip: woods won't get you out of a bunker. Don't even think about it.",
+		"Tip: in a group, whoever's furthest from the pin plays next. Even if that's you again."
+	],
+
+	"forced_card": [
+		"No choice here, a bad card's forced on you. Just swing and get it back on track.",
+		"Forced card. It happens to the best of us. Keep the damage small.",
+		"You can't pick this one. Aim safe and limit the damage.",
+		"Bad card, no options. Like being caught in a net. Wriggle out and move on."
+	],
+	"yips": [
+		"Ooh, the Yips. That could follow you onto the green. Try to stay off the fringe.",
+		"Yips! Nerves of jelly-fish. That might taint your next putt.",
+		"That's the Yips. Shake it off, and keep your next one well clear of the green's edge."
+	],
+	"bad_card_added": [
+		"That trouble left a bad card in your Form deck. Something fishy's swimming in there now.",
+		"Your Form deck just got a bit murkier. Look out for In the Zone to clean it up.",
+		"A bad card's been added to your deck. Don't worry, we'll flush it out eventually."
+	],
+
+	"land_water": [
+		"Lovely in there. For me. For you it's a penalty stroke.",
+		"Splash. I'll go and say hello to it. That's a stroke, by the way.",
+		"Water. Oh my cod. Plus one, and we drop near where we were.",
+		"Into the drink. I'd fetch it, but I'm on the clock. One stroke penalty.",
+		"That ball's sleeping with the fishes now. Penalty stroke, drop near the last spot.",
+		"Water you doing? That's a stroke. Take a breath and go again.",
+		"Holy mackerel. Wet ball. One penalty stroke, then we go again.",
+		"Well, at least it's somewhere I'd be comfortable. You lose a stroke though."
+	],
+	"land_out": [
+		"That's out of bounds. Stroke and distance, I'm afraid.",
+		"Gone. Out of bounds. Let's pretend that was a practice swing.",
+		"Out of bounds. Plus one, replay from where we were. Shake it off.",
+		"That one's swum off the map. Penalty stroke, go again from the same spot.",
+		"OB. That's a reel shame. Same spot, plus one.",
+		"Out of bounds. Even I can't swim that far. Plus one, replay it."
+	],
+	"land_bunker": [
+		"Sand. Grab a wedge, get it out, take your medicine.",
+		"Bunker. Woods won't get you out of that. Short and simple.",
+		"Beach day. Not my scene. Sand halves your distance and forces a bad card, so just get it out.",
+		"In the sand. I'm a fish, I hate this bit. Wedge it out and move on.",
+		"Bunker. Don't be shellfish with your ambitions, just get it back on the grass.",
+		"Sand trap. It's like being stranded at low tide. Get out first, score later."
+	],
+	"land_rough": [
+		"Rough's grabby. It'll take about {pct}% off the next one, so club up.",
+		"In the weeds. Expect to lose {pct}% of your distance. Take more club.",
+		"Rough. Like swimming through kelp. Club up to make up the {pct}%.",
+		"Bit of rough. It'll cost you {pct}% distance. Nothing a bigger club can't fix.",
+		"Long grass. Lose {pct}% on the next shot, so plan for it."
+	],
+	"land_rough_free": [
+		"Rough, but your bag shrugs it off. Swing away.",
+		"Rough? Your clubs don't care. Full distance, go for it.",
+		"In the rough, but your bag has us covered. Play it like the fairway."
+	],
+	"land_fairway": [
+		"Fairway. I can work with that.",
+		"Middle of the short stuff. Lovely.",
+		"Fairway! O-fish-ally a good shot.",
+		"That's fin-tastic. Right where we want it.",
+		"Nice and tidy. Like a fish in a clean stream.",
+		"Fairway. That's what I'm tackle-ing about.",
+		"Sweet as. Short grass, clear look at the flag."
+	],
+	"land_fairway_bomb": [
+		"{carry} yards! That's a whale of a drive.",
+		"You absolutely launched that. {carry} yards of carry. I'm hooked.",
+		"{carry} yards! Did you have a krill shake for breakfast?",
+		"Massive. {carry} yards. The salmon would be jealous of that leap."
+	],
+	"land_green": [
+		"On the green. Now don't three-putt it.",
+		"Dance floor. Nice.",
+		"On in regulation, or close enough. Let's roll it in.",
+		"Green! Now it's all about the putter. Smooth and steady.",
+		"On the putting surface. That's sea-mless."
+	],
+
+	"card_hook": [
+		"That Hook dragged it left. Don't worry, it happens. I know a thing or two about hooks.",
+		"A Hook, eh? You'd think I'd be used to them by now.",
+		"Hooked it. At least it wasn't me on the end of it this time."
+	],
+	"card_slice": [
+		"Slice. Sliced like sashimi. We go again.",
+		"That Slice peeled away right. Aim a bit left to make up for it.",
+		"Sliced. Not my favourite word, as a fish."
+	],
+	"card_top": [
+		"Topped it. Skimmed it like a stone. Not much distance on that one.",
+		"Top. It ran along the ground like a nervous minnow.",
+		"Topped. Head down next time, and keep your eye on the ball."
+	],
+	"card_chunk": [
+		"Chunked it. More turf than ball, that. Short of the target.",
+		"Chunk. You hit the big fat ground. Happens.",
+		"Fat one. Dug a trench. Shorter than we wanted."
+	],
+	"card_shank": [
+		"Shank. We don't talk about the shank. And it made your lie worse.",
+		"The dreaded Shank. That's a fluke, and not the good kind.",
+		"Shanked it. Something fishy about that swing. And the lie's worse now."
+	],
+	"card_pure_strike": [
+		"Pure Strike! Struck it like a pro. Couldn't have done it better myself. Mainly because I'm a fish.",
+		"Absolutely pure. Right off the middle. Fin-tastic.",
+		"That's a Pure Strike. Bang on the number."
+	],
+	"card_stinger": [
+		"Stinger! Low and hard, like a salmon going upstream.",
+		"Lovely Stinger. Kept it under the wind and let it run.",
+		"Stinger. That's the shot for a windy day."
+	],
+	"card_flop": [
+		"Flop Shot! Up like a flying fish, down like a feather.",
+		"Lovely Flop. High, soft and stopped dead.",
+		"Flop Shot. Over the trouble, no fuss."
+	],
+	"card_bump": [
+		"Bump and Run. Along the ground like a bottom-feeder. Very effective.",
+		"Nice Bump and Run. Keep it low, let it roll.",
+		"Bump and Run. Sometimes the ground's your best friend."
+	],
+	"card_draw": [
+		"Controlled Draw. Right to left, lovely shape.",
+		"That Draw curved in beautifully. You had it on a line.",
+		"Nice Draw. That's a shot with a bit of char-acter."
+	],
+	"card_fade": [
+		"Controlled Fade. Left to right, soft landing.",
+		"Lovely Fade. Held against the wind like a pro.",
+		"Fade. Gentle curve, just like it should."
+	],
+	"card_big_strike": [
+		"Big Strike! Full carry, no messing about.",
+		"You gave that everything. The whole lake felt it.",
+		"Big Strike. That's the club's full distance, right there."
+	],
+	"card_in_the_zone": [
+		"In the Zone! And it cleared out some junk from your Form deck.",
+		"You're in the zone. Calm as a still loch.",
+		"In the Zone. Keep this up and your Form deck'll be spotless."
+	],
+
+	"rim_out": [
+		"So close I could smell the cup.",
+		"Lipped it! Tap that in before it changes its mind.",
+		"Oh, it rattled the cup! Cruel. Short one left.",
+		"Rim out! It looked in and said no. Rude."
+	],
+	"hole_out": [
+		"IN! I've seen a lot from the bottom of a loch, but never that.",
+		"Holed it! I'm telling every fish in the lake.",
+		"It went IN! Holy mackerel!",
+		"You holed it from out there! Well, I'll be battered."
+	],
+	"hole_in_one": [
+		"HOLE IN ONE! I'm doing backflips. Well, I'm flopping about. Same thing.",
+		"An ACE! That's the best shot I've ever seen, and I've lived in some very clear water.",
+		"Hole in one! I'm going to need a minute. And a bucket of water."
+	],
+
+	"putt_long": [
+		"Long one. Just get it close. Two putts is fine from here.",
+		"Lag it up. Nobody holes these, so leave yourself a tap-in.",
+		"{dist}. Hard to hit the marker on this one, so just aim to get close.",
+		"Big putt. Don't be a hero, be a two-putter."
+	],
+	"putt_mid": [
+		"Read it, trust it, stroke it.",
+		"Nice and smooth. Stop the marker in the green and it drops.",
+		"{dist}. Makeable. Watch the marker and time it.",
+		"Steady hands. The fish in me believes in you."
+	],
+	"putt_short": [
+		"Short one. Firm and straight, no wobbling.",
+		"You've holed a thousand of these. Make it a thousand and one.",
+		"{dist}. Wide green band, nice and slow. You've got this.",
+		"Easy does it. Don't let the minnow-sized putts get in your head."
+	],
+	"putt_close": [
+		"Good pace. Just slid by. Tap-in territory, nearly.",
+		"Close! Nice roll. One more.",
+		"So near. Good effort, short one left."
+	],
+	"putt_miss": [
+		"Mishit. Still, it's walked closer. Go again.",
+		"Off line. Shake it off. The next one's shorter.",
+		"That one floundered. Reset and roll it."
+	],
+
+	"holed_eagle": [
+		"Eagle! I'm flapping about over here.",
+		"That's an eagle. Absolute scenes.",
+		"Eagle! The birds are jealous and so am I.",
+		"Two under on the hole. You're a natural. Or a dolphin."
+	],
+	"holed_birdie": [
+		"Birdie. Very tidy.",
+		"Birdie! That's the stuff.",
+		"Birdie. I don't usually like birds, they eat my cousins, but I'll allow it.",
+		"One under. That's fin-tastic.",
+		"Birdie! Let minnow if you want another."
+	],
+	"holed_par": [
+		"Par. Nobody ever lost a round making pars.",
+		"Solid par. On to the next.",
+		"Par. Steady as a heron. Not that I like herons.",
+		"Par. Sea-sonal and sensible."
+	],
+	"holed_bogey": [
+		"Bogey. It's the name of the game.",
+		"One over. Shake it off.",
+		"Bogey. Water under the bridge. Hopefully not literally.",
+		"A bogey. Don't flounder about it, next tee."
+	],
+	"holed_double": [
+		"Let's forget that one, like a goldfish would. I'm not a goldfish, but still.",
+		"Rough hole. The next tee doesn't know about it.",
+		"That was a hole and a half. Plenty more fish in the sea.",
+		"Not our finest hour. Let's not dwell on it, let's just keep swimming."
+	],
+
+	"round_under": [
+		"That's the round: {score} over {holes} holes. You're a natural. Same time tomorrow?",
+		"{score}! I've caddied for some fine golfers and you're right up there.",
+		"Round done, {score}. Hook, line and sinker. Well played."
+	],
+	"round_level": [
+		"Level par over {holes} holes. Solid as a glacier.",
+		"Round done, level par. Nothing fishy about that card.",
+		"Level par. Not bad at all. Next time we'll go under."
+	],
+	"round_over": [
+		"That's the round: {score} over {holes} holes. Same time tomorrow? I'll bring the bag.",
+		"Round done, {score}. There's plenty more fish in the sea, and plenty more rounds.",
+		"{score}. We'll get them next time. I'm going for a swim."
+	]
+}

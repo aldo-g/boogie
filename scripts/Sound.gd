@@ -114,14 +114,27 @@ func _ready() -> void:
 	add_child(_music)
 	_playlist = MUSIC.duplicate()
 	_playlist.shuffle()
+	Settings.apply_audio()
 	_next_track()
+
+
+# The player's music and effects volumes (Settings), applied on top of
+# the mix levels above. Master lives on the audio bus.
+func apply_volumes() -> void:
+	if _music:
+		_music.volume_db = MUSIC_DB + Settings.volume_db("music")
+		_music.stream_paused = Settings.is_muted("music")
 
 
 # Plays one random file from `group`. `pitch_spread` widens the random
 # pitch shift (0.0 = exact); the default is just enough that two slides in
 # a row don't sound identical.
 func play(group: String, pitch_spread: float = 0.06, db: float = 0.0) -> void:
-	if not sfx_enabled:
+	if not sfx_enabled or Settings.is_muted("sfx"):
+		return
+	# Before _ready() has loaded anything (the headless harnesses never
+	# give it a frame) there is nothing to play and nothing to warn about.
+	if _streams.is_empty():
 		return
 	var list: Array = _streams.get(group, [])
 	if list.is_empty():
@@ -131,7 +144,7 @@ func play(group: String, pitch_spread: float = 0.06, db: float = 0.0) -> void:
 	_next_voice = (_next_voice + 1) % VOICES
 	voice.stream = list[randi() % list.size()]
 	voice.pitch_scale = randf_range(1.0 - pitch_spread, 1.0 + pitch_spread)
-	voice.volume_db = SFX_DB + db
+	voice.volume_db = SFX_DB + db + Settings.volume_db("sfx")
 	voice.play()
 
 

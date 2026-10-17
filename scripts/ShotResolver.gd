@@ -190,11 +190,11 @@ static func resolve_shot(club: Dictionary, aimed_distance: float, lie: String, c
 		# Flop Shot: ignores the terrain's distance penalty entirely.
 		base_distance = aimed_distance
 
-	# Slazinger deepens a bad card's distance loss; a good card is left
-	# alone, so the drawback only ever bites on the cards you'd rather not
-	# have played.
+	# Slazinger deepens a bad card's distance loss (and Callowell's
+	# softening, below 1, lessens it); a good card is left alone, so the
+	# drawback only ever bites on the cards you'd rather not have played.
 	var dist_mult: float = card.distance_mult
-	if not card.good and severity_mult > 1.0 and dist_mult < 1.0:
+	if not card.good and severity_mult != 1.0 and dist_mult < 1.0:
 		dist_mult = max(0.0, 1.0 - (1.0 - dist_mult) * severity_mult)
 
 	var distance: float = base_distance * dist_mult

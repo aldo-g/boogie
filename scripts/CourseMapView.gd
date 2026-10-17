@@ -24,10 +24,9 @@ var shot_path: Array = []             # yard-space points, tee to current ball_p
 var other_balls: Array = []
 
 # Set true to resolve shots with no tween at all — the ball jumps straight
-# to where it lands and the callback fires immediately. Only the headless
-# flow harness (scripts/MPTest.gd) sets it: the animation is ~0.4-1.0s of
-# real time per shot, which makes driving a full round in a test take
-# minutes. Never set in normal play.
+# to where it lands and the callback fires immediately. Set by the headless
+# flow harnesses (the animation is ~0.4-1.0s of real time per shot); in
+# play, the "Instant" shot speed setting does the same thing.
 var skip_animation: bool = false
 
 var aiming: bool = false           # true while the player can move/set the aim crosshair
@@ -400,7 +399,7 @@ func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side:
 	if not hole:
 		on_done.call()
 		return
-	if skip_animation:
+	if skip_animation or Settings.instant_shots():
 		# No tween: land the shot now. Nothing here needs frames, so a
 		# caller driving the game in a loop makes real progress.
 		preview_landing_active = false
@@ -429,6 +428,7 @@ func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side:
 	queue_redraw()
 
 	var tw := create_tween()
+	tw.set_speed_scale(Settings.shot_speed_scale())
 	tw.tween_method(_set_aim_degree, 0.0, degree, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_method(_set_aim_distance, 0.0, distance, 0.18).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_callback(func():
@@ -462,6 +462,7 @@ func _start_ball_flight(distance: float, degree: float, side: int, on_done: Call
 	var duration: float = clamp(distance / 260.0, 0.28, 0.85)
 
 	var tw := create_tween()
+	tw.set_speed_scale(Settings.shot_speed_scale())
 	tw.tween_method(func(t: float): _update_ball_flight(start_yard, end_yard, t),
 		0.0, 1.0, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 

@@ -84,8 +84,9 @@ func _build() -> void:
 
 	# Filled pill rather than a bare caption — good/bad is the first thing
 	# to register on a Form card, and a tag carries further than 9px text.
+	# A created card says so: it exhausts rather than returning to the deck.
 	vbox.add_child(BogeyUI.tag(
-		"Good form" if form_card.good else "Bad form",
+		("Good form" if form_card.good else "Bad form") + (" · created" if form_card.created else ""),
 		BogeyTheme.OLIVE_200 if form_card.good else BogeyTheme.ACCENT_200,
 		BogeyTheme.OLIVE_800 if form_card.good else BogeyTheme.ACCENT_800))
 

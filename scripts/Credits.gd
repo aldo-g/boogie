@@ -40,6 +40,13 @@ const SECTIONS := [
 		],
 	},
 	{
+		"heading": "Caddy",
+		"note": "Iduns kokbok — public domain",
+		"lines": [
+			"Arctic char illustration, via Wikimedia Commons",
+		],
+	},
+	{
 		"heading": "Sound effects",
 		"note": "CC0, except where noted",
 		"lines": [

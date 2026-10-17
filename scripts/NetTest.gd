@@ -1,5 +1,7 @@
 extends SceneTree
 
+const TestBags := preload("res://scripts/TestBags.gd")
+
 # ---------------------------------------------------------
 # NETWORKED ROUND HARNESS — two real ENet peers, one process.
 #
@@ -103,6 +105,9 @@ func _roll_payload() -> Dictionary:
 	var scratch = load("res://scenes/Main.tscn").instantiate()
 	scratch.player_count = SEATS
 	scratch.init_game()
+	# Ability loadouts, so the round exercises club abilities online.
+	for i in range(scratch.players.size()):
+		scratch.players[i].hand = TestBags.loadout(i)
 	var p: Dictionary = scratch.build_round_payload()
 	scratch.free()
 	return p
@@ -190,8 +195,17 @@ func _play_step() -> bool:
 		print("reached hole %d, stopping as asked" % host_game.current_hole_index)
 		return _finish(drifts.is_empty())
 
-	# Whoever is up acts, through the same submit() path the UI uses.
+	# Whoever is up acts, through the same submit() path the UI uses. In an
+	# end-of-hole draft everyone drafts at once, so any seat still owing a
+	# pick may go — chosen at random, so the two drafts interleave.
 	var seat: int = host_game.active_index
+	if host_game._simul_draft:
+		var owing: Array = []
+		for i in range(host_game.players.size()):
+			if host_game.owes_draft(i):
+				owing.append(i)
+		if not owing.is_empty():
+			seat = owing.pick_random()
 	var actor = host_game if (seat == 0 or dropped) else cli_game
 	var kind_payload := _pick_action(actor)
 	if kind_payload.is_empty():
@@ -219,11 +233,17 @@ func _play_step() -> bool:
 
 # Chooses a legal action for the state the given peer believes it is in.
 func _pick_action(g) -> Dictionary:
+	var ability := TestBags.pick_ability(g, 0.3)
+	if ability != "":
+		return {"kind": "ability", "payload": {"id": ability}}
+	if TestBags.wants_range(g, 0.15):
+		return {"kind": "range", "payload": {}}
 	match g.state:
 		g.State.CLUB_SELECT:
 			if g.hand.is_empty():
 				return {}
-			return {"kind": "club", "payload": {"index": randi() % g.hand.size()}}
+			var playable: Array = g.playable_club_indices()
+			return {"kind": "club", "payload": {"index": playable[randi() % playable.size()]}}
 		g.State.AIM:
 			return {"kind": "aim", "payload": {"target": g.map_view.aim_target}}
 		g.State.FORM_DRAW:
@@ -250,8 +270,12 @@ func _pick_action(g) -> Dictionary:
 func _check_agreement() -> void:
 	var ctx := "action %d (hole %d)" % [actions, host_game.current_hole_index]
 	_cmp(ctx, "hole", host_game.current_hole_index, cli_game.current_hole_index)
-	_cmp(ctx, "state", host_game.state, cli_game.state)
-	_cmp(ctx, "active_index", host_game.active_index, cli_game.active_index)
+	_cmp(ctx, "simul_draft", host_game._simul_draft, cli_game._simul_draft)
+	# Mid-draft each machine shows its own seat, so state and turn
+	# legitimately differ; every player's draft stage must not.
+	if not host_game._simul_draft:
+		_cmp(ctx, "state", host_game.state, cli_game.state)
+		_cmp(ctx, "active_index", host_game.active_index, cli_game.active_index)
 	for i in range(host_game.players.size()):
 		var a = host_game.players[i]
 		var b = cli_game.players[i]
@@ -264,6 +288,8 @@ func _check_agreement() -> void:
 		_cmp(ctx, who + ".bag", str(_names(a.hand)), str(_names(b.hand)))
 		_cmp(ctx, who + ".scores", str(a.round_scores), str(b.round_scores))
 		_cmp(ctx, who + ".form_deck_size", a.form_deck.deck.size(), b.form_deck.deck.size())
+		_cmp(ctx, who + ".draft_stage", a.draft_stage, b.draft_stage)
+		_cmp(ctx, who + ".draft_options", str(_names(a.current_draft_options)), str(_names(b.current_draft_options)))
 
 
 func _names(bag: Array) -> Array:

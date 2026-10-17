@@ -1,5 +1,7 @@
 extends SceneTree
 
+const TestBags := preload("res://scripts/TestBags.gd")
+
 # ---------------------------------------------------------
 # DETERMINISM HARNESS — the test online multiplayer rests on.
 #
@@ -39,6 +41,9 @@ func _initialize() -> void:
 	GameSetup.player_count = 2
 	a = _make_instance()
 	b = _make_instance()
+	# Ability loadouts, so club abilities are replayed too.
+	for i in range(a.players.size()):
+		a.players[i].hand = TestBags.loadout(i)
 
 	# B starts from A's exact state, the way a joining peer would be sent
 	# the host's state rather than rolling its own.
@@ -53,6 +58,12 @@ func _initialize() -> void:
 			break
 
 	print("")
+	# Proof the loadouts did their job: charges spent, by ability.
+	var spent := {}
+	for p in a.players:
+		for id in p.ability_log:
+			spent[id] = int(spent.get(id, 0)) + (p.ability_log[id] as Array).size()
+	print("abilities used: %s" % str(spent))
 	if drifts.is_empty():
 		print("DETERMINISM: OK — %d actions, %d hole(s), two instances stayed identical" % [
 			actions, mini(a.current_hole_index, holes_to_play)])
@@ -138,18 +149,13 @@ func _apply_player(p, d: Dictionary) -> void:
 	p.round_scores = d.round_scores.duplicate(true)
 
 
+# The game's own wire format, so created cards keep their mark.
 func _card_names(cards: Array) -> Array:
-	var out: Array = []
-	for c in cards:
-		out.append(c.name)
-	return out
+	return a.form_card_names(cards)
 
 
 func _cards_from_names(names: Array) -> Array:
-	var out: Array = []
-	for n in names:
-		out.append(FormCard.make(n))
-	return out
+	return a.form_cards_from_names(names)
 
 
 func _copy_state(src, dst) -> void:
@@ -187,6 +193,8 @@ func _assert_match(context: String) -> void:
 		_cmp(context, who + ".bag", str(_club_names(pa.hand)), str(_club_names(pb.hand)))
 		_cmp(context, who + ".form_deck", str(_card_names(pa.form_deck.deck)), str(_card_names(pb.form_deck.deck)))
 		_cmp(context, who + ".scores", str(pa.round_scores), str(pb.round_scores))
+		_cmp(context, who + ".ability_log", str(pa.ability_log), str(pb.ability_log))
+		_cmp(context, who + ".created_next", str(pa.created_next), str(pb.created_next))
 
 
 func _club_names(bag: Array) -> Array:
@@ -206,38 +214,11 @@ func _cmp(context: String, field: String, va, vb) -> void:
 # the identical action. Returns false if the flow has nothing to do.
 
 func _step_both() -> bool:
-	var kind := ""
-	var arg = null
-
-	match a.state:
-		a.State.CLUB_SELECT:
-			if a.hand.is_empty():
-				return false
-			kind = "club"; arg = randi() % a.hand.size()
-		a.State.AIM:
-			kind = "aim"; arg = a.map_view.aim_target
-		a.State.FORM_DRAW:
-			if a.current_form_options.is_empty():
-				return false
-			kind = "form"; arg = randi() % a.current_form_options.size()
-		a.State.DRAFT:
-			if a.current_draft_options.is_empty():
-				return false
-			kind = "draft"; arg = randi() % a.current_draft_options.size()
-		a.State.DISCARD_FOR_DRAFT, a.State.DISCARD_FOR_HAZARD:
-			if a.hand.is_empty():
-				return false
-			kind = "discard"; arg = randi() % a.hand.size()
-		a.State.PUTTING:
-			kind = "putt"
-			# The accuracy travels WITH the action (it's the player's
-			# timing, not a roll), so both instances get the same pair.
-			arg = {
-				"result": ["sunk", "close", "miss"][randi() % 3],
-				"accuracy": randf(),
-			}
-		_:
-			return false
+	var choice := _choose_action()
+	if choice.is_empty():
+		return false
+	var kind: String = choice[0]
+	var arg = choice[1]
 
 	# A acts, recording every random result it consumes.
 	a.begin_roll_capture()
@@ -257,11 +238,51 @@ func _step_both() -> bool:
 	# called from _on_aim_picked), and entering the draft is what draws the
 	# three club options — so those are the two actions after which the
 	# decks must be re-synced.
-	if kind == "aim" or kind == "draft" or kind == "discard" or kind == "putt" or kind == "form":
+	if kind == "aim" or kind == "draft" or kind == "discard" or kind == "putt" or kind == "form" \
+			or kind == "ability" or kind == "range":
 		_sync_decks()
 
 	_assert_match("%s #%d (hole %d)" % [kind, actions, a.current_hole_index])
 	return true
+
+
+# What A does next, as [kind, arg] — or [] if the flow has nothing to do.
+# Now and then that's an ability or a range session rather than the
+# phase's ordinary action.
+func _choose_action() -> Array:
+	var ability := TestBags.pick_ability(a, 0.3)
+	if ability != "":
+		return ["ability", ability]
+	if TestBags.wants_range(a, 0.15):
+		return ["range", null]
+	match a.state:
+		a.State.CLUB_SELECT:
+			if a.hand.is_empty():
+				return []
+			var playable: Array = a.playable_club_indices()
+			return ["club", playable[randi() % playable.size()]]
+		a.State.AIM:
+			return ["aim", a.map_view.aim_target]
+		a.State.FORM_DRAW:
+			if a.current_form_options.is_empty():
+				return []
+			return ["form", randi() % a.current_form_options.size()]
+		a.State.DRAFT:
+			if a.current_draft_options.is_empty():
+				return []
+			return ["draft", randi() % a.current_draft_options.size()]
+		a.State.DISCARD_FOR_DRAFT, a.State.DISCARD_FOR_HAZARD:
+			if a.hand.is_empty():
+				return []
+			return ["discard", randi() % a.hand.size()]
+		a.State.PUTTING:
+			# The accuracy travels WITH the action (it's the player's
+			# timing, not a roll), so both instances get the same pair.
+			return ["putt", {
+				"result": ["sunk", "close", "miss"][randi() % 3],
+				"accuracy": randf(),
+			}]
+	return []
 
 
 # Copies every deck-derived value from A to B. Everything here is a
@@ -279,6 +300,9 @@ func _sync_decks() -> void:
 		pb.current_form_forced = pa.current_form_forced
 		pb.pending_club = pa.pending_club.duplicate(true)
 		pb.pending_new_card = pa.pending_new_card
+		pb.ability_log = pa.ability_log.duplicate(true)
+		pb.armed = pa.armed.duplicate()
+		pb.created_next = pa.created_next.duplicate()
 
 
 func _apply_action(m, kind: String, arg) -> void:
@@ -289,3 +313,5 @@ func _apply_action(m, kind: String, arg) -> void:
 		"draft": m.on_draft_pick(arg)
 		"discard": m.on_discard_pick(arg)
 		"putt": m.on_putt_stopped(arg.result, arg.accuracy)
+		"ability": m.on_ability(arg)
+		"range": m.on_range_session()
