@@ -51,11 +51,13 @@ func _initialize() -> void:
 	# own stroke count, not m.strokes — the turn passes after the shot, so
 	# m.strokes would report whoever is up next. play_shot() increments
 	# before any animation, so this holds regardless of tween timing.
+	# "More than before", not "+1": with skip_animation the shot settles
+	# at once, and a tee shot into a hazard adds its penalty stroke too.
 	var shooter = m.me
 	var before_strokes: int = shooter.strokes
 	m.on_form_pick(0)
 	_check("legit form_pick was accepted (stroke counted)",
-		shooter.strokes == before_strokes + 1)
+		shooter.strokes > before_strokes)
 
 	print("\nGUARDS: %d passed, %d failed" % [passed, failed])
 	print("RESULT: %s" % ("OK" if failed == 0 else "FAIL"))

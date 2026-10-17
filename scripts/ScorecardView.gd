@@ -19,12 +19,17 @@ var _thru_label: Label
 
 
 func _ready() -> void:
-	add_theme_constant_override("separation", 0)
-	custom_minimum_size = Vector2(258, 0)
 	_build()
 
 
+# Built on whichever comes first: _ready(), or the first set_round(). The
+# headless harnesses add Main from _initialize(), which defers _ready(), so
+# refresh_ui() can reach set_round() before there's anything to fill in.
 func _build() -> void:
+	if _total_label != null:
+		return
+	add_theme_constant_override("separation", 0)
+	custom_minimum_size = Vector2(258, 0)
 	add_child(BogeyUI.kicker("Scorecard"))
 
 	var head := _make_row("H", "PAR", "YDS", "SCR", true)
@@ -92,6 +97,7 @@ func _make_row(hole: String, par: String, yds: String, score: String, is_head: b
 
 
 func set_round(scores: Array, current_hole: int, strokes: int) -> void:
+	_build()
 	var by_hole := {}
 	for entry in scores:
 		by_hole[entry.hole] = entry

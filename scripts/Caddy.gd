@@ -177,8 +177,10 @@ func say(text: String) -> void:
 		return
 	_showing = true
 	# Looked up rather than named: a bare --script run (CaddyTest) has no
-	# autoloads, and naming one would stop this file compiling there.
-	var sound := get_node_or_null("/root/Sound")
+	# autoloads, and naming one would stop this file compiling there. An
+	# absolute path also errors outside the tree, which the flow harnesses
+	# hit because they add Main before its _ready() has run.
+	var sound: Node = get_node_or_null("/root/Sound") if is_inside_tree() else null
 	if sound != null:
 		sound.play("ui_click", 0.1, -6.0)
 	_layout()
