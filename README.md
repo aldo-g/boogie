@@ -80,11 +80,12 @@ par; **2-4 players** can share a screen in hot-seat.
   - **Extreme Finesse** → no draw at all; a bad card is created and forced on you
 - Form cards are **fully known before you pick** — degrees of deviation,
   distance multiplier, side. The deck's good cards are Stinger, Controlled
-  Draw/Fade, Flop Shot, Bump and Run and In the Zone (which also removes a
-  bad card from your deck); bad ones are Hook, Slice, Top, Chunk, Shank and
-  Yips. Pure Strike, Big Strike and Steady Hands are never drawn — only
-  clubs create them.
-- The Form deck starts at 24 good / 12 bad (67% good). **Landing in a
+  Draw/Fade, Power Draw, Soft Fade, Flushed, Spinner, Punch Out, Flop Shot,
+  Bump and Run and In the Zone (which also removes a bad card from your
+  deck); bad ones are Hook, Slice, Pull, Push, Duck Hook, Overswing, Top,
+  Thin, Chunk, Skied, Shank and Yips. Pure Strike, Big Strike and Steady
+  Hands are never drawn — only clubs create them.
+- The Form deck starts at 28 good / 14 bad (67% good). **Landing in a
   hazard can add a bad card into that deck**, so a rough patch degrades your
   draws for the rest of the round.
 

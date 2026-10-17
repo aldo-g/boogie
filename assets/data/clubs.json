@@ -30,7 +30,7 @@
 			{"name": "Titanist Fairway 5", "min_yard": 145, "max_yard": 185, "type": "wood", "ability": "Buffers deviation 20% better", "effects": {"buffer": 0.8}}
 		],
 		"callowell": [
-			{"name": "Callowell Big Deal Driver", "min_yard": 175, "max_yard": 230, "type": "wood", "ability": "Chunk and Top played with this club hit at half severity", "effects": {"soft_mishits": true}},
+			{"name": "Callowell Big Deal Driver", "min_yard": 175, "max_yard": 230, "type": "wood", "ability": "Mishits (Top, Thin, Chunk, Skied) played with this club hit at half severity", "effects": {"soft_mishits": true}},
 			{"name": "Callowell 6-Iron", "min_yard": 110, "max_yard": 165, "type": "iron", "ability": "One of the widest irons in the game"},
 			{"name": "Callowell Rescue", "min_yard": 125, "max_yard": 175, "type": "iron", "ability": "No distance penalty from rough", "effects": {"rough_cap": 1.0}},
 			{"name": "Callowell 9-Iron", "min_yard": 70, "max_yard": 115, "type": "iron", "ability": "Wide band"},

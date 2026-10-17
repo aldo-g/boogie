@@ -52,6 +52,10 @@ const CARD_KEYS := {
 	"Flop Shot": "card_flop", "Bump and Run": "card_bump",
 	"Controlled Draw": "card_draw", "Controlled Fade": "card_fade",
 	"Big Strike": "card_big_strike", "In the Zone": "card_in_the_zone",
+	"Pull": "card_pull", "Push": "card_push", "Duck Hook": "card_duck_hook",
+	"Overswing": "card_overswing", "Thin": "card_thin", "Skied": "card_skied",
+	"Power Draw": "card_power_draw", "Soft Fade": "card_soft_fade",
+	"Flushed": "card_flushed", "Spinner": "card_spinner", "Punch Out": "card_punch_out",
 }
 
 static var _lines: Dictionary = {}

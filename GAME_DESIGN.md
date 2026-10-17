@@ -102,7 +102,7 @@ The tiers are **2 / 4 / 7**. Seven is chosen deliberately: it's half your Bag, s
 | Brand | 2 in Bag | 4 in Bag | 7 in Bag |
 |---|---|---|---|
 | **Titanist** *(draw quality)* | Your Form draw **discards the worst card** before you pick | **Draw +1 Form card** at every tier | Once per hole, **re-draw your entire Form hand** before picking |
-| **Callowell** *(severity)* | Bad Form cards played from **rough** lose half their deviation | **Ignore all terrain penalties** — rough, bunker, and lie downgrades no longer apply | Bad Form cards **cannot downgrade your lie or taint a putt**; Chunk and Top hit at half severity everywhere |
+| **Callowell** *(severity)* | Bad Form cards played from **rough** lose half their deviation | **Ignore all terrain penalties** — rough, bunker, and lie downgrades no longer apply | Bad Form cards **cannot downgrade your lie or taint a putt**; mishits (Top, Thin, Chunk, Skied) hit at half severity everywhere |
 | **Ping-Well** *(tier)* | The **Mid tier is widened** — the middle third counts as the middle half | **Every club plays one tier better** than its distance implies | **Extreme Finesse is abolished** for you — you always draw normally, never a forced card |
 | **MacGregorian** *(lie recovery)* | Landing in rough or a bunker **no longer adds a bad card** to your Form deck | Playing **out of** rough or bunker draws Form cards as though you were on the fairway (no forced card in bunkers) | Once per hole, **improve your lie one step** before playing (bunker→rough, rough→fairway) |
 | **Slazinger** *(risk/reward)* | **Draw +1 Form card**, but bad cards you play hit at **+25% severity** | **Draw +2**, same penalty | Created cards (Big Strike, Pure Strike) **no longer exhaust** — they return to hand at the end of each hole |
@@ -211,7 +211,7 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 
 | Club | Category | Band | Rider |
 |---|---|---|---|
-| Callowell Big Deal Driver | Wood | 175-230 | Chunk and Top hit at **half severity** with this club |
+| Callowell Big Deal Driver | Wood | 175-230 | Mishits (Top, Thin, Chunk, Skied) hit at **half severity** with this club |
 | Callowell 6-Iron | Iron | 110-165 | **Width 55** — joint-widest iron in the game, almost always a Mid-tier draw |
 | Callowell Rescue | Iron | 125-175 | Playable from rough with **no distance penalty** |
 | Callowell Gap Wedge | Wedge | 40-85 | Shank cannot downgrade your lie when played with this club |
@@ -313,6 +313,14 @@ Clubs modulate how strongly a Form card's effect applies: a forgiving Wedge migh
 | Chunk/Fat | Hits ground first, major distance loss — runs out half as far, 0.7x flight |
 | Shank | Severe direction error + downgrades your lie |
 | The Yips | Only triggers on the green — see Putting cross-trigger below |
+| Pull | Pulls left 8°, full distance — the mild miss, a good read costs nothing |
+| Push | Pushes right 8°, full distance |
+| Duck Hook | Pulls left 28°, 70% distance, runs out 1.6x — the left-hand disaster, as Shank is the right-hand one (no lie downgrade) |
+| Overswing | Pulls left 12°, **+10% distance** — the bad card with an upside: useful on a par 5, dangerous with trouble behind the green |
+| Thin | 80% distance, low (0.6x flight), runs out 1.5x — a milder Top |
+| Skied | 70% distance, stops quickly (0.4x roll), balloons (1.8x flight) — short, and the wind's plaything |
+
+Top, Thin, Chunk and Skied are **mishits** (bad contact rather than a bad line); Callowell 7 and the Callowell Big Deal Driver play them at half severity.
 
 ### Good Form cards
 
@@ -323,6 +331,11 @@ Clubs modulate how strongly a Form card's effect applies: a forgiving Wedge migh
 | Stinger | Low, controlled flight — minimal deviation, slightly reduced distance, runs out 1.8x, punches under the wind (0.4x flight) |
 | Controlled Draw | Deliberate leftward curve, usable tactically around a left-side dogleg/hazard |
 | Controlled Fade | Same idea, rightward |
+| Power Draw | Pulls left 6°, +8% distance, runs out 1.4x — the draw that chases |
+| Soft Fade | Pulls right 6°, 95% distance, stops quickly (0.5x roll) — the fade that holds a green |
+| Flushed | Dead straight, +8% distance — great to a deep green, a liability with water long |
+| Spinner | Dead straight, full distance, checks up (0.25x roll) — the green-holder |
+| Punch Out | 90% distance, ignores the rough penalty, low (0.6x flight), runs out 1.4x — the low rough escape, where Flop Shot is the high one |
 | Flop Shot | High, soft landing — ignores rough/bunker penalty entirely, stops dead (0.15x roll), balloons in wind (1.6x flight) |
 | Bump and Run | Low running shot — carries half the aimed distance (0.5x flight, so the wind barely touches it) and runs the rest to the target. The run is judged: struck with the pace the slope asks for, up to 1.6x the planned run — so rough on the way leaves it short, sand or water in its path stops it, and side slope still bends its line. No green check, since a low runner arrives without backspin. |
 | Steady Hands | Widens the putt meter's bands on this putt (+60%; Ping-Well Mallet doubles that). **Created only**, used on the green |
@@ -330,7 +343,11 @@ Clubs modulate how strongly a Form card's effect applies: a forgiving Wedge migh
 
 ### Form deck composition & hazards
 
-- Starts weighted toward good cards — 24 good / 12 bad (67%): Stinger, Controlled Draw, Controlled Fade, Flop Shot, Bump and Run and In the Zone ×4, and the six bad cards ×2 — so early holes feel encouraging.
+- Starts weighted toward good cards — **28 good / 14 bad (67%), 42 cards, 23 kinds** (expanded 2026-10-17 from 36 cards / 12 kinds) — so early holes feel encouraging:
+  - Good: Stinger, Controlled Draw, Controlled Fade, Flop Shot, Bump and Run, In the Zone ×3; Power Draw, Soft Fade, Flushed, Spinner, Punch Out ×2.
+  - Bad: Hook, Slice ×2; Pull, Push, Duck Hook, Overswing, Top, Thin, Chunk, Skied, Shank, Yips ×1.
+  - **Why it's built this way**: the aim is committed before the draw, so a pick is a choice between known outcomes on *this* hole. The new cards differ mostly in distance, roll and flight rather than raw quality, so the best card depends on the hole: long or short, holding or running, high or low into the wind. The mild bad cards (Pull, Push, Thin) also make "least bad" a real read rather than an obvious one.
+  - Hazard decay and forced cards still pick uniformly from the 12 bad kinds, so the average added card is a little milder than it was with 6. Watch for this in playtesting.
 - Every hazard hit adds bad Form cards into the **Form deck** (not directly into your Bag) — this degrades the quality of future draws for the rest of the round rather than permanently cluttering your Bag. A rough patch of holes genuinely makes your swing worse as the round goes on.
 - **Range session (decided 2026-10-17)**: at the end of any hole, instead of drafting a club, remove the 2 worst bad cards from your Form deck. It costs bag progress rather than strokes, and it's the way back from a death spiral.
 
@@ -579,8 +596,8 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 - In multiplayer, whether to **introduce** club-deck contention at all. As built, each player drafts from their own pool, so sniping cannot happen (Section 7). The open question is whether the draft feels inert without it — and if so, whether a shared pool with sequential picks is good tension or just a feel-bad.
 - Whether downtime is acceptable at 4 players, hot-seat or online, or whether the per-shot turn handover needs to batch somehow. Online makes simultaneous declaration buildable if it isn't — that's the escape hatch.
 - ~~Whether the end-of-hole draft should stay sequential online~~ **Decided 2026-10-17:** online, everyone drafts at once (see "Online play — as built"). Hot-seat stays sequential — one screen, one picker.
-- Whether Form cards should differ between clubs (e.g. a Driver-specific bad card set vs. a universal pool) or stay universal for simplicity.
-- Full Form card list is still a first draft (6 bad / 8 good) — needs expansion to a real deck-sized set before implementation.
+- Whether Form cards should differ between clubs (e.g. a Driver-specific bad card set vs. a universal pool) or stay universal for simplicity. **Current stance (2026-10-17): universal.** Clubs already make the same card play differently through buffering (a Duck Hook off a Driver is twice what it is off a wedge) and through roll share and loft in the wind. Club-specific cards come from created cards. Revisit if Driver and wedge draws feel the same in playtesting.
+- ~~Full Form card list is still a first draft~~ **Expanded 2026-10-17** to 12 bad / 14 good kinds (see Section 4). Still open: whether the four new cards that share an icon with an older card need their own art, and whether the Bad-card mix needs a severity weighting for hazard decay.
 - ~~How many Created-card sources should exist across the full club list~~ **Decided 2026-10-17:** only clubs whose text says so (limited editions and a few branded riders). Standard clubs create nothing.
 - ~~Whether "Active" abilities need an explicit UI/UX moment~~ **Decided 2026-10-17:** yes — a button with its charges shown, in an Abilities box under the shot panel.
 - Whether the Bulger, Gold Cleek and Old Reliable charges are the right size. Gold Cleek in particular hands out a Pure Strike every hole; if it decides rounds, make it once per round with the Titanist Wood rider raising it to once every six holes.

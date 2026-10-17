@@ -32,8 +32,19 @@ static func accent_color(card: FormCard) -> Color:
 # Shot-shape icon for a card, from game-icons.net (see assets/art/CREDITS.md),
 # stored white so it takes the accent tint. Files are named after the card,
 # snake_cased: "Bump and Run" -> bump_and_run.svg. Null if there is none.
+# Cards without art of their own yet borrow the nearest shot shape's; the
+# accent tint still tells good from bad.
+const ICON_STAND_INS := {
+	"Pull": "hook", "Duck Hook": "hook", "Overswing": "hook",
+	"Push": "slice", "Thin": "top", "Skied": "chunk",
+	"Power Draw": "controlled_draw", "Soft Fade": "controlled_fade",
+	"Flushed": "pure_strike", "Spinner": "flop_shot", "Punch Out": "stinger",
+}
+
+
 static func icon_texture(card: FormCard) -> Texture2D:
-	var path := "res://assets/art/form/%s.svg" % card.name.to_lower().replace(" ", "_")
+	var file: String = ICON_STAND_INS.get(card.name, card.name.to_lower().replace(" ", "_"))
+	var path := "res://assets/art/form/%s.svg" % file
 	if ResourceLoader.exists(path):
 		return load(path)
 	return null

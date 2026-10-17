@@ -239,6 +239,59 @@
 		"You're in the zone. Calm as a still loch.",
 		"In the Zone. Keep this up and your Form deck'll be spotless."
 	],
+	"card_pull": [
+		"Pulled it a touch. Good contact, wrong postcode.",
+		"A little Pull left. Nothing a decent read won't fix."
+	],
+	"card_push": [
+		"Pushed it right. Struck well, just pointed wrong.",
+		"Bit of a Push. We'll take the distance."
+	],
+	"card_duck_hook": [
+		"Duck Hook! Dived left like a heron after a minnow.",
+		"That's a Duck Hook. Low, left and still going.",
+		"Duck Hook. I've seen eels with straighter lines."
+	],
+	"card_overswing": [
+		"Overswing! Further than you asked, and left of where you looked.",
+		"You went after that one. It went after the left side.",
+		"Overswung. Plenty of distance, not much manners."
+	],
+	"card_thin": [
+		"Thinned it. Low and quick, a bit short.",
+		"Thin one. Skipped along like a flat stone.",
+		"Caught it thin. It'll run, at least."
+	],
+	"card_skied": [
+		"Skied it! Up, up, and not very far.",
+		"Straight up. The gulls got a good look at that one.",
+		"Skied. The wind's having a field day with it."
+	],
+	"card_power_draw": [
+		"Power Draw! Turned it over and let it chase.",
+		"Lovely Power Draw. Right to left, and it kept running.",
+		"Power Draw. That's extra yards, that is."
+	],
+	"card_soft_fade": [
+		"Soft Fade. Drifted in and sat down like a trout on a fly.",
+		"Nice Soft Fade. Holds the green, that one.",
+		"Soft Fade. Gentle as a summer current."
+	],
+	"card_flushed": [
+		"Flushed it! Right out of the screws.",
+		"That's flushed. Went further than the club's got any right to.",
+		"Flushed! You felt nothing on that, didn't you?"
+	],
+	"card_spinner": [
+		"Spinner! Landed and stopped like it hit a net.",
+		"That's got some juice on it. Stopped on a sixpence.",
+		"Spinner. Bit and held. Lovely."
+	],
+	"card_punch_out": [
+		"Punch Out. Low out of the rough, no drama.",
+		"Nice punch. Kept it under the branches and running.",
+		"Punched it out. Sometimes the smart shot is the low one."
+	],
 
 	"rim_out": [
 		"So close I could smell the cup.",

@@ -40,14 +40,10 @@ func _init() -> void:
 
 static func build_starting_deck() -> Array:
 	var cards: Array = []
-	# 24 good / 12 bad = 67%: six drawable good cards x4, six bad x2. Pure
-	# Strike, Big Strike and Steady Hands are created by clubs, never drawn.
-	for good_name in FormCard.DECK_GOOD_NAMES:
-		for i in range(4):
-			cards.append(FormCard.make(good_name))
-	for bad_name in FormCard.BAD_NAMES:
-		for i in range(2):
-			cards.append(FormCard.make(bad_name))
+	# See FormCard.DECK_MIX for the counts.
+	for card_name in FormCard.DECK_MIX:
+		for i in range(int(FormCard.DECK_MIX[card_name])):
+			cards.append(FormCard.make(card_name))
 	return cards
 
 

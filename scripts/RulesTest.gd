@@ -268,7 +268,15 @@ func _check_effect_data() -> void:
 	for c in deck:
 		_expect(not ["Pure Strike", "Big Strike", "Steady Hands"].has(c.name), "%s is not in the Form deck" % c.name)
 		good += 1 if c.good else 0
-	_expect(good == 24 and deck.size() == 36, "the Form deck is 24 good / 12 bad (%d / %d)" % [good, deck.size() - good])
+	_expect(good == 28 and deck.size() == 42, "the Form deck is 28 good / 14 bad (%d / %d)" % [good, deck.size() - good])
+	# Every card in the game can be made by name (decks travel online as
+	# names), is on the list for its side, and has a caddy line.
+	for n in FormCard.BAD_NAMES + FormCard.GOOD_NAMES:
+		var c := FormCard.make(n)
+		_expect(c.name == n and c.good == FormCard.GOOD_NAMES.has(n), "%s is made as itself" % n)
+		_expect(preload("res://scripts/Caddy.gd").CARD_KEYS.has(n) or ["Steady Hands", "Yips"].has(n), "the caddy knows %s" % n)
+	for n in FormCard.DECK_MIX:
+		_expect(FormCard.BAD_NAMES.has(n) or FormCard.GOOD_NAMES.has(n), "%s in the deck mix is a real card" % n)
 
 
 func _degrees(bag: Array, club: Dictionary, card_name: String, lie: String = "fairway", armed: Dictionary = {}) -> float:
@@ -277,6 +285,24 @@ func _degrees(bag: Array, club: Dictionary, card_name: String, lie: String = "fa
 
 func _distance(bag: Array, club: Dictionary, card_name: String, lie: String = "fairway", aim: float = 130) -> float:
 	return float(ShotRules.resolve(bag, club, aim, lie, FormCard.make(card_name)).distance)
+
+
+# The cards added for variety each do the one thing that makes them worth
+# picking over their neighbours.
+func _check_new_cards(plain: Dictionary) -> void:
+	var stinger := _distance([], plain, "Stinger")
+	_expect(_distance([], plain, "Flushed") > _distance([], plain, "Spinner"), "Flushed flies further than straight")
+	_expect(_distance([], plain, "Power Draw") > _distance([], plain, "Controlled Draw"), "Power Draw flies further than Controlled Draw")
+	_expect(_distance([], plain, "Soft Fade") < _distance([], plain, "Controlled Fade"), "Soft Fade gives up a little distance")
+	_expect(_distance([], plain, "Punch Out", "rough") > _distance([], plain, "Stinger", "rough"), "Punch Out escapes the rough")
+	_expect(stinger > 0.0, "Stinger still flies")
+	_expect(_distance([], plain, "Overswing") > _distance([], plain, "Hook"), "Overswing goes long")
+	_expect(_degrees([], plain, "Duck Hook") > _degrees([], plain, "Hook"), "a Duck Hook is worse than a Hook")
+	_expect(_degrees([], plain, "Pull") < _degrees([], plain, "Hook"), "a Pull is milder than a Hook")
+	var spin := ShotRules.resolve([], plain, 130, "fairway", FormCard.make("Spinner"))
+	_expect(float(spin.roll_mult) < 0.5, "Spinner checks up")
+	var skied := ShotRules.resolve([], plain, 130, "fairway", FormCard.make("Skied"))
+	_expect(float(skied.flight) > 1.2, "Skied balloons in the wind")
 
 
 func _check_modifiers() -> void:
@@ -314,6 +340,10 @@ func _check_modifiers() -> void:
 	_expect(is_equal_approx(ShotRules.resolve([], launch, 150, "fairway", big).distance, launch.max_yard + 10),
 		"Slazinger Launch Wood's Big Strike flies +10")
 
+	_expect(_distance(_brand_bag("callowell", 7), plain, "Thin") > _distance([], plain, "Thin"), "Callowell 7 softens a Thin")
+	_expect(is_equal_approx(_distance(_brand_bag("callowell", 7), plain, "Pull"), _distance([], plain, "Pull")),
+		"Callowell 7 leaves a Pull's distance alone")
+	_check_new_cards(plain)
 	# Chunk and Top: half severity means half the distance loss.
 	var chunk_plain := _distance([], plain, "Chunk")
 	_expect(_distance(_brand_bag("callowell", 7), plain, "Chunk") > chunk_plain, "Callowell 7 softens a Chunk")

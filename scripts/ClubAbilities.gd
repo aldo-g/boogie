@@ -119,9 +119,10 @@ static func _persimmon_rider(bag: Array) -> bool:
 	return int(Brands.counts(bag).get("macgregorian", 0)) >= 2
 
 
-# "Half severity" for Chunk and Top: they lose half as much distance.
+# "Half severity" for mishits (Top, Thin, Chunk, Skied): they lose half as
+# much distance.
 static func softens_mishit(club: Dictionary, card: FormCard) -> bool:
-	return (card.name == "Chunk" or card.name == "Top") and bool(effect(club, "soft_mishits", false))
+	return card.mishit and bool(effect(club, "soft_mishits", false))
 
 
 static func blocks_lie_downgrade(club: Dictionary) -> bool:

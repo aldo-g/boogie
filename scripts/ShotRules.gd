@@ -197,9 +197,9 @@ static func resolve(bag: Array, club: Dictionary, aimed_distance: float,
 	var buffer_scale := club_buffer / type_buffer if type_buffer > 0.0 else 1.0
 
 	var severity := Brands.severity_mult(bag)
-	# Callowell 7 and the Callowell Big Deal Driver: Chunk and Top hit at
-	# half severity — they cost half as much distance.
-	if card.name == "Chunk" or card.name == "Top":
+	# Callowell 7 and the Callowell Big Deal Driver: mishits (Top, Thin,
+	# Chunk, Skied) hit at half severity — they cost half as much distance.
+	if card.mishit:
 		if Brands.softens_mishits(bag):
 			severity *= 0.5
 		if ClubAbilities.softens_mishit(club, card):

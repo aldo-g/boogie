@@ -81,7 +81,7 @@ const BONUS_TEXT := {
 	"callowell": {
 		2: "Bad Form cards played from rough lose half their deviation",
 		4: "Ignore all terrain penalties",
-		7: "Bad cards can't downgrade your lie or taint a putt; Chunk and Top hit at half severity",
+		7: "Bad cards can't downgrade your lie or taint a putt; mishits (Top, Thin, Chunk, Skied) hit at half severity",
 	},
 	"pingwell": {
 		2: "The Mid tier is widened — the middle third counts as the middle half",
@@ -233,7 +233,7 @@ static func deviation_mult(bag: Array, lie: String, card: FormCard) -> float:
 	return 1.0
 
 
-# Callowell 7: Chunk and Top hit at half severity anywhere. They have no
+# Callowell 7: mishits hit at half severity anywhere. They have no
 # deviation, so their severity is their distance loss — see
 # ShotRules.resolve().
 static func softens_mishits(bag: Array) -> bool:

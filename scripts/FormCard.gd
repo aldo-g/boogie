@@ -26,6 +26,9 @@ var downgrades_lie: bool          # Shank: worsens the resulting lie by one step
 var is_yips: bool                 # Only meaningful on the green — see Section 4 cross-trigger
 var to_max_band: bool = false     # Big Strike: flies the club's full carry, whatever the aim
 var purges_bad: int = 0           # In the Zone: bad cards it removes from your Form deck
+# A bad strike off the face (Top, Thin, Chunk, Skied) rather than a bad
+# line — what Callowell 7 and the Big Deal Driver soften.
+var mishit: bool = false
 # Created by a club ability rather than drawn (Section 4 "Created cards").
 # A created card exhausts: played or not, it never goes back into the
 # Form deck.
@@ -110,6 +113,11 @@ func with_run(share: float) -> FormCard:
 	return self
 
 
+func as_mishit() -> FormCard:
+	mishit = true
+	return self
+
+
 func as_created() -> FormCard:
 	created = true
 	return self
@@ -123,10 +131,28 @@ static func make(card_name: String) -> FormCard:
 			return FormCard.new("Hook", false, -1, 15.0, 0.9)
 		"Slice":
 			return FormCard.new("Slice", false, 1, 15.0, 0.9)
+		"Pull":
+			# The mild misses: on line for distance, just off it.
+			return FormCard.new("Pull", false, -1, 8.0, 1.0)
+		"Push":
+			return FormCard.new("Push", false, 1, 8.0, 1.0)
+		"Duck Hook":
+			# The left-hand disaster, as Shank is the right-hand one: it
+			# dives in low and keeps running.
+			return FormCard.new("Duck Hook", false, -1, 28.0, 0.7).with_roll(1.6)
+		"Overswing":
+			# The bad card with an upside: it goes further than you asked,
+			# and left. Right on a par 5, wrong with water behind the green.
+			return FormCard.new("Overswing", false, -1, 12.0, 1.1)
 		"Top":
-			return FormCard.new("Top", false, 0, 0.0, 0.45).with_roll(2.0).with_flight(0.3)
+			return FormCard.new("Top", false, 0, 0.0, 0.45).with_roll(2.0).with_flight(0.3).as_mishit()
+		"Thin":
+			return FormCard.new("Thin", false, 0, 0.0, 0.8).with_roll(1.5).with_flight(0.6).as_mishit()
 		"Chunk":
-			return FormCard.new("Chunk", false, 0, 0.0, 0.3).with_roll(0.5).with_flight(0.7)
+			return FormCard.new("Chunk", false, 0, 0.0, 0.3).with_roll(0.5).with_flight(0.7).as_mishit()
+		"Skied":
+			# Up under it: short, and the wind's plaything.
+			return FormCard.new("Skied", false, 0, 0.0, 0.7).with_roll(0.4).with_flight(1.8).as_mishit()
 		"Shank":
 			return FormCard.new("Shank", false, 1, 35.0, 0.6, false, 0.0, true)
 		"Yips":
@@ -140,6 +166,20 @@ static func make(card_name: String) -> FormCard:
 			return FormCard.new("Controlled Draw", true, -1, 10.0, 1.0)
 		"Controlled Fade":
 			return FormCard.new("Controlled Fade", true, 1, 10.0, 1.0)
+		"Power Draw":
+			# A draw that runs: longer, and chases on after landing.
+			return FormCard.new("Power Draw", true, -1, 6.0, 1.08).with_roll(1.4)
+		"Soft Fade":
+			# A fade that sits down: a touch short, but it holds a green.
+			return FormCard.new("Soft Fade", true, 1, 6.0, 0.95).with_roll(0.5)
+		"Flushed":
+			return FormCard.new("Flushed", true, 0, 0.0, 1.08)
+		"Spinner":
+			# Full distance, straight, and it checks — the green-holder.
+			return FormCard.new("Spinner", true).with_roll(0.25)
+		"Punch Out":
+			# The rough escape that stays low, where Flop Shot goes high.
+			return FormCard.new("Punch Out", true, 0, 0.0, 0.9, true).with_roll(1.4).with_flight(0.6)
 		"Flop Shot":
 			return FormCard.new("Flop Shot", true, 0, 0.0, 0.85, true).with_roll(0.15).with_flight(1.6)
 		"Bump and Run":
@@ -162,13 +202,23 @@ static func make(card_name: String) -> FormCard:
 	return FormCard.new(card_name, true)
 
 
-const BAD_NAMES := ["Hook", "Slice", "Top", "Chunk", "Shank", "Yips"]
+const BAD_NAMES := ["Hook", "Slice", "Pull", "Push", "Duck Hook", "Overswing",
+	"Top", "Thin", "Chunk", "Skied", "Shank", "Yips"]
 const GOOD_NAMES := ["Pure Strike", "Stinger", "Controlled Draw", "Controlled Fade",
+	"Power Draw", "Soft Fade", "Flushed", "Spinner", "Punch Out",
 	"Flop Shot", "Bump and Run", "Steady Hands", "In the Zone", "Big Strike"]
 
-# The good cards the Form deck is built from. Pure Strike, Big Strike and
-# Steady Hands are deliberately absent: they only ever come from a club's
-# ability (Section 4 "Created cards"), so they're a resource you spend
-# rather than a lucky draw.
-const DECK_GOOD_NAMES := ["Stinger", "Controlled Draw", "Controlled Fade",
-	"Flop Shot", "Bump and Run", "In the Zone"]
+# How many of each card the Form deck starts with: 28 good / 14 bad (67%).
+# The workhorse cards come in threes and the situational ones in twos;
+# among the bad, Hook and Slice are the common miss and the rest turn up
+# once each. Pure Strike, Big Strike and Steady Hands are deliberately
+# absent: they only ever come from a club's ability (Section 4 "Created
+# cards"), so they're a resource you spend rather than a lucky draw.
+const DECK_MIX := {
+	"Stinger": 3, "Controlled Draw": 3, "Controlled Fade": 3,
+	"Flop Shot": 3, "Bump and Run": 3, "In the Zone": 3,
+	"Power Draw": 2, "Soft Fade": 2, "Flushed": 2, "Spinner": 2, "Punch Out": 2,
+	"Hook": 2, "Slice": 2,
+	"Pull": 1, "Push": 1, "Duck Hook": 1, "Overswing": 1,
+	"Top": 1, "Thin": 1, "Chunk": 1, "Skied": 1, "Shank": 1, "Yips": 1,
+}
