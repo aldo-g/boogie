@@ -5,10 +5,14 @@ to test whether the core mechanics are fun before committing to physical
 production. Working title "Pars and Chars."
 
 > **Note on the design:** this project pivoted away from dice. Shot
-> resolution is now the **Form Card System** — fully deterministic, no hidden
-> rolls. The only randomness in the tee-to-green game is *which cards you are
-> offered*. See [GAME_DESIGN.md](GAME_DESIGN.md) for the full design document,
-> which is the source of truth.
+> resolution is now the **Form Card System**: you can see every card's effect
+> before you play it, and nothing about where the ball goes is hidden. The
+> randomness is *which cards you are offered* and each hole's wind, which is
+> shown before you aim. There is one deliberate exception: a shot that
+> finishes on the cup from off the green earns a **d20**, and only a natural
+> 20 holes it (see "Holing out from off the green" below). See
+> [GAME_DESIGN.md](GAME_DESIGN.md) for the full design document, which is
+> the source of truth.
 
 ## Concept
 
@@ -370,6 +374,8 @@ takes a few seconds.
   per-round charges, passives, activated set bonuses, and range sessions
 - **Form Card shot resolution** — deterministic, tier-based draw counts, club
   buffering
+- **Per-hole wind, elevation, slope and roll-out**: club yardage is carry,
+  and the ball runs on after landing
 - Click-to-aim on a drawn hole map with swing-tier bands and a live landing
   preview per Form card
 - Terrain (fairway / rough / bunker / water / **out of bounds**) with distance
@@ -380,7 +386,7 @@ takes a few seconds.
 
 ## Not in this version
 
-- Weather (per-flight conditions)
+- A per-flight weather deck (wind is per hole and stays fixed for the hole)
 - Internet play without port forwarding (no relay — see above)
 - Host migration if the host leaves
 - Simultaneous/secret shot declaration

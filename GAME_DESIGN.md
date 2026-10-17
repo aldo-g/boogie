@@ -1,6 +1,6 @@
 # Pars and Chars — Game Design Document
 
-*A mid-weight golf deckbuilder. 60-90 min per round. Solo vs. par or head-to-head. Video game (Steam target), built as a card-resolution deckbuilder in the spirit of Slay the Spire — no dice, and no timing checks anywhere in the tee-to-green game. Putting is the deliberate exception: it's a timing meter whose difficulty scales with distance (Section 6).*
+*A mid-weight golf deckbuilder. 60-90 min per round. Solo vs. par or head-to-head. Video game (Steam target), built as a card-resolution deckbuilder in the spirit of Slay the Spire — no timing checks anywhere in the tee-to-green game, and no dice except one: a shot that finishes on the cup from off the green earns a hole-out d20 (Section 4). Putting is the other deliberate exception: it's a timing meter whose difficulty scales with distance (Section 6).*
 
 ---
 
@@ -269,7 +269,7 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 
 ## 4. Shot Resolution — The Form Card System
 
-Every shot from tee to green is resolved by reading a fully known Form card and aiming around it — no hidden probability, no dice, no timing check (putting is the one exception; see Section 7). Luck lives in what you draw; skill lives in reading it correctly and adjusting your aim.
+Every shot from tee to green is resolved by reading a fully known Form card and aiming around it — no hidden probability and no timing check (putting is the exception; see Section 6). The only die in the game is the hole-out d20: a shot that finishes on the cup from off the green earns the roll, and only a natural 20 drops. That way a player who reads the cards perfectly can earn a hole-out but can't make one happen at will. Luck lives in what you draw; skill lives in reading it correctly and adjusting your aim.
 
 ### The two-hand split
 
@@ -546,7 +546,7 @@ These are the game's actual feel — everything else is dressing:
 
 ## 10. Digital Prototype — Build Plan (Godot)
 
-Suggested build order, each stage playable before moving to the next. **Note**: the existing prototype (`Main.gd`) was built against the earlier dice-based system and needs updating to match the Form Card System described in Section 4 before further work continues.
+Suggested build order, each stage playable before moving to the next. **Note**: the prototype (`Main.gd`) has been rebuilt on the Form Card System described in Section 4; nothing from the earlier dice-based system is left in it.
 
 1. **Single hole, single player**: hole data, starting Bag of 3 clubs, Form draw-3-pick-1 resolution, distance-to-pin tracking.
 2. **Add terrain**: rough/bunker/water zones affecting Form draw and distance (Section 5).
