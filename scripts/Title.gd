@@ -40,6 +40,8 @@ var card: PanelContainer
 
 
 func _ready() -> void:
+	# Rounds started from here are the ones that count toward records.
+	Records.title_shown(self)
 	# A previous round may have left a connection open.
 	Net.reset()
 	Net.lobby_changed.connect(_rebuild_panel)

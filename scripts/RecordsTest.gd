@@ -12,7 +12,8 @@ extends SceneTree
 #   3. records survive a reload from disk
 #   4. editing a custom course gives it a fresh record
 #   5. settings save, reload, clamp bad values and reset
-#   6. headless runs record nothing unless a harness opts in
+#   6. nothing records unless a harness opts in (in the game, the title
+#      screen does: Records.title_shown())
 # ---------------------------------------------------------
 
 # Held so the scripts stay loaded. GDScript statics live on the script
@@ -28,7 +29,7 @@ var failures: Array = []
 
 
 func _initialize() -> void:
-	_expect(not Records.enabled, "headless runs don't record by default")
+	_expect(not Records.enabled, "nothing records until the title screen starts a round")
 	Records.enabled = true
 	Records.path = RECORDS_FILE
 	Settings.path = SETTINGS_FILE

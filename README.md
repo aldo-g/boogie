@@ -158,7 +158,10 @@ says whether you've set a new course record. Solo and every hot-seat seat
 are recorded; online, only your own seat. A custom course is identified by
 its contents, so editing one starts its record afresh; the game's own
 courses keep theirs, whoever hosts the round and however a hole is later
-reshaped. Editor test rounds record nothing.
+reshaped. Editor test rounds record nothing. Nor does any round that
+wasn't started from the title screen: `Main.tscn` run on its own, the
+capture tool and the test harnesses leave your records alone, in a window
+or headless.
 
 **Settings** (title screen, or the header's **Settings** mid-round) are
 kept in `user://settings.cfg` and apply as you change them: master, music

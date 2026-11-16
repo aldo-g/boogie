@@ -21,14 +21,22 @@ extends RefCounted
 # records survive an update that reshapes a hole.
 #
 # Only rounds played on this machine are recorded: solo, every hot-seat
-# player, and your own seat online. Headless runs (the test harnesses)
-# record nothing, so they never touch a player's real records.
+# player, and your own seat online.
+#
+# And only rounds a player started. Recording is off until the title
+# screen comes up as the scene the game is running (title_shown(), below),
+# which is the one way a player reaches a round. A script that loads
+# Main.tscn on its own — a test harness, a screenshot script, the capture
+# tool — never passes through it, so it records nothing, in a window or
+# headless. (It used to be "off when headless" only, and windowed
+# screenshot scripts wrote faked rounds into the player's real records.)
+# A harness that wants records sets `enabled` and a scratch `path` itself.
 # ---------------------------------------------------------
 
 const PATH := "user://records.json"
 const HISTORY_LIMIT := 20
 
-static var enabled: bool = DisplayServer.get_name() != "headless"
+static var enabled: bool = false
 static var path: String = PATH  # the harness points this at a scratch file
 
 static var _data: Dictionary = {}
@@ -45,6 +53,20 @@ static func _ensure_loaded() -> void:
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if parsed is Dictionary and parsed.get("courses") is Dictionary:
 		_data = parsed
+
+
+# The title screen calls this as it comes up. It turns recording on when
+# `title` is the scene the game is running — not a title screen some other
+# scene has loaded as a child to photograph — and the run has a display.
+# It only ever turns recording on: a harness's own choice is left alone.
+static func title_shown(title: Node) -> void:
+	var running: bool = title != null and title.is_inside_tree() \
+		and title.get_tree().current_scene == title
+	var headless := DisplayServer.get_name() == "headless"
+	if running and not headless:
+		enabled = true
+	print_verbose("Records: recording %s (title is the running scene: %s, headless: %s)" % [
+		"on" if enabled else "off", running, headless])
 
 
 # Forget the cached file, e.g. after pointing `path` somewhere else.
