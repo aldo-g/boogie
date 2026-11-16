@@ -39,7 +39,7 @@ func log_msg(_text: String) -> void:
 	pass
 
 
-func caddy_says(_kind: String, _ctx: Dictionary = {}, _everyone: bool = false) -> void:
+func caddy_says(_kind: String, _ctx: Dictionary = {}, _everyone: bool = false, _wait: bool = false) -> void:
 	pass
 
 

@@ -194,6 +194,10 @@ func _play_step() -> bool:
 	if host_game.current_hole_index > holes_to_play:
 		print("reached hole %d, stopping as asked" % host_game.current_hole_index)
 		return _finish(drifts.is_empty())
+	# The round ends on the last putt: nobody drafts a club they can't hit.
+	if host_game._simul_draft and host_game.current_hole_index >= Course.hole_count():
+		print("NETTEST: FAIL — a draft was dealt after the last hole")
+		return _finish(false)
 
 	# Whoever is up acts, through the same submit() path the UI uses. In an
 	# end-of-hole draft everyone drafts at once, so any seat still owing a

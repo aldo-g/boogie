@@ -9,6 +9,7 @@ const TestBags := preload("res://scripts/TestBags.gd")
 #   - every player finishes all 18 holes
 #   - the turn order is always "furthest from the pin plays first"
 #   - bags stay within [3, HAND_CAP]
+#   - nobody is offered a draft after the last hole
 #   - the round actually terminates
 #
 #   godot --headless --script res://scripts/MPTest.gd
@@ -70,12 +71,16 @@ func _run_round(count: int) -> bool:
 
 	var ok := true
 	var order_violations := 0
+	var late_drafts := 0
 	var actions := 0
 
 	while main.state != main.State.DONE and actions < MAX_ACTIONS:
 		actions += 1
 		if not _turn_order_holds(main):
 			order_violations += 1
+		if main.current_hole_index >= Course.hole_count() \
+				and (main.state == main.State.DRAFT or main.state == main.State.DISCARD_FOR_DRAFT):
+			late_drafts += 1
 		if not _step(main):
 			print("players=%d -> FAIL (stuck in state %d on hole %d)" % [
 				count, main.state, main.current_hole_index])
@@ -97,6 +102,9 @@ func _run_round(count: int) -> bool:
 				ok = false
 		if order_violations > 0:
 			print("  !! %d turn-order violations (someone was up who wasn't furthest out)" % order_violations)
+			ok = false
+		if late_drafts > 0:
+			print("  !! a draft was offered after the last hole (%d actions), with no shot left to play the club" % late_drafts)
 			ok = false
 
 	var totals: Array = []

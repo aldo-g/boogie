@@ -29,8 +29,8 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
 **The bag (deckbuilding-adjacent, but non-standard)**
 - Start with three Bogey-Mart clubs — Driver, 7-Iron, Putter. Deliberately the
   worst gear in the game: you start with it and only ever lose it.
-- At the **end of every hole**, draw 3 clubs from a shared pool and permanently
-  add 1 to your bag.
+- At the **end of every hole but the last**, draw 3 clubs from a shared pool
+  and permanently add 1 to your bag. The round ends on the final putt.
 - Bag caps at 14 clubs (a real club limit). Once full, discard before adding.
 - Any club in the bag can be played for any shot.
 - No currency, no shop — the draw-3-pick-1 step is the entire acquisition
@@ -510,8 +510,8 @@ takes a few seconds.
 - **Multiplayer for 2-4 players, online or hot-seat** — furthest-from-pin
   turn order, per-player bags/Form decks/draft pools, standings and a
   winner; host-authoritative online with disconnect recovery
-- Starting Bogey-Mart bag; draw-3-pick-1 club draft each hole (14-club cap,
-  forced discard when full)
+- Starting Bogey-Mart bag; draw-3-pick-1 club draft after each hole but the
+  last (14-club cap, forced discard when full)
 - **Brands, set bonuses at 2/4/7, per-run draft pools, and limited-edition
   clubs**
 - **Club abilities** — per-club riders, created cards (Pure Strike, Big

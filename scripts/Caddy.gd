@@ -78,6 +78,8 @@ var _showing: bool = false
 var _hide_at: float = 0.0
 var _last_spoke: float = -1000.0
 var _current_forced: bool = false
+# A closing line waiting for the one on screen to have had its time.
+var _held: String = ""
 var _introduced: bool = false
 var _clock: float = 0.0
 
@@ -133,6 +135,11 @@ func _init() -> void:
 
 func _process(delta: float) -> void:
 	_clock += delta
+	if _held != "" and _clock - _last_spoke >= MIN_ON_SCREEN_SEC:
+		var text := _held
+		_held = ""
+		_current_forced = true
+		say(text)
 	if not _rig.visible:
 		return
 	# A lazy fin-paddle bob while he's on screen.
@@ -143,7 +150,12 @@ func _process(delta: float) -> void:
 
 
 # Main reports an event; he may or may not have something to say about it.
-func react(kind: String, ctx: Dictionary) -> void:
+# `wait` is for his last word on a round, which arrives in the same moment
+# as his line about the last hole (the round ends on the final putt): if
+# that line is still having its time, this one is held and follows it
+# rather than being dropped.
+func react(kind: String, ctx: Dictionary, wait: bool = false) -> void:
+	_held = ""  # a newer event overtakes a line that was still waiting
 	var key := situation(kind, ctx, _rng)
 	var options := lines_for(key)
 	if options.is_empty():
@@ -153,6 +165,8 @@ func react(kind: String, ctx: Dictionary) -> void:
 	# has just happened: a ball in the water outranks a remark about the
 	# card that put it there.
 	if _showing and _clock - _last_spoke < MIN_ON_SCREEN_SEC and (_current_forced or not forced):
+		if wait and forced:
+			_held = fill(_any(_rng, options), ctx)
 		return
 	var text := fill(_any(_rng, options), ctx)
 	if kind == "tee" and not _introduced:

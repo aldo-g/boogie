@@ -714,13 +714,15 @@ func _on_form_deck_chip_pressed() -> void:
 # Hands the caddy an event to maybe comment on. Online, he only talks to
 # the player at this machine: advice about someone else's ball is noise.
 # `everyone` is for news that applies to the whole group, like the wind.
-func caddy_says(kind: String, ctx: Dictionary = {}, everyone: bool = false) -> void:
+# `wait` is for his last word on the round: it follows his line about the
+# last hole instead of being lost to it (see Caddy.react()).
+func caddy_says(kind: String, ctx: Dictionary = {}, everyone: bool = false, wait: bool = false) -> void:
 	if caddy == null:
 		return
 	# He's the player's caddy: he doesn't narrate a computer golfer's shots.
 	if not everyone and (not is_my_turn() or is_cpu_turn()):
 		return
-	caddy.react(kind, ctx)
+	caddy.react(kind, ctx, wait)
 
 
 # The record of the hole — every stroke, penalty and ruling, newest
@@ -2301,6 +2303,20 @@ func _after_putt_drops(then: Callable) -> void:
 	create_tween().tween_callback(then).set_delay(beat)
 
 
+# The round's jingle. The round now ends on the last putt rather than on a
+# draft pick after it, so the jingle has to wait its turn: for the putt to
+# drop, then for the last hole's own jingle (the longest runs 1.3 s).
+# At once in the flow harnesses, which run no frames for a tween to use.
+const ROUND_JINGLE_GAP := 1.4
+
+func _play_round_jingle() -> void:
+	var play := func(): Sound.play("jingle_round", 0.0)
+	if map_view == null or map_view.skip_animation or not is_inside_tree():
+		play.call()
+		return
+	create_tween().tween_callback(play).set_delay(map_view.putt_beat() + ROUND_JINGLE_GAP)
+
+
 # The flow harnesses run with no frames, so a tween would never finish.
 func _can_stamp() -> bool:
 	return hole_banner != null and map_view != null and not map_view.skip_animation
@@ -2471,6 +2487,14 @@ func begin_end_of_hole() -> void:
 		if you != null and Course.hole_count() >= 4 and current_hole_index * 2 == Course.hole_count():
 			caddy_says("turn", {"margin": match_margin(you), "rival": closest_rival_name(you)}, true)
 
+	# No draft after the last hole: there is no shot left to play a new
+	# club with, so the round ends here. Every way a hole can finish comes
+	# through this function (the last putt, a seat retired mid-hole), so
+	# one check covers solo, hot-seat and online alike.
+	if current_hole_index >= Course.hole_count():
+		finish_hole_done()
+		return
+
 	if online:
 		begin_simultaneous_draft()
 		return
@@ -2579,8 +2603,9 @@ func begin_next_draft() -> void:
 
 
 # Called once the end-of-hole draft pick has been resolved (with or without
-# a forced discard) — the hole is now fully over. Either advances to the
-# next hole, or — after hole 18 — ends the round and shows the scorecard.
+# a forced discard) — the hole is now fully over — and straight from
+# begin_end_of_hole() after the last hole, which has no draft. Either
+# advances to the next hole or ends the round and shows the scorecard.
 func finish_hole_done() -> void:
 	if current_hole_index >= Course.hole_count():
 		finish_round()
@@ -2591,7 +2616,7 @@ func finish_hole_done() -> void:
 
 func finish_round() -> void:
 	state = State.DONE
-	Sound.play("jingle_round", 0.0)
+	_play_round_jingle()
 	log_entries.clear()
 	log_msg("[b]Round Complete — %s[/b]\n" % Course.active_name)
 	record_finished_round()
@@ -2632,7 +2657,7 @@ func finish_round() -> void:
 		var you := lone_human()
 		if you != null and not you.abandoned:
 			caddy_says("match", {"margin": match_margin(you), "rival": closest_rival_name(you),
-				"diff": you.score_diff(), "holes": you.round_scores.size()}, true)
+				"diff": you.score_diff(), "holes": you.round_scores.size()}, true, true)
 		refresh_ui()
 		return
 
@@ -2644,7 +2669,7 @@ func finish_round() -> void:
 		log_msg("Hole %2d — Par %d — %d strokes — %s" % [entry.hole, entry.par, entry.strokes, score_name(entry.strokes - entry.par)])
 	var diff := total_strokes - total_par
 	log_msg("\n[b]Total: %d (%s)[/b]" % [total_strokes, score_diff_text(diff)])
-	caddy_says("round", {"diff": diff, "holes": round_scores.size()})
+	caddy_says("round", {"diff": diff, "holes": round_scores.size()}, false, true)
 	refresh_ui()
 
 
