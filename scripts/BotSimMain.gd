@@ -10,11 +10,17 @@ extends "res://scripts/Main.gd"
 #     gained, and the bag it was played with;
 #   - a few rules can be switched for controlled experiments (`variant`):
 #       decay=<p>    Form decay chance after a hazard (default: the game's)
+#       rough=<p>    ...and after finishing in the rough
+#       pins=off     every pin in the middle of its green
+#       build=off    the wind and the pins don't build through the round
 #       wind=off     no wind;  wind=<mph> caps it
 #       nodraft      skip the end-of-hole draft entirely
 # ---------------------------------------------------------
 
 var decay_chance: float = -1.0   # < 0: the game's own rule, untouched
+var rough_chance: float = -1.0   # < 0: the game's own rule, untouched
+var pins_off: bool = false
+var build_off: bool = false
 var wind_cap: float = -1.0       # < 0: the game's own wind
 var no_draft: bool = false
 
@@ -39,6 +45,11 @@ func caddy_says(_kind: String, _ctx: Dictionary = {}, _everyone: bool = false) -
 
 func start_hole() -> void:
 	super.start_hole()
+	if build_off:
+		hole.wind = Wind.for_hole(wind_seed, current_hole_index, "", 0.0)
+		hole.cut_pin(Pins.for_hole(wind_seed, current_hole_index, hole, 0.0))
+	if pins_off:
+		hole.cut_pin(hole.green_pos)
 	if wind_cap >= 0.0 and hole.wind.length() > wind_cap:
 		hole.wind = hole.wind.normalized() * wind_cap if wind_cap > 0.0 else Vector2.ZERO
 	var bag: Array = me.hand
@@ -49,19 +60,28 @@ func start_hole() -> void:
 		"deck_n": form_deck.deck.size() + form_deck.discard.size(),
 		"bag": bag.map(func(c): return c.name),
 		"tiers": _tiers(bag),
+		"pin": hole.pin_name,
+		"pin_off": snappedf(hole.pin_pos.distance_to(hole.green_pos), 0.1),
 		"hazards": 0,
+		"roughs": 0,
 		"bad_added": 0,
 	})
 
 
-func maybe_add_bad_card_to_form_deck(lie_result: String) -> void:
+# `chance` tells a hazard from the rough: only the rough's is lower.
+func maybe_add_bad_card_to_form_deck(lie_result: String, chance: float, family: String = "") -> void:
+	var from_rough: bool = chance < ShotRules.FORM_DECAY_CHANCE - 0.0001
 	var before := form_deck.bad_count()
-	if decay_chance < 0.0:
-		super.maybe_add_bad_card_to_form_deck(lie_result)
-	elif ShotRules.hazard_can_decay_form(hand) and randf() < decay_chance:
-		form_deck.add_bad_card_to_deck(FormCard.BAD_NAMES.pick_random())
+	var swapped: float = rough_chance if from_rough else decay_chance
+	if swapped < 0.0:
+		super.maybe_add_bad_card_to_form_deck(lie_result, chance, family)
+	elif ShotRules.hazard_can_decay_form(hand) and randf() < swapped:
+		form_deck.add_bad_card_to_deck("", family)
 	if not hole_log.is_empty():
-		hole_log[-1].hazards += 1
+		if from_rough:
+			hole_log[-1].roughs += 1
+		else:
+			hole_log[-1].hazards += 1
 		hole_log[-1].bad_added += form_deck.bad_count() - before
 
 

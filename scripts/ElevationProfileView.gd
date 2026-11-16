@@ -27,9 +27,10 @@ const SAMPLE_STEP := 4.0
 # looks near-flat instead of having its 2 ft wobble blown up to fill the box.
 const MIN_RANGE_YD := 6.0
 
-const COLOR_GROUND := Color(0.596, 0.749, 0.494)
-const COLOR_GROUND_EDGE := Color(0.337, 0.388, 0.247)
 const COLOR_PIN := Color(0.753, 0.278, 0.227)
+# Which of the terrain's colours (CourseTheme) each lie is drawn in.
+const LIE_ROLE := {"fairway": "fairway", "green": "green", "rough": "rough",
+	"bunker": "sand", "water": "water", "out": "surround"}
 
 
 func _ready() -> void:
@@ -53,7 +54,7 @@ func _resample() -> void:
 	_samples = PackedVector2Array()
 	if _hole == null:
 		return
-	var end_y: float = _hole.pin_pos.y + _hole.green_radius
+	var end_y: float = _hole.green_pos.y + _hole.green_radius
 	var y := 0.0
 	while y <= end_y:
 		_samples.append(Vector2(y, _hole.height_at(Vector2(_hole.centre_x_at(y), y))))
@@ -83,16 +84,25 @@ func _draw() -> void:
 		return
 	var font := get_theme_default_font()
 
-	# Ground: filled down to the bottom edge, with a darker crest line.
-	var poly := PackedVector2Array()
+	# Ground: filled down to the bottom edge, with a darker crest line. Each
+	# slice takes the colour of what the centreline crosses there — fairway,
+	# rough, sand, water, green — in the course's own terrain palette, so a
+	# burn across the fairway or a carry over rough shows in the side view
+	# at the yardage it sits at.
 	var line := PackedVector2Array()
 	for p in _samples:
 		line.append(_to_px(p.x, p.y))
-	poly.append_array(line)
-	poly.append(Vector2(line[line.size() - 1].x, size.y - PAD_BOTTOM + 4))
-	poly.append(Vector2(line[0].x, size.y - PAD_BOTTOM + 4))
-	draw_colored_polygon(poly, Color(COLOR_GROUND, 0.55))
-	draw_polyline(line, COLOR_GROUND_EDGE, 1.5, true)
+	var floor_y: float = size.y - PAD_BOTTOM + 4
+	for i in line.size() - 1:
+		var mid_y: float = (_samples[i].x + _samples[i + 1].x) * 0.5
+		var lie := _hole.terrain_at(Vector2(_hole.centre_x_at(mid_y), mid_y))
+		var role: String = LIE_ROLE.get(lie, "rough")
+		# A hair of overlap, so no seam shows between slices (and opaque,
+		# so the overlap itself doesn't show either).
+		draw_colored_polygon(PackedVector2Array([line[i], line[i + 1] + Vector2(0.5, 0),
+			Vector2(line[i + 1].x + 0.5, floor_y), Vector2(line[i].x, floor_y)]),
+			CourseTheme.color(_hole.theme, role).lerp(BogeyTheme.PARCHMENT, 0.12))
+	draw_polyline(line, CourseTheme.color(_hole.theme, "canopy_dark"), 1.5, true)
 
 	# Flag.
 	var pin_px := _to_px(_hole.pin_pos.y, _hole.height_at(_hole.pin_pos))

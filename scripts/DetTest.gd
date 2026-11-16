@@ -160,9 +160,10 @@ func _cards_from_names(names: Array) -> Array:
 
 func _copy_state(src, dst) -> void:
 	dst.current_hole_index = src.current_hole_index
-	dst.hole = HoleData.hole(src.current_hole_index)  # derived, never sent
 	dst.wind_seed = src.wind_seed                      # sent in the round payload
-	dst.hole.wind = src.hole.wind
+	# Derived, never sent: the hole, its wind and its pin all come out of
+	# the hole number and that one seed.
+	dst.hole = HoleData.for_round(src.current_hole_index, src.wind_seed)
 	dst.hole_yardage = dst.hole.yardage
 	dst.hole_par = dst.hole.par
 	dst.active_index = src.active_index
@@ -179,6 +180,7 @@ func _assert_match(context: String) -> void:
 	_cmp(context, "state", a.state, b.state)
 	_cmp(context, "active_index", a.active_index, b.active_index)
 	_cmp(context, "wind", a.hole.wind, b.hole.wind)
+	_cmp(context, "pin", a.hole.pin_pos, b.hole.pin_pos)
 	_cmp(context, "draft_queue", str(a._draft_queue), str(b._draft_queue))
 	for i in range(a.players.size()):
 		var pa = a.players[i]

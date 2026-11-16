@@ -2,8 +2,9 @@ class_name CourseMapView
 extends Control
 
 # ---------------------------------------------------------
-# Top-down hole map: draws the fairway/green/hazard polygons from a
-# HoleData, mowed-stripe texture, the ball's position and shot trail,
+# Top-down hole map. The ground — fairway, green, hazards, scenery — is
+# painted once per hole by a child node (CourseArt) from the HoleData;
+# this node draws what moves over it: the ball's position and shot trail,
 # and (during a shot) the ball itself actually flying along the aim
 # arc — a small arcing hop with a growing motion trail — so the shot
 # reads as the ball traveling across the screen, not just a marker
@@ -30,6 +31,9 @@ var other_balls: Array = []
 var skip_animation: bool = false
 
 var aiming: bool = false           # true while the player can move/set the aim crosshair
+# True while a computer golfer is aiming: the crosshair and its line are
+# drawn as usual, but the mouse can't move or commit them.
+var input_locked: bool = false
 var aim_target: Vector2 = Vector2.ZERO  # yard-space, current crosshair position
 var aim_min_range: float = 0.0     # yards — the selected club's min_yard
 var aim_max_range: float = 999.0   # yards — the selected club's max_yard
@@ -44,40 +48,20 @@ var _hovering: bool = false        # true once the mouse has moved over the map 
 # picture the player has to learn separately.
 var preview_club: Dictionary = {}
 
-# Form-card landing preview. Set while the cursor rests on a Form card
-# during the draw, cleared when it leaves. Because every Form card is
-# fully deterministic (Section 4 — no hidden numbers), the landing spot
-# can be shown exactly rather than as a probability cloud: this is the
-# shot you will get if you play this card.
-var preview_landing_active: bool = false
-var preview_landing_pos: Vector2 = Vector2.ZERO   # yard-space
-var preview_landing_from: Vector2 = Vector2.ZERO  # yard-space
-var preview_landing_good: bool = true
-var preview_landing_out: bool = false   # lands off the course — stroke and distance
-var preview_landing_holed: bool = false # on the cup — earns the d20 roll
-var preview_carry_pos: Vector2 = Vector2.ZERO     # where it first touches down
-var preview_roll_path: Array = []                 # carry -> rest, yard-space
-
-# While aiming: where a clean strike of this aim would land and roll to.
-var aim_ghost_active: bool = false
-var aim_ghost_carry: Vector2 = Vector2.ZERO
-var aim_ghost_roll: Array = []
-
-# Slope shading, baked once per hole (see _bake_hillshade()).
-var _hillshade: ImageTexture = null
+# The painted ground — everything that holds still while a hole is played —
+# lives in a child drawn behind this node (see CourseArt), so the redraws
+# aiming and ball flight ask for never repaint it.
+var _art: CourseArt
 
 # The editor pins the framing while a handle is dragged, so the view doesn't
 # rescale under the cursor as the hole's bounds grow. Zero size = follow
 # the hole.
-var fixed_extent: Rect2 = Rect2()
-const HILLSHADE_STEP := 2.0   # yards per texel
-const HILLSHADE_GAIN := 7.0   # slopes are gentle; exaggerate so 3% reads
-
-# True while the live aim crosshair sits on a line that would earn the
-# hole-out roll. Set by Main.gd on every aim change (it owns the club, lie
-# and hand the resolution depends on) rather than computed here, so the
-# map never has to duplicate shot math it doesn't own.
-var aim_can_hole_out: bool = false
+var fixed_extent: Rect2 = Rect2():
+	set(value):
+		fixed_extent = value
+		# The framing moved, so the ground has to be repainted under it.
+		if _art:
+			_art.queue_redraw()
 
 # Aim-tool animation state (yard-space): set by play_aim_animation(), cleared after.
 var _aim_active: bool = false
@@ -93,20 +77,29 @@ var _aim_max_distance: float = 1.0
 var _flight_active: bool = false
 var _flight_pos: Vector2 = Vector2.ZERO
 var _flight_trail: Array = []       # recent yard-space points, most recent last
-var _flight_hop_height: float = 0.0 # current arc height in yards, for the shadow offset
+var _flight_hop_height: float = 0.0 # how high the ball is right now, in yards
+var _flight_loft: float = 1.0       # how high this shot flies (ShotResolver.flight_height)
 var _pending_roll: Array = []       # run-out path for the shot being animated
+var _flight_sunk: bool = false      # it went in the water: nothing left to draw
+var _bounce_apex: float = 0.0       # yards the first skip rises after this landing
+
+# What the ground does when the ball arrives — a ring on turf, a puff out
+# of sand, a splash — each a short-lived thing drawn over the map and gone
+# again: { kind, pos (yards), age, life (seconds), seed }.
+var _fx: Array = []
+
+# Putts (and anything else that goes in the hole). The game moves the ball
+# the instant a putt is struck; these are the rolls the map is still
+# showing, oldest first: { from, to, holed, roll (seconds) }.
+var _putts: Array = []
+var _putt_t: float = 0.0            # the one under way: how far along, 0 to 1
+var _putt_drop: float = 0.0         # ...and how far into the cup, 0 to 1
+var _putt_tween: Tween
+var _putt_busy_until: int = 0       # msec tick when the last of them will have dropped
 
 const MARGIN := 16.0
-const COLOR_FAIRWAY := Color(0.596, 0.749, 0.494)   # brighter fairway green
-const COLOR_FAIRWAY_STRIPE := Color(0.561, 0.718, 0.455) # subtle mow-stripe alt tone
-const COLOR_ROUGH := Color(0.435, 0.557, 0.373)     # darker rough green
-const COLOR_ROUGH_STRIPE := Color(0.404, 0.522, 0.345)
-const COLOR_GREEN := Color(0.702, 0.839, 0.596)     # putting green, lightest
-const COLOR_GREEN_STRIPE := Color(0.663, 0.808, 0.553)
-const COLOR_BUNKER := Color(0.867, 0.784, 0.573)
-const COLOR_BUNKER_EDGE := Color(0.745, 0.651, 0.435)
-const COLOR_WATER := Color(0.561, 0.663, 0.722)
-const COLOR_WATER_RIPPLE := Color(0.702, 0.784, 0.831, 0.6)
+# The ground's own colours — fairway, rough, sand, water, trees — belong to
+# the course's terrain and live in CourseTheme. What's here is what moves.
 const COLOR_BALL := Color(0.98, 0.98, 0.97)
 # Seat tints for other players' balls, indexed by seat. Picked to read
 # against both fairway green and sand, and to stay distinct from each
@@ -120,41 +113,52 @@ const COLOR_SEATS := [
 	Color(0.608, 0.420, 0.718), # seat 4 — violet
 ]
 const COLOR_BALL_OUTLINE := Color(0.169, 0.227, 0.184)
+# The map looks straight down, so a ball in the air is a ball coming
+# toward you: it swells as it climbs and shrinks back as it drops, while
+# its shadow stays on the ground, slides out from under it and thins. At
+# rest and at the top of FLIGHT_FULL_RISE yards of air it is BALL_RADIUS
+# and BALL_RADIUS * FLIGHT_SWELL pixels across.
+const BALL_RADIUS := 5.0
+const FLIGHT_APEX_SHARE := 0.06   # a stock shot peaks at this share of its carry
+const FLIGHT_FULL_RISE := 12.0    # yards up — about a full drive — at which the ball is biggest
+const FLIGHT_SWELL := 2.1
+
+# A ball that pitches on turf skips before it runs: the first skip rises
+# BOUNCE_SHARE of the flight's own apex (kept between MIN and MAX yards, so
+# a chip still skips and a drive doesn't leap), the second a third of
+# that, and the two are over in BOUNCE_TIME seconds. How lively depends on
+# what it lands on — and sand and water don't give it back at all.
+const BOUNCE_SHARE := 0.28
+const BOUNCE_MIN := 1.0
+const BOUNCE_MAX := 3.5
+const BOUNCE_TIME := 0.40
+const BOUNCE_BY_GROUND := {"fairway": 1.0, "green": 0.7, "rough": 0.45}
+# How long the map holds on a splash before the game moves on.
+const SPLASH_HOLD := 0.38
+const FX_LIFE := {"thump": 0.30, "rough": 0.38, "sand": 0.55, "splash": 0.80, "cup": 0.45}
+# A putt: yards rolled per second of animation (within the limits), then
+# the drop into the cup, then a beat before the fanfare.
+const PUTT_YARDS_PER_SEC := 11.0
+const PUTT_ROLL_MIN := 0.22
+const PUTT_ROLL_MAX := 0.85
+const PUTT_DROP_TIME := 0.20
+const PUTT_BEAT := 0.28
 const COLOR_BALL_SHADOW := Color(0.106, 0.129, 0.110, 0.35)
 const COLOR_TRAIL := Color(0.169, 0.227, 0.184, 0.55)
 const COLOR_FLIGHT_TRAIL := Color(0.98, 0.98, 0.97, 0.9)
 const COLOR_PIN := Color(0.753, 0.278, 0.227)
-const COLOR_AIM_LINE := Color(0.753, 0.278, 0.227, 0.55)
-const COLOR_AIM_WARNING := Color(0.827, 0.514, 0.106)  # amber — outside the club's sweet-spot band
-# Yellow — this line finishes on the cup and earns the d20 hole-out roll.
-# Deliberately brighter and more saturated than the amber warning above so
-# the two never read as the same signal: amber is "this is risky", yellow
-# is "this gets a shot at the hole". Yellow is a chance, not a promise —
-# only a natural 20 actually drops.
-const COLOR_AIM_HOLE_OUT := Color(0.984, 0.839, 0.141)
-# Form-card landing preview: green for a good card, red for a bad one, so
-# the cost of a bad draw is legible on the map before it is played.
-const COLOR_PREVIEW_GOOD := Color(0.306, 0.431, 0.251)
-const COLOR_PREVIEW_BAD := Color(0.753, 0.278, 0.227)
-const COLOR_TREE_CANOPY := Color(0.325, 0.443, 0.271)
-const COLOR_TREE_CANOPY_DARK := Color(0.267, 0.373, 0.220)
-const COLOR_TREE_SHADOW := Color(0.106, 0.129, 0.110, 0.16)
-const COLOR_GREEN_FRINGE := Color(0.639, 0.780, 0.529)
-const COLOR_MARKER := Color(0.169, 0.227, 0.184, 0.4)
 
-# Swing-tier reference bands drawn around the ball while aiming — a bell
-# curve centered on MID (green, the most repeatable swing and best odds),
-# with BOTH Finesse and Full swing colored as risky (amber) since swinging
-# all-out is just as mishit-prone as a delicate touch shot, and Extreme
-# Finesse worst of all (red, guaranteed bad). Matches the shot outlook
-# panel's own warning color for the risky tiers (Main.gd's COLOR_FLAG).
-const TIER_BAND_COLOR_EXTREME_FINESSE := Color(0.753, 0.278, 0.227, 0.30)  # red — guaranteed bad card
-const TIER_BAND_COLOR_FINESSE := Color(0.827, 0.514, 0.106, 0.26)         # amber — worse odds (touch-shot mishit risk)
-const TIER_BAND_COLOR_MID := Color(0.306, 0.431, 0.251, 0.28)             # fairway green — best odds, most repeatable
-const TIER_BAND_COLOR_FULL := Color(0.827, 0.514, 0.106, 0.26)            # amber — worse odds (all-out mishit risk)
+
+func _init() -> void:
+	# Made here rather than in _ready(): set_hole() can be called on a map
+	# that isn't in the tree yet.
+	_art = CourseArt.new()
+	_art.view = self
+	add_child(_art)
 
 
 func _ready() -> void:
+	set_process(false)   # only while a landing effect is in the air
 	custom_minimum_size = Vector2(220, 0)
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -171,33 +175,14 @@ func _ready() -> void:
 func set_hole(p_hole: HoleData, bake: bool = true) -> void:
 	if hole != p_hole:
 		hole = p_hole
-		_hillshade = _bake_hillshade() if (hole and bake) else null
+		_art.refresh(bake)
+		# Nothing from the last hole is still landing on this one.
+		_fx = []
+		_putts = []
+		_putt_busy_until = 0
+		if _putt_tween != null and _putt_tween.is_valid():
+			_putt_tween.kill()
 	queue_redraw()
-
-
-# Light from the upper-left of the screen (toward -x, +y in yard-space):
-# slopes facing it brighten, slopes facing away darken. Baked into a small
-# texture so _draw() just stretches one image over the hole.
-func _bake_hillshade() -> ImageTexture:
-	var b := hole.bounds
-	var w: int = maxi(2, int(ceil(b.size.x / HILLSHADE_STEP)))
-	var h: int = maxi(2, int(ceil(b.size.y / HILLSHADE_STEP)))
-	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
-	var light := Vector2(-1.0, 1.0).normalized()
-	for j in h:
-		# Row 0 is the top of the picture, which is the far (pin) end.
-		var y: float = b.position.y + b.size.y - (float(j) + 0.5) * HILLSHADE_STEP
-		for i in w:
-			var x: float = b.position.x + (float(i) + 0.5) * HILLSHADE_STEP
-			var g: Vector2 = hole.gradient_at(Vector2(x, y))
-			# Ground facing the light has its downhill direction pointing
-			# away from it, i.e. gradient along the light vector.
-			var lit: float = clampf(g.dot(light) * HILLSHADE_GAIN, -1.0, 1.0)
-			if lit >= 0.0:
-				img.set_pixel(i, j, Color(1.0, 0.98, 0.9, lit * 0.32))
-			else:
-				img.set_pixel(i, j, Color(0.08, 0.12, 0.06, -lit * 0.32))
-	return ImageTexture.create_from_image(img)
 
 
 func set_ball(p_pos: Vector2, p_path: Array) -> void:
@@ -238,80 +223,134 @@ static func seat_color(index: int) -> Color:
 # empty dictionary to clear. Suppressed while aiming: once a club is
 # chosen the map is already showing that club's full tier breakdown, and
 # a second ring over the top would be noise.
-# The four swing-tier bands for one club, centred on `origin_px`.
+# One club's yardages, drawn the way a yardage book prints carry arcs: short
+# arcs across the line of play, each with its number, rather than coloured
+# rings all the way round the ball.
 #
-# Shared deliberately by both the live aim and the bag-hover preview: the
-# preview's whole job is to show what committing to this club would look
-# like, so it must be the same picture, from the same
-# ShotResolver.tier_yardage_range() numbers. Two copies would be free to
-# drift apart, which is exactly the bug a preview cannot afford.
+#   - the club's shortest yardage: a dashed hairline (below it is Extreme
+#     Finesse, where the crosshair turns claret);
+#   - the sweet spot (the Mid tier, best odds): a pair of solid arcs with
+#     fine hatching between them;
+#   - the club's longest yardage: a plain hairline.
 #
-# `fallback_max` covers the putter and any degenerate 0-0 club, which have
-# no meaningful tier split — those get a single plain reach ring instead.
+# Lines are paper-white over a soft ink shadow so they read on fairway and
+# dark rough alike. The putter (a band starting at 0) gets just its reach
+# arc, in the same hand. Shared by the live aim and the bag-hover preview so
+# the two can never show a club differently.
+#
+# `facing` is the line of play in yard-space (toward the crosshair, or the
+# pin on a hover); `fallback_max` is the aim's own reach for the putter.
+const ARC_HALF_ANGLE := 0.663   # 38° either side of the line of play
+const ARC_INK := Color(1.0, 1.0, 0.98, 0.92)
+const ARC_SHADOW := Color(0.08, 0.09, 0.08, 0.35)
+
+
 func _draw_tier_bands(club: Dictionary, origin_px: Vector2, scale_px: float,
-		fallback_max: float = 0.0) -> void:
+		fallback_max: float = 0.0, facing: Vector2 = Vector2.UP) -> void:
 	if club.is_empty():
 		return
+	# Yard-space +y is screen-up, so flip y to get the screen angle.
+	var f := Vector2(facing.x, -facing.y)
+	if f.length_squared() < 0.0001:
+		f = Vector2(0, -1)
+	var mid_angle := f.angle()
+	var a0 := mid_angle - ARC_HALF_ANGLE
+	var a1 := mid_angle + ARC_HALF_ANGLE
+	var labels: Array = []   # [radius_px, yards], drawn last so arcs never cover them
 
-	if club.get("min_yard", 0.0) > 0.0:
-		var tiers := [ShotResolver.Tier.EXTREME_FINESSE, ShotResolver.Tier.FINESSE, ShotResolver.Tier.MID, ShotResolver.Tier.FULL]
-		var tier_colors := [TIER_BAND_COLOR_EXTREME_FINESSE, TIER_BAND_COLOR_FINESSE, TIER_BAND_COLOR_MID, TIER_BAND_COLOR_FULL]
-		for i in range(tiers.size()):
-			var band := ShotResolver.tier_yardage_range(club, tiers[i])
-			var lo: float = band.x
-			var hi: float = band.y
-			if hi <= lo:
-				continue
-			var mid_r: float = ((lo + hi) * 0.5) * scale_px
-			var band_width_px: float = (hi - lo) * scale_px
-			draw_arc(origin_px, mid_r, 0, TAU, 72, tier_colors[i], max(band_width_px, 1.5))
+	var lo_yd: float = float(club.get("min_yard", 0.0))
+	var hi_yd: float = float(club.get("max_yard", 0.0))
+	if lo_yd <= 0.0:
+		var reach: float = fallback_max if fallback_max > 0.0 else hi_yd
+		if reach > 0.0 and reach < 900.0:
+			_yardage_arc(origin_px, reach * scale_px, a0, a1, 1.2, false)
+			labels.append([reach * scale_px, reach])
+	else:
+		var sweet := ShotResolver.tier_yardage_range(club, ShotResolver.Tier.MID)
+		var r_lo := lo_yd * scale_px
+		var r_s0 := sweet.x * scale_px
+		var r_s1 := sweet.y * scale_px
+		var r_hi := hi_yd * scale_px
+		_yardage_arc(origin_px, r_lo, a0, a1, 1.0, true)
+		# Sweet-spot hatching: short radial strokes across the band.
+		var steps := maxi(int((a1 - a0) / deg_to_rad(2.5)), 1)
+		for i in range(steps + 1):
+			var a := a0 + (a1 - a0) * float(i) / float(steps)
+			var d := Vector2.from_angle(a)
+			draw_line(origin_px + d * r_s0, origin_px + d * r_s1, Color(ARC_INK, 0.28), 1.0)
+		_yardage_arc(origin_px, r_s0, a0, a1, 1.6, false)
+		_yardage_arc(origin_px, r_s1, a0, a1, 1.6, false)
+		_yardage_arc(origin_px, r_hi, a0, a1, 1.0, false)
+		labels.append([r_lo, lo_yd])
+		labels.append([r_s0, sweet.x])
+		labels.append([r_s1, sweet.y])
+		labels.append([r_hi, hi_yd])
+
+	# Numbers at the clockwise end of each arc, on a slip of card. The
+	# club's own shortest and longest always get theirs; a sweet-spot edge
+	# is numbered only if it has room, never stacked over another.
+	var end_dir := Vector2.from_angle(a1)
+	var order: Array = [labels[0]]
+	if labels.size() == 4:
+		order = [labels[0], labels[3], labels[1], labels[2]]
+	var placed: Array = []
+	for l in order:
+		var clear := true
+		for r in placed:
+			if absf(l[0] - r) < 14.0:
+				clear = false
+		if not clear:
+			continue
+		placed.append(l[0])
+		_yardage_slip(origin_px + end_dir * l[0] + end_dir * 4.0, "%d" % roundi(l[1]), BogeyTheme.INK)
+
+
+# The aim line and crosshair: paper-white over an ink shadow so it reads on
+# any ground; dashed once committed, solid while the cursor still moves it.
+func _draw_aim_mark(from_px: Vector2, to_px: Vector2, col: Color, dashed: bool) -> void:
+	var sh := Vector2(0, 1)
+	if dashed:
+		_draw_dashed_line(from_px + sh, to_px + sh, ARC_SHADOW, 2.5, 5.0, 4.0)
+		_draw_dashed_line(from_px, to_px, col, 1.5, 5.0, 4.0)
+	else:
+		draw_line(from_px + sh, to_px + sh, ARC_SHADOW, 3.0, true)
+		draw_line(from_px, to_px, col, 1.6, true)
+	draw_arc(from_px, 9.0, 0, TAU, 20, Color(col, 0.8), 1.5, true)
+	draw_arc(to_px + sh, 7.0, 0, TAU, 18, ARC_SHADOW, 2.5, true)
+	draw_arc(to_px, 7.0, 0, TAU, 18, col, 1.5, true)
+	for d in [Vector2(1, 0), Vector2(0, 1)]:
+		draw_line(to_px - d * 11.0 + sh, to_px + d * 11.0 + sh, ARC_SHADOW, 2.5)
+		draw_line(to_px - d * 11.0, to_px + d * 11.0, col, 1.2)
+
+
+func _yardage_arc(c: Vector2, r: float, a0: float, a1: float, w: float, dashed: bool) -> void:
+	if r < 2.0:
 		return
-
-	# A club whose band starts at 0 — the putter — gets a single reach ring
-	# rather than the four tier bands. Its Extreme Finesse band is
-	# necessarily empty (you cannot aim below zero) and it buffers
-	# deviation to nothing, so the only thing worth drawing is how far it
-	# actually gets. The aim path passes its own aim_max_range; the hover
-	# preview falls back to the club's own max.
-	var reach: float = fallback_max
-	if reach <= 0.0:
-		reach = float(club.get("max_yard", 0.0))
-	if reach > 0.0 and reach < 900.0:
-		draw_arc(origin_px, reach * scale_px, 0, TAU, 56, Color(BogeyTheme.INK, 0.16), 1.0)
-
-
-# Called as the cursor enters/leaves a Form card during the draw. Pass
-# active=false to clear.
-# `holed` says this card's landing spot finishes on the cup — Main.gd
-# computes it from the same ShotResolver.earns_hole_out_roll() the played
-# shot uses, so the yellow marks exactly the cards that earn the d20.
-func set_preview_landing(active: bool, from_pos: Vector2 = Vector2.ZERO,
-		landing: Vector2 = Vector2.ZERO, good: bool = true,
-		holed: bool = false, carry_pos: Vector2 = Vector2.INF,
-		roll_path: Array = []) -> void:
-	if preview_landing_active == active \
-			and preview_landing_pos == landing \
-			and preview_landing_from == from_pos \
-			and preview_landing_holed == holed:
+	var pts := maxi(int((a1 - a0) * r / 6.0), 8)
+	if not dashed:
+		draw_arc(c + Vector2(0, 1), r, a0, a1, pts, ARC_SHADOW, w + 1.0, true)
+		draw_arc(c, r, a0, a1, pts, ARC_INK, w, true)
 		return
-	preview_landing_active = active
-	preview_carry_pos = landing if carry_pos == Vector2.INF else carry_pos
-	preview_roll_path = roll_path
-	preview_landing_from = from_pos
-	preview_landing_pos = landing
-	preview_landing_good = good
-	preview_landing_out = active and hole != null and hole.is_out_of_bounds(landing)
-	preview_landing_holed = holed and not preview_landing_out
-	queue_redraw()
+	# Dashes of about 6 px with 5 px gaps along the arc.
+	var step := 11.0 / r
+	var a := a0
+	while a < a1:
+		var b := minf(a + 6.0 / r, a1)
+		draw_arc(c + Vector2(0, 1), r, a, b, 4, ARC_SHADOW, w + 1.0, true)
+		draw_arc(c, r, a, b, 4, ARC_INK, w, true)
+		a += step
 
 
-# The clean-strike read while aiming. Main.gd computes it from the same
-# ShotResolver.shot_outcome() the real shot uses.
-func set_aim_ghost(active: bool, carry_pos: Vector2 = Vector2.ZERO, roll_path: Array = []) -> void:
-	aim_ghost_active = active
-	aim_ghost_carry = carry_pos
-	aim_ghost_roll = roll_path
-	queue_redraw()
+# A small number on a slip of card, centred on `at` — the same paper slip
+# the wind dial and the pin note sit on.
+func _yardage_slip(at: Vector2, text: String, col: Color) -> void:
+	var font := BogeyUI.sans(500)
+	var fs := 10
+	var w: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var rect := Rect2(at - Vector2(w * 0.5 + 4.0, 7.0), Vector2(w + 8.0, 14.0))
+	draw_rect(rect, Color(BogeyTheme.CARD_BG, 0.9))
+	draw_string(font, Vector2(rect.position.x + 4.0, rect.position.y + 10.5), text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 
 func set_preview_club(club: Dictionary) -> void:
@@ -332,24 +371,11 @@ func set_aiming(enabled: bool, min_range: float = 0.0, max_range: float = 999.0,
 	aim_max_range = max(max_range, 0.01)
 	aim_club = club
 	_hovering = false
-	if not enabled:
-		# Leaving the aim step drops the yellow with it — a stale hole-out
-		# highlight next to a ball that has already been played is a lie.
-		aim_can_hole_out = false
-		aim_ghost_active = false
 	queue_redraw()
 
 
 func set_aim_target(p_target: Vector2) -> void:
 	aim_target = _clamp_to_range(p_target) if aiming else p_target
-	queue_redraw()
-
-
-# Main.gd tells the map whether the current aim line is a hole-out line.
-func set_aim_can_hole_out(p_can: bool) -> void:
-	if aim_can_hole_out == p_can:
-		return
-	aim_can_hole_out = p_can
 	queue_redraw()
 
 
@@ -362,7 +388,16 @@ func set_aim_can_hole_out(p_can: bool) -> void:
 func _clamp_to_range(p: Vector2) -> Vector2:
 	# Delegates to ShotResolver so the crosshair and the authoritative
 	# gameplay value can never drift apart.
-	return ShotResolver.clamp_aim(p, ball_pos, aim_max_range, _yard_extent())
+	var q := ShotResolver.clamp_aim(p, ball_pos, aim_max_range, _yard_extent())
+	# The ground in play is a shape inside that box, not the box itself. A
+	# cursor over the trees slides the crosshair along the stakes rather
+	# than letting it be set down out of bounds. (Still inside the box, so
+	# the authoritative clamp leaves it exactly where it is.)
+	if hole and fixed_extent.size == Vector2.ZERO and hole.is_out_of_bounds(q):
+		var on_course := hole.nearest_in_bounds(q)
+		if on_course.distance_to(ball_pos) <= aim_max_range + 0.01:
+			q = on_course
+	return q
 
 
 # Clamps a yard-space point to stay within the rectangle _yard_extent()
@@ -373,7 +408,7 @@ func _clamp_to_extent(p: Vector2) -> Vector2:
 
 
 func _gui_input(event: InputEvent) -> void:
-	if not aiming:
+	if not aiming or input_locked:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		aim_target = _clamp_to_range(_px_to_yard(event.position))
@@ -395,25 +430,26 @@ func _gui_input(event: InputEvent) -> void:
 # the ball is visibly traceable across the map rather than teleporting.
 # All distances in yards; base_dir is the player's chosen aim line (from
 # the click-to-aim step), not necessarily toward the pin.
-func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side: int, max_distance: float, on_done: Callable, roll_path: Array = []) -> void:
+# `loft` is how high the shot flies against a stock iron's 1.0
+# (ShotResolver.flight_height): it sets how far the ball lifts off its
+# shadow and how much it swells on the way up. 0 runs along the ground.
+func play_aim_animation(base_dir: Vector2, distance: float, degree: float, side: int, max_distance: float, on_done: Callable, roll_path: Array = [], loft: float = 1.0) -> void:
 	if not hole:
 		on_done.call()
 		return
+	_flight_loft = maxf(loft, 0.0)
 	if skip_animation or Settings.instant_shots():
 		# No tween: land the shot now. Nothing here needs frames, so a
 		# caller driving the game in a loop makes real progress.
-		preview_landing_active = false
 		_aim_active = false
 		_flight_active = false
 		_flight_trail = []
+		# No pictures, but still the sound of where it finished.
+		if not roll_path.is_empty():
+			_sound_landing(hole.terrain_at(roll_path[roll_path.size() - 1]))
 		on_done.call()
 		return
 	_pending_roll = roll_path
-	# The card that was hovered is the one just played, and its
-	# mouse_exited never fires because the Form row is cleared out from
-	# under the cursor — so the preview has to be dropped here or it would
-	# hang over the shot it was predicting.
-	preview_landing_active = false
 	_aim_active = true
 	_aim_origin = ball_pos
 	_aim_base_dir = base_dir.normalized()
@@ -453,6 +489,7 @@ func _start_ball_flight(distance: float, degree: float, side: int, on_done: Call
 		end_yard = _pending_roll[0]
 
 	_flight_active = true
+	_flight_sunk = false
 	_flight_pos = start_yard
 	_flight_trail = [start_yard]
 	_flight_hop_height = 0.0
@@ -466,24 +503,190 @@ func _start_ball_flight(distance: float, degree: float, side: int, on_done: Call
 	tw.tween_method(func(t: float): _update_ball_flight(start_yard, end_yard, t),
 		0.0, 1.0, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
-	# Then the run-out along the exact path ShotResolver rolled, easing to
-	# a stop so it reads as the ball losing pace.
+	# It lands: the sound and the mark of whatever it landed on, and on
+	# turf a skip or two — higher off a high shot, livelier off short grass.
 	var path: Array = _pending_roll
 	_pending_roll = []
 	var roll_len := _path_length(path)
+	var rest_yard: Vector2 = path[path.size() - 1] if not path.is_empty() else end_yard
+	var touched := hole.terrain_at(end_yard)
+	var rested := hole.terrain_at(rest_yard)
+	var apex: float = start_yard.distance_to(end_yard) * FLIGHT_APEX_SHARE * _flight_loft
+	var spring: float = float(BOUNCE_BY_GROUND.get(touched, 0.0)) if _flight_loft > 0.0 else 0.0
+	tw.tween_callback(func():
+		_flight_hop_height = 0.0
+		_flight_trail = [_flight_pos]
+		_bounce_apex = clampf(apex * BOUNCE_SHARE, BOUNCE_MIN, BOUNCE_MAX) * spring
+		_touch_down(end_yard, touched))
+
+	# Then the run-out along the exact path ShotResolver rolled, easing to
+	# a stop so it reads as the ball losing pace — skipping as it sets off.
 	if roll_len >= 1.0:
-		tw.tween_callback(func():
-			_flight_hop_height = 0.0
-			_flight_trail = [_flight_pos])
+		var roll_time: float = clamp(roll_len / 40.0, 0.25, 1.1)
 		tw.tween_method(func(t: float): _update_ball_roll(path, roll_len, t),
-			0.0, 1.0, clamp(roll_len / 40.0, 0.25, 1.1)) \
-			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			0.0, 1.0, roll_time).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		if spring > 0.0:
+			tw.parallel().tween_method(_set_bounce, 0.0, 1.0, minf(BOUNCE_TIME, roll_time))
+	elif spring > 0.0:
+		# It stops where it pitched: one hop on the spot, half the height.
+		tw.tween_method(func(u: float): _set_bounce(u * 0.62 * 0.999, 0.5), 0.0, 1.0, BOUNCE_TIME * 0.6)
+
+	# Where it stopped, if that's somewhere worse than where it landed: a
+	# ball that ran on into the sand or the water.
+	tw.tween_callback(func():
+		_flight_hop_height = 0.0
+		if rested != touched:
+			_touch_down(rest_yard, rested))
+	if touched == "water" or rested == "water":
+		tw.tween_interval(SPLASH_HOLD)
 
 	tw.tween_callback(func():
 		_flight_active = false
+		_flight_sunk = false
 		_flight_trail = []
 		on_done.call()
 	)
+
+
+# The Sound autoload, found by path and called by name. Not written as
+# `Sound.…`: the dev harnesses compile this script (through its class
+# name) before any autoload exists, and a bare `Sound` would not compile.
+func _sound_landing(ground: String) -> void:
+	var sound := get_node_or_null("/root/Sound") if is_inside_tree() else null
+	if sound:
+		sound.call("landing", ground)
+
+
+func _sound_play(group: String) -> void:
+	var sound := get_node_or_null("/root/Sound") if is_inside_tree() else null
+	if sound:
+		sound.call("play", group)
+
+
+# The ball meets the ground at `at`, which is `ground`: its sound, and
+# its mark. Water takes the ball with it.
+func _touch_down(at: Vector2, ground: String) -> void:
+	_sound_landing(ground)
+	match ground:
+		"water":
+			_flight_sunk = true
+			_spawn_fx("splash", at)
+		"bunker":
+			_spawn_fx("sand", at)
+		"rough":
+			_spawn_fx("rough", at)
+		"fairway", "green":
+			_spawn_fx("thump", at)
+	queue_redraw()
+
+
+# The skips after a landing: `u` runs 0 to 1 over the two of them, the
+# second a third the height of the first. They ride on whatever the ball
+# is doing along the ground, so it skips forward along its run-out.
+func _set_bounce(u: float, scale: float = 1.0) -> void:
+	var h: float = sin(PI * u / 0.62) if u < 0.62 else 0.34 * sin(PI * (u - 0.62) / 0.38)
+	_flight_hop_height = _bounce_apex * scale * maxf(h, 0.0)
+	queue_redraw()
+
+
+func _spawn_fx(kind: String, at: Vector2) -> void:
+	_fx.append({"kind": kind, "pos": at, "age": 0.0, "life": float(FX_LIFE.get(kind, 0.4)), "seed": randi()})
+	set_process(true)
+	queue_redraw()
+
+
+# Only running while an effect is in the air (see _spawn_fx).
+func _process(delta: float) -> void:
+	var live: Array = []
+	for fx in _fx:
+		fx.age += delta
+		if fx.age < fx.life:
+			live.append(fx)
+	_fx = live
+	if _fx.is_empty():
+		set_process(false)
+	queue_redraw()
+
+
+# --- Putts ------------------------------------------------------------
+# The game decides a putt the moment it's struck and moves the ball there
+# and then. The map shows it happening: the ball rolls from where it was to
+# where it finished, and if that's the hole it drops — the cup's rattle on
+# the drop, not before. Purely a picture: nothing waits on it except the
+# fanfare, which asks putt_beat() how long to hold off.
+func play_putt(from: Vector2, to: Vector2, holed: bool) -> void:
+	if skip_animation or Settings.instant_shots() or hole == null or not is_inside_tree():
+		if holed:
+			_sound_play("cup")
+		return
+	var roll: float = 0.0
+	if from.distance_to(to) > 0.05:
+		roll = clampf(from.distance_to(to) / PUTT_YARDS_PER_SEC, PUTT_ROLL_MIN, PUTT_ROLL_MAX)
+	_putts.append({"from": from, "to": to, "holed": holed, "roll": roll})
+	var takes: float = (roll + (PUTT_DROP_TIME + PUTT_BEAT if holed else 0.0)) / maxf(Settings.shot_speed_scale(), 0.01)
+	_putt_busy_until = maxi(_putt_busy_until, Time.get_ticks_msec()) + int(takes * 1000.0)
+	if _putts.size() == 1:
+		_run_putt()
+
+
+# A ball that has just arrived at the hole some other way — holed from off
+# the green — drops in like a putt that got there.
+func drop_in_cup() -> void:
+	if hole:
+		play_putt(hole.pin_pos, hole.pin_pos, true)
+
+
+# Seconds until every putt on the map has finished (and, if it was holed,
+# dropped and been given its beat). 0 when nothing is rolling.
+func putt_beat() -> float:
+	if _putts.is_empty():
+		return 0.0
+	return maxf(0.0, float(_putt_busy_until - Time.get_ticks_msec()) / 1000.0)
+
+
+func _run_putt() -> void:
+	queue_redraw()
+	if _putts.is_empty():
+		return
+	var p: Dictionary = _putts[0]
+	_putt_t = 0.0 if float(p.roll) > 0.0 else 1.0
+	_putt_drop = 0.0
+	_putt_tween = create_tween()
+	_putt_tween.set_speed_scale(Settings.shot_speed_scale())
+	if float(p.roll) > 0.0:
+		# Dying into the hole, the way a putt does.
+		_putt_tween.tween_method(_set_putt_t, 0.0, 1.0, float(p.roll)) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if bool(p.holed):
+		_putt_tween.tween_callback(func():
+			_sound_play("cup")
+			_spawn_fx("cup", p.to))
+		_putt_tween.tween_method(_set_putt_drop, 0.0, 1.0, PUTT_DROP_TIME)
+		_putt_tween.tween_interval(PUTT_BEAT)
+	_putt_tween.tween_callback(func():
+		_putts.pop_front()
+		_run_putt())
+
+
+func _set_putt_t(t: float) -> void:
+	_putt_t = t
+	queue_redraw()
+
+
+func _set_putt_drop(d: float) -> void:
+	_putt_drop = d
+	queue_redraw()
+
+
+# A ball marker isn't drawn where a putt is still rolling to, nor in the
+# hole itself: a ball at the pin has been holed, and it's in the cup.
+func _marker_hidden(at: Vector2) -> bool:
+	if hole and at.distance_to(hole.pin_pos) < 0.05:
+		return true
+	for p in _putts:
+		if at.distance_to(p.to) < 0.05:
+			return true
+	return false
 
 
 func _path_length(path: Array) -> float:
@@ -505,7 +708,6 @@ func _update_ball_roll(path: Array, total: float, t: float) -> void:
 			break
 		acc += seg
 		_flight_pos = b
-	_flight_hop_height = 0.0
 	_flight_trail.append(_flight_pos)
 	if _flight_trail.size() > 6:
 		_flight_trail.pop_front()
@@ -514,8 +716,9 @@ func _update_ball_roll(path: Array, total: float, t: float) -> void:
 
 func _update_ball_flight(start_yard: Vector2, end_yard: Vector2, t: float) -> void:
 	_flight_pos = start_yard.lerp(end_yard, t)
-	# Simple parabolic hop for the shadow-offset "height" cue (unitless 0..1 * a few yards).
-	_flight_hop_height = sin(t * PI) * (start_yard.distance_to(end_yard) * 0.06)
+	# Up and down again over the carry: nothing at either end, the apex in
+	# the middle. Higher for a longer shot and for a loftier one.
+	_flight_hop_height = sin(t * PI) * start_yard.distance_to(end_yard) * FLIGHT_APEX_SHARE * _flight_loft
 	_flight_trail.append(_flight_pos)
 	if _flight_trail.size() > 10:
 		_flight_trail.pop_front()
@@ -589,112 +792,13 @@ func _px_scale() -> float:
 	return min(scale_x, scale_y)
 
 
-func _to_px_polygon(yard_poly: PackedVector2Array) -> PackedVector2Array:
-	var out := PackedVector2Array()
-	out.resize(yard_poly.size())
-	for i in range(yard_poly.size()):
-		out[i] = _to_px(yard_poly[i])
-	return out
-
-
-# Draws horizontal mow-stripe bands (alternating tone) clipped to a polygon's
-# bounding box, giving the turf a groundskept, textured look instead of a
-# flat fill. Cheap approximation: draws full-width stripe rects then relies
-# on being layered under nothing else, so slight overdraw beyond the
-# polygon edge is fine since the surrounding tone is close in value.
-func _draw_mow_stripes(yard_poly: PackedVector2Array, base_col: Color, stripe_col: Color) -> void:
-	if yard_poly.is_empty():
-		return
-	var min_y: float = yard_poly[0].y
-	var max_y: float = yard_poly[0].y
-	var min_x: float = yard_poly[0].x
-	var max_x: float = yard_poly[0].x
-	for pt in yard_poly:
-		min_y = min(min_y, pt.y)
-		max_y = max(max_y, pt.y)
-		min_x = min(min_x, pt.x)
-		max_x = max(max_x, pt.x)
-
-	draw_colored_polygon(_to_px_polygon(yard_poly), base_col)
-
-	var stripe_width: float = 18.0  # yards per stripe band
-	var y: float = floor(min_y / stripe_width) * stripe_width
-	var band_index := 0
-	while y < max_y:
-		if band_index % 2 == 1:
-			var band_poly := PackedVector2Array([
-				Vector2(min_x, y), Vector2(max_x, y),
-				Vector2(max_x, min(y + stripe_width, max_y)), Vector2(min_x, min(y + stripe_width, max_y)),
-			])
-			_draw_clipped_polygon(band_poly, yard_poly, stripe_col)
-		y += stripe_width
-		band_index += 1
-
-
-# Intersects a rect-ish band with the target polygon before drawing, so
-# stripes stay inside the fairway/green/rough shape.
-func _draw_clipped_polygon(band: PackedVector2Array, clip_poly: PackedVector2Array, col: Color) -> void:
-	var clipped := Geometry2D.intersect_polygons(band, clip_poly)
-	for piece in clipped:
-		draw_colored_polygon(_to_px_polygon(piece), col)
-
-
 func _draw() -> void:
 	if not hole:
 		return
 
-	var extent := _yard_extent()
-
-	# Rough is the base/background tone; fairway, green, and hazards draw over it.
-	var rough_rect := PackedVector2Array([
-		Vector2(extent.position.x, extent.position.y),
-		Vector2(extent.position.x, extent.position.y + extent.size.y),
-		Vector2(extent.position.x + extent.size.x, extent.position.y + extent.size.y),
-		Vector2(extent.position.x + extent.size.x, extent.position.y),
-	])
-	_draw_mow_stripes(rough_rect, COLOR_ROUGH, COLOR_ROUGH_STRIPE)
-
-	_draw_mow_stripes(hole.fairway_polygon, COLOR_FAIRWAY, COLOR_FAIRWAY_STRIPE)
-	_draw_tree_line(hole.fairway_polygon, extent)
-	_draw_yardage_markers()
-
-	for hazard in hole.hazards:
-		var poly_px := _to_px_polygon(hazard.polygon)
-		if hazard.type == "water":
-			draw_colored_polygon(poly_px, COLOR_WATER)
-			_draw_water_ripples(hazard.polygon)
-		else:
-			draw_colored_polygon(poly_px, COLOR_BUNKER)
-			_draw_bunker_texture(hazard.polygon)
-			# Sandy edge outline so the bunker reads as a dug-out hazard.
-			var closed := poly_px.duplicate()
-			closed.append(poly_px[0])
-			draw_polyline(closed, COLOR_BUNKER_EDGE, 1.5)
-
-	_draw_green_fringe(hole.green_polygon)
-	_draw_mow_stripes(hole.green_polygon, COLOR_GREEN, COLOR_GREEN_STRIPE)
-
-	# Slope: shading over the whole hole, plus fall-line arrows on the
-	# green, where a yard of break decides a putt.
-	if _hillshade:
-		var top_left := _to_px(Vector2(extent.position.x, extent.position.y + extent.size.y))
-		var bottom_right := _to_px(Vector2(extent.position.x + extent.size.x, extent.position.y))
-		draw_texture_rect(_hillshade, Rect2(top_left, bottom_right - top_left), false)
-	_draw_green_slope()
-
-	# Tee marker: a small pair of tee-box pegs.
-	var tee_px := _to_px(hole.tee_pos)
-	draw_circle(tee_px + Vector2(-3, 0), 2.2, BogeyTheme.INK_SOFT)
-	draw_circle(tee_px + Vector2(3, 0), 2.2, BogeyTheme.INK_SOFT)
-
-	# Pin/flag with a soft ground shadow so it feels planted on the green.
-	var pin_px := _to_px(hole.pin_pos)
-	draw_circle(pin_px + Vector2(0, 2), 3.0, Color(0, 0, 0, 0.12))
-	draw_line(pin_px, pin_px + Vector2(0, -18), COLOR_PIN, 2.0)
-	var flag_pts := PackedVector2Array([
-		pin_px + Vector2(0, -18), pin_px + Vector2(10, -14), pin_px + Vector2(0, -10)])
-	draw_colored_polygon(flag_pts, COLOR_PIN)
-	draw_circle(pin_px, 2.5, BogeyTheme.INK)
+	# The ground itself — rough, fairway, hazards, green, slope shading,
+	# scenery, tee and flag — is already on screen: CourseArt painted it
+	# behind this node. From here down is only what changes during a hole.
 
 	# Shot trail: tee -> each prior landing spot -> current ball position,
 	# drawn as short dashes so it reads as a path etched into the grass
@@ -703,135 +807,36 @@ func _draw() -> void:
 		for i in range(shot_path.size() - 1):
 			_draw_dashed_line(_to_px(shot_path[i]), _to_px(shot_path[i + 1]), COLOR_TRAIL, 2.0, 6.0, 5.0)
 
-	# Waiting for the player's aim: a ring around the ball marks the origin
-	# so it reads as the pivot point, not just a static dot, plus four
-	# concentric bands showing exactly where each swing tier falls —
-	# Extreme Finesse (below the club's own minimum, worst odds), Finesse,
-	# Mid-range, and Full swing (best odds) — read straight from
-	# ShotResolver.tier_yardage_range() so the picture never drifts from
-	# what the Form draw actually does. Capped to the hole's own extent so
-	# a long club's outer band can't bulge into the dead space beyond the
-	# mapped course art.
-	# --- Club reach preview (hovering a bag card, before committing) -----
-	# Exactly the picture the shot itself shows, just previewed: the same
-	# tier bands, drawn by the same function, so hovering a club and
-	# committing to it can never disagree about where its tiers fall.
+	# --- Club yardages: hovering a bag card, and while aiming -----------
+	# The same arcs, drawn by the same function, so hovering a club and
+	# committing to it can never disagree about its yardages.
 	if not aiming and not preview_club.is_empty() and not _flight_active:
 		var prev_origin := _to_px(ball_pos)
-		_draw_tier_bands(preview_club, prev_origin, _px_scale())
-		# The same origin ring the live aim draws, so the ball reads as the
-		# pivot the bands radiate from in both views.
-		draw_arc(prev_origin, 9.0, 0, TAU, 20, COLOR_AIM_LINE, 2.0)
+		_draw_tier_bands(preview_club, prev_origin, _px_scale(), 0.0, hole.pin_pos - ball_pos)
 
 	if aiming:
-		var origin_px := _to_px(ball_pos)
-		var scale_px := _px_scale()
-		# Bands are drawn at their real radius, uncapped by the map's drawn
-		# extent — the crosshair itself is what's clamped inside the course
-		# (see _clamp_to_extent()), so a band reaching toward/past the pin is
-		# expected and simply gets naturally clipped by the Control's own
-		# rect when Godot rasterizes past its bounds.
-		_draw_tier_bands(aim_club, origin_px, scale_px, aim_max_range)
+		# Arcs are drawn at their real radius and simply clip at the
+		# Control's edge; the crosshair is what's clamped inside the course.
+		_draw_tier_bands(aim_club, _to_px(ball_pos), _px_scale(), aim_max_range,
+			aim_target - ball_pos)
 
-		draw_arc(origin_px, 9.0, 0, TAU, 20, COLOR_AIM_LINE, 2.0)
-
-	# --- Form-card landing preview (hovering a card in the Form hand) ----
-	# The exact spot this card puts the ball, drawn over the aim bands: a
-	# dashed flight line out to a ringed marker. Every Form card is fully
-	# deterministic, so this is a promise, not an estimate.
-	if preview_landing_active:
-		var from_px := _to_px(preview_landing_from)
-		var land_px := _to_px(preview_landing_pos)
-		var carry_px := _to_px(preview_carry_pos)
-		# Out of bounds outranks good/bad: a "good" card that still puts you
-		# off the course costs a stroke, and that is the headline.
-		var col: Color = COLOR_PREVIEW_GOOD if preview_landing_good else COLOR_PREVIEW_BAD
-		if preview_landing_out:
-			col = COLOR_PREVIEW_BAD
-		elif preview_landing_holed:
-			# Yellow regardless of whether the card itself is "good": a bad
-			# card that happens to put the ball on the cup still buys the
-			# roll, which is the best outcome on the table.
-			col = COLOR_AIM_HOLE_OUT
-
-		# Dashed so it reads as a projection rather than the solid trail
-		# used for shots already played. The flight runs to the carry spot;
-		# the run-out is dotted on from there to the rest marker.
-		var seg := carry_px - from_px
-		var seg_len := seg.length()
-		if seg_len > 1.0:
-			var dir := seg / seg_len
-			var dash := 9.0
-			var gap := 6.0
-			var t := 0.0
-			while t < seg_len:
-				var t2: float = min(t + dash, seg_len)
-				draw_line(from_px + dir * t, from_px + dir * t2,
-					Color(col, 0.75), 2.0)
-				t = t2 + gap
-		_draw_roll_path(preview_roll_path, col)
-		if carry_px.distance_to(land_px) > 4.0:
-			draw_arc(carry_px, 3.5, 0, TAU, 12, Color(col, 0.8), 1.5)
-
-		# Landing marker: a filled dot inside a ring, so it stays readable
-		# over both light fairway and dark rough.
-		draw_circle(land_px, 6.5, Color(col, 0.28))
-		draw_arc(land_px, 6.5, 0, TAU, 24, col, 2.0)
-		draw_circle(land_px, 2.0, col)
-
-		# Off the course: an X through the marker, so an OB landing is not
-		# just "a red dot slightly further out" but visibly a different
-		# outcome from a bad-but-playable one.
-		if preview_landing_holed:
-			# A halo ring around the cup marker, echoing the live aim's
-			# wider ring so both yellow states read as the same signal.
-			draw_arc(land_px, 12.0, 0, TAU, 26, Color(col, 0.6), 2.0)
-
-		if preview_landing_out:
-			var d := 9.0
-			draw_line(land_px + Vector2(-d, -d), land_px + Vector2(d, d), col, 2.0)
-			draw_line(land_px + Vector2(-d, d), land_px + Vector2(d, -d), col, 2.0)
-			draw_arc(land_px, 13.0, 0, TAU, 28, Color(col, 0.55), 1.5)
-
-	if aiming and aim_ghost_active:
-		# Where a clean strike of this aim comes down — wind and elevation
-		# move it off the crosshair. Carry only, no run-out: drawn faint,
-		# it's the baseline the Form card will bend.
-		var ghost_col := Color(BogeyTheme.INK, 0.55)
-		var ghost_px := _to_px(aim_ghost_carry)
-		draw_circle(ghost_px, 4.0, Color(COLOR_BALL, 0.7))
-		draw_arc(ghost_px, 4.0, 0, TAU, 14, ghost_col, 1.5)
-
-	if aiming and _hovering:
-		# Live crosshair: follows the cursor continuously; a click commits
-		# immediately at this spot. Turns warning-red when the current
-		# distance falls outside the club's own yardage band — Finesse/
-		# Extreme Finesse territory, where the Form draw skews bad — so the
-		# risk is visible right where you're aiming, not just in the side panel.
+	# The guide shows where you are aiming and nothing more. Wind, slope,
+	# run-out and the Form card all act on the shot, but reading them is the
+	# player's job: nothing on the map works out where the ball will finish.
+	if aiming and (_hovering or input_locked):
+		# Live crosshair: follows the cursor; a click commits at this spot.
+		# Claret below the club's shortest yardage (Extreme Finesse, where the
+		# Form draw is forced bad), paper-white otherwise.
 		var dist_now: float = ball_pos.distance_to(aim_target)
 		var out_of_band: bool = dist_now < aim_min_range
-		var crosshair_col := COLOR_AIM_WARNING if out_of_band else COLOR_AIM_LINE
-		# A hole-out line outranks the out-of-band warning: the shot being
-		# an awkward tier stops mattering the moment it buys a roll at the
-		# hole.
-		if aim_can_hole_out:
-			crosshair_col = COLOR_AIM_HOLE_OUT
+		var col: Color = BogeyTheme.FLAG if out_of_band else ARC_INK
 		var target_px := _to_px(aim_target)
-		draw_line(_to_px(ball_pos), target_px, crosshair_col, 2.0)
-		draw_arc(target_px, 7.0, 0, TAU, 16, crosshair_col, 2.0)
-		# A second, wider ring so the yellow state is unmistakable at a
-		# glance — the line alone is thin enough to miss mid-aim.
-		if aim_can_hole_out:
-			draw_arc(target_px, 12.0, 0, TAU, 24, Color(crosshair_col, 0.6), 2.0)
-		draw_line(target_px + Vector2(-8, 0), target_px + Vector2(8, 0), crosshair_col, 1.5)
-		draw_line(target_px + Vector2(0, -8), target_px + Vector2(0, 8), crosshair_col, 1.5)
+		_draw_aim_mark(_to_px(ball_pos), target_px, col, false)
+		_yardage_slip(target_px + Vector2(0, 17), "%d yds" % roundi(dist_now),
+			BogeyTheme.FLAG if out_of_band else BogeyTheme.INK)
 	elif not aiming and not _aim_active and not _flight_active and aim_target.distance_to(ball_pos) > 0.5:
-		# Last-committed aim target, shown while browsing clubs/tiers.
-		var target_px := _to_px(aim_target)
-		_draw_dashed_line(_to_px(ball_pos), target_px, COLOR_AIM_LINE, 1.5, 5.0, 4.0)
-		draw_arc(target_px, 6.0, 0, TAU, 16, COLOR_AIM_LINE, 1.5)
-		draw_line(target_px + Vector2(-8, 0), target_px + Vector2(8, 0), COLOR_AIM_LINE, 1.5)
-		draw_line(target_px + Vector2(0, -8), target_px + Vector2(0, 8), COLOR_AIM_LINE, 1.5)
+		# Last-committed aim, shown while the Form hand is read.
+		_draw_aim_mark(_to_px(ball_pos), _to_px(aim_target), ARC_INK, true)
 
 	# Aim tool: pivots at the ball's position, rotates to the degree offset,
 	# extends to the rolled distance. Sign convention must match Main.gd's
@@ -848,43 +853,138 @@ func _draw() -> void:
 		var end_yard: Vector2 = _aim_origin + dir * _aim_current_distance
 		var origin_px := _to_px(_aim_origin)
 		var end_px := _to_px(end_yard)
-		draw_line(origin_px, end_px, COLOR_AIM_LINE, 2.0)
-		draw_circle(end_px, 3.5, COLOR_AIM_LINE)
+		draw_line(origin_px + Vector2(0, 1), end_px + Vector2(0, 1), ARC_SHADOW, 3.0, true)
+		draw_line(origin_px, end_px, ARC_INK, 1.6, true)
+		draw_circle(end_px, 3.5, ARC_INK)
 
-	if hole.wind != Vector2.ZERO or aiming or preview_landing_active:
+	if hole.wind != Vector2.ZERO or aiming:
 		_draw_wind_dial()
+	if hole.pin_name != "":
+		_draw_pin_note()
+
+	# The other players' balls first, so the active player's own ball
+	# draws over the top of them and stays unambiguous.
+	for other in other_balls:
+		if _marker_hidden(other.pos):
+			continue
+		var other_px := _to_px(other.pos)
+		draw_circle(other_px + Vector2(0, 2), 3.0, COLOR_BALL_SHADOW)
+		draw_circle(other_px, 4.0, seat_color(int(other.index)))
+		draw_arc(other_px, 4.0, 0, TAU, 14, COLOR_BALL_OUTLINE, 1.2)
+
+	# What the last landing left behind goes under the ball.
+	_draw_fx()
 
 	# Ball in flight: a fading motion trail behind the current flight
 	# position, plus a drop shadow offset from the ball to sell a hop/arc,
 	# so the ball is visibly traceable across the screen mid-shot.
 	if _flight_active:
-		var n := _flight_trail.size()
-		for i in range(n - 1):
-			var a: float = float(i + 1) / float(n)
-			var c := COLOR_FLIGHT_TRAIL
-			c.a *= a * 0.6
-			var r: float = lerp(1.0, 4.0, a)
-			draw_circle(_to_px(_flight_trail[i]), r, c)
-		var shadow_px := _to_px(_flight_pos)
-		draw_circle(shadow_px, 4.0, COLOR_BALL_SHADOW)
-		var lift_px: float = _flight_hop_height * _px_scale()
-		var ball_px := shadow_px + Vector2(0, -lift_px)
-		draw_circle(ball_px, 4.5, COLOR_BALL)
-		draw_arc(ball_px, 4.5, 0, TAU, 14, COLOR_BALL_OUTLINE, 1.2)
-	else:
-		# The other players' balls first, so the active player's own ball
-		# draws over the top of them and stays unambiguous.
-		for other in other_balls:
-			var other_px := _to_px(other.pos)
-			draw_circle(other_px + Vector2(0, 2), 3.0, COLOR_BALL_SHADOW)
-			draw_circle(other_px, 4.0, seat_color(int(other.index)))
-			draw_arc(other_px, 4.0, 0, TAU, 14, COLOR_BALL_OUTLINE, 1.2)
-
+		if not _flight_sunk:
+			var n := _flight_trail.size()
+			for i in range(n - 1):
+				var a: float = float(i + 1) / float(n)
+				var c := COLOR_FLIGHT_TRAIL
+				c.a *= a * 0.6
+				var r: float = lerp(1.0, 4.0, a)
+				draw_circle(_to_px(_flight_trail[i]), r, c)
+			# How far up it is, 0 on the ground to 1 at the height of a full
+			# drive (a ballooned one goes a little past, and is capped).
+			var rise: float = clampf(_flight_hop_height / FLIGHT_FULL_RISE, 0.0, 1.25)
+			var shadow_px := _to_px(_flight_pos)
+			draw_circle(shadow_px + Vector2(0, 2), lerpf(3.5, 2.6, minf(rise, 1.0)),
+				Color(COLOR_BALL_SHADOW, COLOR_BALL_SHADOW.a * lerpf(1.0, 0.55, minf(rise, 1.0))))
+			var lift_px: float = _flight_hop_height * _px_scale()
+			var ball_px := shadow_px + Vector2(0, -lift_px)
+			var ball_r: float = BALL_RADIUS * lerpf(1.0, FLIGHT_SWELL, rise)
+			draw_circle(ball_px, ball_r, COLOR_BALL)
+			draw_arc(ball_px, ball_r, 0, TAU, 24, COLOR_BALL_OUTLINE, 1.5)
+	elif not _marker_hidden(ball_pos):
 		# Ball marker at its current resting position.
 		var ball_px := _to_px(ball_pos)
 		draw_circle(ball_px + Vector2(0, 2), 3.5, COLOR_BALL_SHADOW)
-		draw_circle(ball_px, 5.0, COLOR_BALL)
-		draw_arc(ball_px, 5.0, 0, TAU, 16, COLOR_BALL_OUTLINE, 1.5)
+		draw_circle(ball_px, BALL_RADIUS, COLOR_BALL)
+		draw_arc(ball_px, BALL_RADIUS, 0, TAU, 16, COLOR_BALL_OUTLINE, 1.5)
+
+	_draw_putt()
+
+
+# A putt on its way (see play_putt): the ball rolling to where it finished
+# and, if that's the hole, going down into it.
+func _draw_putt() -> void:
+	if _putts.is_empty():
+		return
+	var p: Dictionary = _putts[0]
+	var px := _to_px((p.from as Vector2).lerp(p.to, _putt_t))
+	if bool(p.holed) and _putt_drop > 0.0:
+		# Over the lip: the cup shows dark, and the ball sinks into it,
+		# shrinking and losing the light.
+		draw_circle(px, 3.6, Color(BogeyTheme.INK, 0.9))
+		if _putt_drop < 1.0:
+			var r: float = BALL_RADIUS * lerpf(1.0, 0.4, _putt_drop)
+			draw_circle(px + Vector2(0, 1.4 * _putt_drop), r, COLOR_BALL.darkened(0.55 * _putt_drop))
+		return
+	draw_circle(px + Vector2(0, 2), 3.5, COLOR_BALL_SHADOW)
+	draw_circle(px, BALL_RADIUS, COLOR_BALL)
+	draw_arc(px, BALL_RADIUS, 0, TAU, 16, COLOR_BALL_OUTLINE, 1.5)
+
+
+# The mark a landing leaves, for the fraction of a second it lasts. Sizes
+# are in pixels: these are gestures, not ground.
+func _draw_fx() -> void:
+	if _fx.is_empty():
+		return
+	var theme_id: String = hole.theme if hole else CourseTheme.DEFAULT
+	for fx in _fx:
+		var c := _to_px(fx.pos)
+		var k: float = clampf(float(fx.age) / float(fx.life), 0.0, 1.0)
+		var fade: float = 1.0 - k
+		var out: float = 1.0 - (1.0 - k) * (1.0 - k)   # fast out, slowing
+		var rng := RandomNumberGenerator.new()
+		rng.seed = int(fx.seed)
+		match fx.kind:
+			"thump":
+				# Short grass: a pitch mark's worth of ring.
+				draw_arc(c, lerpf(3.0, 13.0, out), 0, TAU, 28, Color(1.0, 1.0, 0.96, 0.75 * fade), 1.8)
+			"rough":
+				# Long grass: less ring, and blades thrown up that fall back.
+				draw_arc(c, lerpf(3.0, 10.0, out), 0, TAU, 24, Color(1.0, 1.0, 0.96, 0.5 * fade), 1.5)
+				var blade := CourseTheme.color(theme_id, "fairway").lightened(0.5)
+				for i in 9:
+					var dir := Vector2.from_angle(rng.randf_range(-PI * 0.95, -PI * 0.05))
+					var at := c + dir * rng.randf_range(8.0, 19.0) * out + Vector2(0, 10.0 * k * k)
+					draw_line(at, at + dir.rotated(rng.randf_range(-0.7, 0.7)) * 5.0, Color(blade, fade), 2.0)
+			"sand":
+				# A puff: a pale cloud spreading low over the crater, and
+				# grains thrown up and out that fall back as they fade. Paler
+				# than the bunker, or sand on sand wouldn't show.
+				var sand := CourseTheme.color(theme_id, "sand")
+				draw_arc(c, lerpf(3.0, 9.0, out), 0, TAU, 20, Color(sand.darkened(0.3), 0.6 * fade), 2.0)
+				draw_circle(c, lerpf(5.0, 17.0, out), Color(sand.lightened(0.4), 0.62 * fade))
+				for i in 15:
+					var dir := Vector2.from_angle(rng.randf_range(-PI * 0.95, -PI * 0.05))
+					var at := c + dir * rng.randf_range(11.0, 30.0) * out + Vector2(0, 18.0 * k * k)
+					draw_circle(at, rng.randf_range(1.4, 2.8) * lerpf(1.0, 0.6, k), Color(sand.lightened(0.55), fade))
+			"splash":
+				# Rings going out one after another, a white flash where it
+				# went in, and drops thrown up that fall back.
+				var light := CourseTheme.color(theme_id, "water_light").lightened(0.45)
+				for i in 3:
+					var late: float = float(i) * 0.16
+					if k <= late:
+						continue
+					var rk: float = (k - late) / (1.0 - late)
+					draw_arc(c, lerpf(3.0, 15.0 + 6.0 * float(i), 1.0 - (1.0 - rk) * (1.0 - rk)), 0, TAU, 32,
+						Color(light, 0.85 * (1.0 - rk)), 1.8)
+				if k < 0.3:
+					draw_circle(c, lerpf(5.5, 1.0, k / 0.3), Color(1, 1, 1, 0.9 * (1.0 - k / 0.3)))
+				for i in 8:
+					var dir := Vector2.from_angle(rng.randf_range(-PI, 0.0) if i < 6 else rng.randf_range(0.0, PI))
+					var reach: float = rng.randf_range(8.0, 19.0)
+					var at := c + dir * reach * out + Vector2(0, -11.0 * sin(PI * minf(k * 1.25, 1.0)))
+					draw_circle(at, rng.randf_range(1.1, 1.9), Color(1, 1, 1, 0.95 * fade))
+			"cup":
+				# In: one clean ring off the hole.
+				draw_arc(c, lerpf(4.0, 13.0, out), 0, TAU, 28, Color(1.0, 1.0, 0.96, 0.7 * fade), 1.6)
 
 
 # Wind dial in the top-left corner: an arrow the way it blows, and the
@@ -899,7 +999,7 @@ func _draw_wind_dial() -> void:
 		draw_string(font, c + Vector2(-18, 4), "Calm", HORIZONTAL_ALIGNMENT_CENTER, 36, 10, BogeyTheme.INK_SOFT)
 		return
 	var dir_px := Vector2(hole.wind.x, -hole.wind.y).normalized()
-	var col: Color = BogeyTheme.INK if speed < 18 else BogeyTheme.SAND_DEEP
+	var col: Color = BogeyTheme.INK if speed < 18 else BogeyTheme.FLAG
 	var tail := c - dir_px * 11.0
 	var tip := c + dir_px * 11.0
 	draw_line(tail, tip, col, 2.0)
@@ -907,7 +1007,27 @@ func _draw_wind_dial() -> void:
 	draw_colored_polygon(PackedVector2Array([tip + dir_px * 2.0, tip - dir_px * 6.0 + side * 4.5,
 		tip - dir_px * 6.0 - side * 4.5]), col)
 	var label := "%d mph" % speed
-	draw_string(font, c + Vector2(-26, 32), label, HORIZONTAL_ALIGNMENT_CENTER, 52, 11, col)
+	# On its own slip of card: the dial sits over whatever country the
+	# course is cut through, and ink on dark forest can't be read.
+	var slip := Rect2(c + Vector2(-19, 22), Vector2(38, 15))
+	draw_circle(slip.position + Vector2(0, 7.5), 7.5, Color(BogeyTheme.CARD_BG, 0.88))
+	draw_circle(slip.position + Vector2(slip.size.x, 7.5), 7.5, Color(BogeyTheme.CARD_BG, 0.88))
+	draw_rect(slip, Color(BogeyTheme.CARD_BG, 0.88))
+	draw_string(font, c + Vector2(-26, 33), label, HORIZONTAL_ALIGNMENT_CENTER, 52, 11, col)
+
+
+# Where today's pin is cut, in words, under the wind dial: the flag shows
+# it, but at the size a whole hole is drawn a pin eight yards off the
+# middle is easy to miss — and it's a club's difference.
+func _draw_pin_note() -> void:
+	var font := get_theme_default_font()
+	var label := "Pin · %s" % hole.pin_name
+	var w: float = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+	var slip := Rect2(Vector2(MARGIN + 3 + 7.5, MARGIN + 64), Vector2(w - 3.0, 15))
+	draw_circle(slip.position + Vector2(0, 7.5), 7.5, Color(BogeyTheme.CARD_BG, 0.88))
+	draw_circle(slip.position + Vector2(slip.size.x, 7.5), 7.5, Color(BogeyTheme.CARD_BG, 0.88))
+	draw_rect(slip, Color(BogeyTheme.CARD_BG, 0.88))
+	draw_string(font, slip.position + Vector2(-1.5, 11), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, BogeyTheme.INK)
 
 
 func _draw_dashed_line(from_px: Vector2, to_px: Vector2, col: Color, width: float, dash: float, gap: float) -> void:
@@ -920,193 +1040,3 @@ func _draw_dashed_line(from_px: Vector2, to_px: Vector2, col: Color, width: floa
 		var seg_end: float = min(travelled + dash, total)
 		draw_line(from_px + dir * travelled, from_px + dir * seg_end, col, width)
 		travelled += dash + gap
-
-
-func _draw_water_ripples(yard_poly: PackedVector2Array) -> void:
-	var min_y: float = yard_poly[0].y
-	var max_y: float = yard_poly[0].y
-	var min_x: float = yard_poly[0].x
-	var max_x: float = yard_poly[0].x
-	for pt in yard_poly:
-		min_y = min(min_y, pt.y)
-		max_y = max(max_y, pt.y)
-		min_x = min(min_x, pt.x)
-		max_x = max(max_x, pt.x)
-	var step: float = 10.0
-	var y: float = min_y + step * 0.5
-	var row := 0
-	while y < max_y:
-		var offset: float = 4.0 if row % 2 == 0 else 0.0
-		var x: float = min_x + offset
-		while x < max_x:
-			var pt := Vector2(x, y)
-			if Geometry2D.is_point_in_polygon(pt, yard_poly):
-				var p := _to_px(pt)
-				draw_arc(p, 2.0, 0, PI, 6, COLOR_WATER_RIPPLE, 1.0)
-			x += step
-		y += step
-		row += 1
-
-
-func _draw_bunker_texture(yard_poly: PackedVector2Array) -> void:
-	var min_y: float = yard_poly[0].y
-	var max_y: float = yard_poly[0].y
-	var min_x: float = yard_poly[0].x
-	var max_x: float = yard_poly[0].x
-	for pt in yard_poly:
-		min_y = min(min_y, pt.y)
-		max_y = max(max_y, pt.y)
-		min_x = min(min_x, pt.x)
-		max_x = max(max_x, pt.x)
-	var step: float = 7.0
-	var y: float = min_y + step * 0.5
-	var row := 0
-	while y < max_y:
-		var x: float = min_x + step * 0.5
-		while x < max_x:
-			var pt := Vector2(x, y)
-			if Geometry2D.is_point_in_polygon(pt, yard_poly):
-				var p := _to_px(pt)
-				draw_circle(p, 0.9, COLOR_BUNKER_EDGE)
-			x += step
-		y += step
-		row += 1
-
-
-# Scatters simple two-tone tree clusters along the rough just outside the
-# fairway polygon, so the hole reads as a corridor cut through woods
-# rather than a flat green shape floating on parchment. Trees are placed
-# at fixed offsets from sampled fairway edge points (deterministic per
-# hole, not randomized per redraw) so they don't jitter every frame.
-func _draw_tree_line(fairway_poly: PackedVector2Array, extent: Rect2) -> void:
-	var scale_px := _px_scale()
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 1337  # fixed seed: stable tree placement across redraws
-
-	var step_y: float = 26.0
-	var y: float = extent.position.y + 14.0
-	while y < extent.position.y + extent.size.y - 10.0:
-		var half_width := _fairway_half_width_at_y(fairway_poly, y)
-		if half_width > 0.0:
-			for side in [-1.0, 1.0]:
-				# Base offset clears the fairway edge with real margin; the
-				# per-cluster jitter below is small and always additive (never
-				# subtracted), so a tree can never jitter back onto the fairway.
-				var base_offset: float = rng.randf_range(14.0, 30.0)
-				var jitter_y: float = rng.randf_range(-8.0, 8.0)
-				var tree_yard := Vector2(side * (half_width + base_offset), y + jitter_y)
-				if tree_yard.x < extent.position.x or tree_yard.x > extent.position.x + extent.size.x:
-					continue
-				var cluster_size := rng.randi_range(1, 2)
-				for k in range(cluster_size):
-					var extra_out: float = rng.randf_range(0.0, 8.0)
-					var along: float = rng.randf_range(-5.0, 5.0)
-					var offset := Vector2(side * extra_out, along)
-					_draw_tree(_to_px(tree_yard + offset), scale_px, rng.randf_range(0.75, 1.15))
-		y += step_y
-
-
-# Finds the fairway polygon's approximate half-width at a given yard-space
-# y by scanning a horizontal ray for the fairway edge; returns 0 if y is
-# outside the fairway's vertical span (so trees don't spawn in the void
-# past the green or behind the tee).
-func _fairway_half_width_at_y(fairway_poly: PackedVector2Array, y: float) -> float:
-	var min_y: float = fairway_poly[0].y
-	var max_y: float = fairway_poly[0].y
-	for pt in fairway_poly:
-		min_y = min(min_y, pt.y)
-		max_y = max(max_y, pt.y)
-	if y < min_y or y > max_y:
-		return 0.0
-	var widest: float = 0.0
-	var probe_x: float = -120.0
-	while probe_x < 120.0:
-		if Geometry2D.is_point_in_polygon(Vector2(probe_x, y), fairway_poly):
-			widest = max(widest, abs(probe_x))
-		probe_x += 2.0
-	return max(widest, 8.0)
-
-
-func _draw_tree(px: Vector2, scale_px: float, size_mult: float) -> void:
-	var r: float = clamp(3.2 * scale_px * size_mult, 2.0, 9.0)
-	draw_circle(px + Vector2(1.5, 2.0), r * 0.85, COLOR_TREE_SHADOW)
-	draw_circle(px, r, COLOR_TREE_CANOPY_DARK)
-	draw_circle(px - Vector2(r * 0.28, r * 0.28), r * 0.7, COLOR_TREE_CANOPY)
-
-
-# Small tick marks + labels along the fairway's left rough at 100/150/200
-# yard-to-pin distances, like painted yardage markers on a real course.
-func _draw_yardage_markers() -> void:
-	if not hole:
-		return
-	var font := ThemeDB.fallback_font
-	for dist_to_pin in [100, 150, 200]:
-		var y: float = hole.pin_pos.y - dist_to_pin
-		if y <= hole.tee_pos.y + 5.0 or y >= hole.pin_pos.y - 5.0:
-			continue
-		var extent := _yard_extent()
-		var mark_yard := Vector2(extent.position.x + 4.0, y)
-		var p := _to_px(mark_yard)
-		draw_line(p + Vector2(0, -5), p + Vector2(0, 5), COLOR_MARKER, 1.5)
-		draw_string(font, p + Vector2(6, 4), "%d" % dist_to_pin, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, COLOR_MARKER)
-
-
-# A slightly darker-than-fairway fringe ring around the green, mowed
-# tighter than the rough but not yet putting-green height — the collar
-# real courses have between fairway/rough and the green surface proper.
-func _draw_green_fringe(green_poly: PackedVector2Array) -> void:
-	var center := Vector2.ZERO
-	for pt in green_poly:
-		center += pt
-	center /= green_poly.size()
-	var expanded := PackedVector2Array()
-	for pt in green_poly:
-		var dir := (pt - center)
-		expanded.append(pt + dir.normalized() * 6.0)
-	draw_colored_polygon(_to_px_polygon(expanded), COLOR_GREEN_FRINGE)
-
-
-# Dotted run-out: small beads along the roll path, so roll reads as a
-# different thing from the dashed flight.
-func _draw_roll_path(path: Array, col: Color) -> void:
-	if path.size() < 2:
-		return
-	var spacing := 5.0
-	var carry_over := 0.0
-	for i in range(path.size() - 1):
-		var a := _to_px(path[i])
-		var b := _to_px(path[i + 1])
-		var seg := a.distance_to(b)
-		var t := carry_over
-		while t < seg:
-			draw_circle(a.lerp(b, t / max(seg, 0.0001)), 1.4, col)
-			t += spacing
-		carry_over = t - seg
-
-
-# Fall-line chevrons on the green: point downhill, and only where it's
-# steep enough to matter.
-func _draw_green_slope() -> void:
-	if hole.green_tilt == Vector2.ZERO:
-		return
-	var r: float = hole.green_radius
-	var step: float = max(6.0, r / 2.5)
-	var col := Color(BogeyTheme.FAIRWAY_DEEP, 0.55)
-	var y := -r
-	while y <= r:
-		var x := -r
-		while x <= r:
-			var p: Vector2 = hole.pin_pos + Vector2(x, y)
-			if Geometry2D.is_point_in_polygon(p, hole.green_polygon) and p.distance_to(hole.pin_pos) > 3.0:
-				var g := hole.gradient_at(p)
-				if g.length() > 0.008:
-					var down := -g.normalized()
-					var c := _to_px(p)
-					var tip := _to_px(p + down * 2.0)
-					var dir_px := (tip - c).normalized()
-					var side := Vector2(-dir_px.y, dir_px.x)
-					var s := 3.0 + clampf(g.length() * 80.0, 0.0, 3.0)
-					draw_line(c + dir_px * s - side * 0.0, c - dir_px * s * 0.2 + side * s, col, 1.5)
-					draw_line(c + dir_px * s, c - dir_px * s * 0.2 - side * s, col, 1.5)
-			x += step
-		y += step

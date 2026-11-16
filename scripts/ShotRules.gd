@@ -27,6 +27,11 @@ const GIMME_YARDS := 0.7
 # Section 5 "Bad cards from hazards": the chance that a hazard lie leaves a
 # bad Form card in the player's Form deck.
 const FORM_DECAY_CHANCE := 1.0 / 3.0
+# ...and that a ball finishing in the rough does. Lower, because the rough
+# is found several times a round where sand and water are found once or
+# twice; between them the deck now gets dirtier through a scrappy round
+# instead of only ever cleaner.
+const ROUGH_DECAY_CHANCE := 1.0 / 5.0
 
 # A range session (skipping an end-of-hole draft) purges this many bad
 # cards from the Form deck.
@@ -146,8 +151,10 @@ static func draw_form(deck: FormDeck, bag: Array, club: Dictionary,
 		distance: float, lie: String, armed: Dictionary = {}, created: Array = []) -> Dictionary:
 	var tier := swing_tier(bag, club, distance, armed)
 	var lie_forced := lie_forces_card(bag, lie)
+	# Dealt from the family of the club in hand, and from no other
+	# (Section 4 "Form by club family").
 	var result := deck.draw_for_shot(tier, lie_forced,
-		Brands.bonus_draw_cards(bag), Brands.drops_worst_draw(bag))
+		Brands.bonus_draw_cards(bag), Brands.drops_worst_draw(bag), FormCard.family_of(club))
 	result["tier"] = tier
 	result["from_lie"] = lie_forced and tier != Tier.EXTREME_FINESSE
 	result["had_forced_card"] = result.forced
@@ -245,14 +252,20 @@ static func rim_out_position(pin: Vector2, landing_pos: Vector2, roll: int) -> V
 #   terrain        — what it finished on ("out", "water", "bunker", ...)
 #   ball_pos, lie  — where the next shot is played from, and its lie
 #   penalty        — penalty strokes (out of bounds and water: 1)
-#   hazard         — true when this counts as a hazard for Form decay
+#   hazard         — true when this is a hazard: sand, water, out of
+#                    bounds, or a lie a Shank downgraded. (Rough is not
+#                    one — club abilities that answer hazards don't fire
+#                    for it — though it can still cost a card, below.)
+#   form_risk      — the chance this leaves a bad card in the Form deck:
+#                    FORM_DECAY_CHANCE for a hazard, ROUGH_DECAY_CHANCE for
+#                    rough, 0 for anything else
 #   lie_downgraded — true when the card's Shank downgraded the lie
 static func settle(hole: HoleData, before_pos: Vector2, landing_pos: Vector2,
 		downgrades_lie: bool, bag: Array, club: Dictionary = {}) -> Dictionary:
 	var terrain := hole.terrain_at(landing_pos)
 	var out := {
 		"terrain": terrain, "ball_pos": landing_pos, "lie": terrain,
-		"penalty": 0, "hazard": false, "lie_downgraded": false,
+		"penalty": 0, "hazard": false, "form_risk": 0.0, "lie_downgraded": false,
 	}
 	match terrain:
 		"out":
@@ -279,6 +292,8 @@ static func settle(hole: HoleData, before_pos: Vector2, landing_pos: Vector2,
 			if ClubAbilities.fringe_putts(bag) and not hole.green_fringe_polygon.is_empty() \
 					and Geometry2D.is_point_in_polygon(landing_pos, hole.green_fringe_polygon):
 				out.lie = "green"
+			else:
+				out.form_risk = ROUGH_DECAY_CHANCE
 		"green":
 			pass
 		_:
@@ -290,6 +305,8 @@ static func settle(hole: HoleData, before_pos: Vector2, landing_pos: Vector2,
 		out.lie = ShotResolver.lie_downgrade(out.lie)
 		out.lie_downgraded = true
 		out.hazard = true
+	if out.hazard:
+		out.form_risk = FORM_DECAY_CHANCE
 	return out
 
 

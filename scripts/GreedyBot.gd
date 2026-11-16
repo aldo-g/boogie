@@ -69,6 +69,7 @@ const SHORTLIST := 6
 var rng := RandomNumberGenerator.new()
 var _putts: PackedFloat32Array = PackedFloat32Array()  # expected putts, index = half-yards
 var _plan: Dictionary = {}
+var _planned: bool = false   # _plan was made ahead by plan_shot() for the shot now due
 
 # What happened, for the harness. Reset with reset_log().
 var notes: Dictionary = {}
@@ -85,14 +86,39 @@ func reset_log() -> void:
 		"range": false, "draft": "", "cut": ""}
 
 
+# Works out the next shot without playing it; act() then plays that plan
+# instead of working it out again. This is the slow part of a turn (a few
+# hundred milliseconds), so the game runs it on a worker thread while the
+# bot "thinks". Safe there because it only reads the game and writes only
+# to this bot — as long as nothing changes the game until it's done.
+func plan_shot(main) -> void:
+	_plan = choose_shot(main)
+	_planned = true
+
+
+# True when act() would spend a lie-improving ability before choosing a
+# club, in which case the plan has to wait for the new lie.
+func will_improve_lie(main) -> bool:
+	return _can(main, "improve_lie")
+
+
+# Where it means to aim the shot it has just chosen a club for, so a
+# watcher can be shown the line before it commits.
+func planned_aim(fallback: Vector2) -> Vector2:
+	return _plan.get("aim", fallback)
+
+
 # Plays one action for whoever is active. False when there is nothing to do.
 func act(main) -> bool:
 	match main.state:
 		main.State.CLUB_SELECT:
 			if _can(main, "improve_lie"):
+				_planned = false
 				_use(main, "improve_lie")
 				return true
-			_plan = choose_shot(main)
+			if not _planned:
+				plan_shot(main)
+			_planned = false
 			main.on_club_select(_plan.index)
 		main.State.AIM:
 			for id in _plan.get("arm", []):
@@ -100,9 +126,9 @@ func act(main) -> bool:
 					_use(main, id)
 			main._on_aim_picked(_misjudge(main, _plan.get("aim", main.hole.pin_pos)))
 		main.State.FORM_DRAW:
-			if _maybe_form_ability(main):
-				return true
-			main.on_form_pick(choose_form(main))
+			var pick := form_step(main)
+			if pick >= 0:
+				main.on_form_pick(pick)
 		main.State.DRAFT:
 			var pick := choose_draft(main)
 			if pick < 0:
@@ -122,6 +148,16 @@ func act(main) -> bool:
 		_:
 			return false
 	return true
+
+
+# The Form phase, without playing the card: uses an ability if one is
+# worth it (returns -1 — the hand has changed, so ask again), otherwise
+# returns the index of the card to play. Split from act() so a watcher can
+# be shown the card before it's played.
+func form_step(main) -> int:
+	if _maybe_form_ability(main):
+		return -1
+	return choose_form(main)
 
 
 # The committed aim: the one it wanted, misjudged by aim_error.
@@ -183,8 +219,9 @@ func shot_cost(main, club: Dictionary, aim: Vector2, card: FormCard, lie: String
 		return cost + 0.95 * putts_from(2.0)
 	var s := ShotRules.settle(hole, from, out.rest, result.downgrades_lie, bag, club)
 	cost += float(s.penalty) + value_at(main, s.ball_pos, s.lie)
-	if s.hazard and ShotRules.hazard_can_decay_form(bag):
-		cost += DECAY_COST
+	# DECAY_COST is for a hazard's one-in-three; the rough's chance is lower.
+	if float(s.form_risk) > 0.0 and ShotRules.hazard_can_decay_form(bag):
+		cost += DECAY_COST * float(s.form_risk) / ShotRules.FORM_DECAY_CHANCE
 	if ShotRules.yips_effect(bag, card) == ShotRules.Yips.TAINTS_PUTT:
 		if s.lie == "green":
 			var d: float = s.ball_pos.distance_to(hole.pin_pos)
@@ -207,9 +244,17 @@ func _lie_for(main, club: Dictionary, armed: Dictionary) -> String:
 	return main.current_lie
 
 
-# The Form deck as the next draw sees it: [{card, p}], one entry per name.
-func deck_mix(fd: FormDeck) -> Array:
-	var pool: Array = fd.deck if fd.deck.size() >= 4 else fd.deck + fd.discard
+# The Form deck as the next draw of `family` sees it: [{card, p}], one
+# entry per name. Only that family's cards are in it — a swing is dealt
+# from no other (Section 4 "Form by club family").
+func deck_mix(fd: FormDeck, family: String = "") -> Array:
+	# A card with no family can be dealt to any (see FormDeck._in_family()).
+	var of_family := func(c): return family == "" or c.family == family or c.family == ""
+	var pool: Array = fd.deck.filter(of_family)
+	if pool.size() < 4:
+		pool = (fd.deck + fd.discard).filter(of_family)
+	if pool.is_empty():
+		pool = fd.deck + fd.discard
 	var counts := {}
 	for c in pool:
 		counts[c.name] = int(counts.get(c.name, 0)) + 1
@@ -249,10 +294,12 @@ func expected_shot(main, club: Dictionary, aim: Vector2, armed: Dictionary, mix:
 	for cname in created:
 		cap = minf(cap, shot_cost(main, club, aim, FormCard.make(cname), lie, armed))
 	if ShotRules.is_forced(bag, tier, lie):
+		# The forced card is one of the club family's own misses.
+		var misses: Array = FormCard.bad_names_for(FormCard.family_of(club))
 		var total := 0.0
-		for bad in FormCard.BAD_NAMES:
+		for bad in misses:
 			total += minf(shot_cost(main, club, aim, FormCard.make(bad), lie, armed), cap)
-		return total / FormCard.BAD_NAMES.size()
+		return total / misses.size()
 	var n := ShotRules.form_choice_count(bag, tier, lie)
 	if Brands.drops_worst_draw(bag):
 		n += 1
@@ -322,7 +369,7 @@ func choose_shot(main) -> Dictionary:
 	short.sort_custom(func(a, b): return a.rough < b.rough)
 	short = short.slice(0, SHORTLIST)
 
-	var mix := deck_mix(main.form_deck)
+	var mixes := {}  # club family -> the deck as a swing of it sees it
 	var toggles: Array = []
 	for id in ["ideal_club", "boost_tier"]:
 		if _can_aim_toggle(main, id):
@@ -335,7 +382,10 @@ func choose_shot(main) -> Dictionary:
 			var armed := {}
 			for id in arm:
 				armed[id] = true
-			var e := expected_shot(main, club, s.aim, armed, mix)
+			var fam := FormCard.family_of(club)
+			if not mixes.has(fam):
+				mixes[fam] = deck_mix(main.form_deck, fam)
+			var e := expected_shot(main, club, s.aim, armed, mixes[fam])
 			# A toggle has to earn its charge.
 			if not arm.is_empty():
 				e += 0.05
@@ -446,7 +496,7 @@ func _maybe_form_ability(main) -> bool:
 		var drawn := options.filter(func(c): return not c.created)
 		var costs: Array = []
 		var probs: Array = []
-		for m in deck_mix(main.form_deck):
+		for m in deck_mix(main.form_deck, FormCard.family_of(club)):
 			costs.append(shot_cost(main, club, aim, m.card, lie, armed))
 			probs.append(m.p)
 		if best_now - expected_best(costs, probs, drawn.size()) > 0.08:

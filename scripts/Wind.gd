@@ -18,12 +18,36 @@ const MAX_MPH := 35.0
 # in six blows 25+, and a full 35 mph gale is rare.
 const CALM_SKEW := 1.6
 const CALM_MPH := 3.0
+# The wind gets up as the round goes on (Course.late()), and it is the
+# quiet holes that go: a hole's draw is lifted by up to this share of the
+# terrain's ceiling, the lift fading to nothing as the draw nears the
+# ceiling. By the last hole on parkland a dead calm has become a 9 mph
+# breeze and the median has gone from ~11 mph to ~16 — but a gale is no
+# stronger, and hardly more common, than on the first tee. So the back
+# nine asks more of the low cards without handing out more disasters: a
+# 30 mph hole decides a round more than it tests it, and there were
+# enough of those.
+const LATE_LIFT := 0.26
 
 
-static func for_hole(seed: int, hole_n: int) -> Vector2:
+# The two constants above are the parkland numbers. The terrain a course
+# sits on (CourseTheme) can swap them: a links blows harder, a desert
+# barely at all. `theme` defaults to the course being played, which every
+# machine in an online round already agrees on — it travels with the
+# course — so the wind stays a pure function of things everyone has.
+#
+# `late` is how far through the round the hole is, 0 to 1; left at -1 it
+# is worked out from the course being played (Course.late()).
+static func for_hole(seed: int, hole_n: int, theme: String = "", late: float = -1.0) -> Vector2:
+	var t := CourseTheme.get_theme(Course.active_theme if theme == "" else theme)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([seed, hole_n, "wind"])
-	var mph: float = MAX_MPH * pow(rng.randf(), CALM_SKEW)
+	if late < 0.0:
+		late = Course.late(hole_n)
+	var top: float = float(t.get("wind_max", MAX_MPH))
+	var mph: float = top * pow(rng.randf(), float(t.get("wind_skew", CALM_SKEW)))
+	var room: float = 1.0 - mph / maxf(top, 0.001)
+	mph += clampf(late, 0.0, 1.0) * LATE_LIFT * top * room * room
 	var angle: float = rng.randf() * TAU
 	var w := Vector2.from_angle(angle) * mph
 	# Whole mph — it's what the player is shown, so it's what the shot uses.

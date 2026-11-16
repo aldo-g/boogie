@@ -28,6 +28,7 @@ func _initialize() -> void:
 	_check_pool()
 	_check_tiers()
 	_check_form_counts()
+	_check_families()
 	_check_settle()
 	_check_putting()
 	_check_effect_data()
@@ -164,6 +165,100 @@ func _check_form_counts() -> void:
 
 # A point on `hole` whose terrain is `kind`, found by sampling a grid —
 # Vector2.INF if the hole has none.
+# Section 4 "Form by club family": a swing is dealt only from the family
+# of the club in hand, and each family keeps its own form.
+func _check_families() -> void:
+	# Every card starts in exactly one family, about two good to one bad.
+	var start := FormDeck.new()
+	var form := start.family_form()
+	for fam in FormCard.FAMILIES:
+		var good: int = form[fam].good
+		var bad: int = form[fam].bad
+		_expect(good >= 2 * bad - 2 and bad >= 2, "%s starts about two good to one bad (%d / %d)" % [fam, good, bad])
+	for c in start.deck:
+		_expect(FormCard.FAMILIES.has(c.family), "%s starts in a family" % c.name)
+
+	# Deal after deal — through several reshuffles — every card belongs to
+	# the club's family, and no card is lost or made.
+	for club in [ClubRoster.make_club("Test Wood", 180, 230, "wood"),
+			ClubRoster.make_club("Test Iron", 100, 160, "iron"),
+			ClubRoster.make_club("Test Wedge", 40, 90, "wedge"),
+			ClubRoster.make_club("Test Putter", 0, 35, "putter")]:
+		var fam := FormCard.family_of(club)
+		var deck := FormDeck.new()
+		var total := deck.deck.size()
+		var mid := (float(club.min_yard) + float(club.max_yard)) / 2.0
+		var strays := 0
+		for i in range(40):
+			var drawn := ShotRules.draw_form(deck, [], club, mid, "fairway")
+			for c in drawn.cards:
+				strays += 0 if c.family == fam else 1
+			deck.return_unpicked(drawn.cards, -1)
+		_expect(strays == 0, "a %s swing is only dealt %s cards (%d strays)" % [fam, fam, strays])
+		_expect(deck.deck.size() + deck.discard.size() == total, "dealing %s loses no cards" % fam)
+
+	# A family's discards come back when that family runs out; the others'
+	# stay where they are.
+	var rd := FormDeck.new()
+	var iron_drawn := rd.draw_cards(3, "iron")
+	rd.return_unpicked(iron_drawn, -1)
+	var wood_total: int = form["wood"].good + form["wood"].bad
+	rd.return_unpicked(rd.draw_cards(wood_total, "wood"), -1)
+	var again := rd.draw_cards(1, "wood")
+	_expect(again[0].family == "wood", "a spent family reshuffles its own cards")
+	var iron_in_discard := 0
+	for c in rd.discard:
+		iron_in_discard += 1 if c.family == "iron" else 0
+	_expect(iron_in_discard == 3, "...and leaves the other families' discards alone (%d)" % iron_in_discard)
+
+	# A bigger hand than the family holds borrows rather than deals nothing.
+	var small := FormDeck.new()
+	var putter_total: int = form["putter"].good + form["putter"].bad
+	_expect(small.draw_cards(putter_total + 2, "putter").size() == putter_total + 2,
+		"a draw bigger than the family still fills the hand")
+
+	# A hazard's card joins the family of the club that found it, and is one
+	# of that family's own misses.
+	for fam in FormCard.FAMILIES:
+		var hd := FormDeck.new()
+		var before := hd.family_form()
+		var added := hd.add_bad_card_to_deck("", fam)
+		var after := hd.family_form()
+		_expect(added.family == fam and not added.good and FormCard.FAMILY_BAD[fam].has(added.name),
+			"a hazard leaves a %s miss in the %s form (%s)" % [fam, fam, added.name])
+		for other in FormCard.FAMILIES:
+			_expect(int(after[other].bad) == int(before[other].bad) + (1 if other == fam else 0),
+				"...and only there (%s after a %s hazard)" % [other, fam])
+	_expect(FormDeck.new().add_bad_card_to_deck("Skied").family == "wood", "a miss with no family goes to its home")
+
+	# A bunker's forced card is the club family's own kind of miss.
+	var sand := ShotRules.draw_form(FormDeck.new(), [], ClubRoster.make_club("Test Wedge", 40, 90, "wedge"), 60, "bunker")
+	_expect(sand.forced and sand.cards[0].created and FormCard.FAMILY_BAD["wedge"].has(sand.cards[0].name),
+		"sand forces a wedge miss on a wedge (%s)" % sand.cards[0].name)
+
+	# A played card comes back round; a created one does not.
+	var cyc := FormDeck.new()
+	var cyc_total := cyc.deck.size()
+	for i in range(60):
+		var hand_i := ShotRules.draw_form(cyc, [], ClubRoster.make_club("Test Wood", 180, 230, "wood"), 205, "fairway")
+		cyc.return_unpicked(hand_i.cards, 0)
+		cyc.discard_played(hand_i.cards[0])
+	_expect(cyc.deck.size() + cyc.discard.size() == cyc_total, "sixty shots leave the deck the size it started")
+	cyc.discard_played(FormCard.make("Pure Strike").as_created())
+	_expect(cyc.deck.size() + cyc.discard.size() == cyc_total, "a created card exhausts when played")
+
+	# A purge with a family clears that family first, then any.
+	var pd := FormDeck.new()
+	var iron_bad := pd.bad_count("iron")
+	var all_bad := pd.bad_count()
+	pd.purge_bad(1, "iron")
+	_expect(pd.bad_count("iron") == iron_bad - 1 and pd.bad_count() == all_bad - 1, "a family purge takes that family's card")
+	pd.purge_bad(iron_bad - 1, "iron")
+	_expect(pd.bad_count("iron") == 0, "...down to none")
+	pd.purge_bad(1, "iron")
+	_expect(pd.bad_count() == all_bad - iron_bad - 1, "...and then takes one from elsewhere")
+
+
 func _find(hole: HoleData, kind: String) -> Vector2:
 	var r := hole.bounds.grow(30.0)
 	for yi in range(0, 120):
@@ -198,10 +293,18 @@ func _check_settle() -> void:
 					_expect(s.penalty == 0 and s.lie == "bunker" and s.hazard, "a bunker is a hazard lie")
 				_:
 					_expect(s.penalty == 0 and s.lie == kind and not s.hazard, "%s is a plain lie" % kind)
+			# What it can cost the Form deck: a hazard one time in three, the
+			# rough one in five (it isn't a hazard, but it isn't free), and
+			# short grass nothing.
+			var risk: float = ShotRules.FORM_DECAY_CHANCE if kind in ["out", "water", "bunker"] \
+				else (ShotRules.ROUGH_DECAY_CHANCE if kind == "rough" else 0.0)
+			_expect(is_equal_approx(float(s.form_risk), risk),
+				"%s risks a bad card %.2f of the time, not %.2f (hole %d)" % [kind, float(s.form_risk), risk, n])
 
 		# A Shank downgrades the lie, unless Callowell 7 blocks it.
 		var shank := ShotRules.settle(hole, fairway, fairway, true, [])
 		_expect(shank.lie_downgraded and shank.lie == ShotResolver.lie_downgrade("fairway"), "Shank downgrades the lie")
+		_expect(is_equal_approx(float(shank.form_risk), ShotRules.FORM_DECAY_CHANCE), "a Shanked lie risks a card like a hazard")
 		var blocked := ShotRules.settle(hole, fairway, fairway, true, _brand_bag("callowell", 7))
 		_expect(not blocked.lie_downgraded and blocked.lie == "fairway", "Callowell 7 blocks the Shank downgrade")
 	for kind in ["out", "water", "bunker", "rough", "green", "fairway"]:
@@ -268,15 +371,18 @@ func _check_effect_data() -> void:
 	for c in deck:
 		_expect(not ["Pure Strike", "Big Strike", "Steady Hands"].has(c.name), "%s is not in the Form deck" % c.name)
 		good += 1 if c.good else 0
-	_expect(good == 28 and deck.size() == 42, "the Form deck is 28 good / 14 bad (%d / %d)" % [good, deck.size() - good])
+	_expect(good == 35 and deck.size() == 53, "the Form deck is 35 good / 18 bad (%d / %d)" % [good, deck.size() - good])
 	# Every card in the game can be made by name (decks travel online as
 	# names), is on the list for its side, and has a caddy line.
 	for n in FormCard.BAD_NAMES + FormCard.GOOD_NAMES:
 		var c := FormCard.make(n)
 		_expect(c.name == n and c.good == FormCard.GOOD_NAMES.has(n), "%s is made as itself" % n)
 		_expect(preload("res://scripts/Caddy.gd").CARD_KEYS.has(n) or ["Steady Hands", "Yips"].has(n), "the caddy knows %s" % n)
-	for n in FormCard.DECK_MIX:
-		_expect(FormCard.BAD_NAMES.has(n) or FormCard.GOOD_NAMES.has(n), "%s in the deck mix is a real card" % n)
+	for fam in FormCard.FAMILIES:
+		for n in FormCard.FAMILY_MIX[fam]:
+			_expect(FormCard.BAD_NAMES.has(n) or FormCard.GOOD_NAMES.has(n), "%s in the %s mix is a real card" % [n, fam])
+		for n in FormCard.FAMILY_BAD[fam]:
+			_expect(FormCard.BAD_NAMES.has(n), "%s, a %s miss, is a bad card" % [n, fam])
 
 
 func _degrees(bag: Array, club: Dictionary, card_name: String, lie: String = "fairway", armed: Dictionary = {}) -> float:

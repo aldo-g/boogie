@@ -15,6 +15,10 @@ extends RefCounted
 
 static var player_count: int = 1
 
+# Seats played by the computer in a local round: seat index -> a
+# Rivals.gd skill id. Empty means every seat is a person. Ignored online.
+static var cpu_seats: Dictionary = {}
+
 # --- Online rounds -----------------------------------------------------
 # False for solo and hot-seat, where every seat is played from this
 # machine and any input is legitimate.
@@ -43,6 +47,7 @@ static var return_to_editor: bool = false
 # previous online session can't leak settings into it.
 static func reset_to_local(count: int) -> void:
 	player_count = count
+	cpu_seats = {}
 	online = false
 	my_seat = 0
 	seat_names = {}

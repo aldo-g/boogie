@@ -69,10 +69,12 @@ const SECTIONS := [
 		],
 	},
 	{
-		"heading": "Font",
-		"note": "",
+		"heading": "Typefaces",
+		"note": "SIL Open Font License 1.1",
 		"lines": [
 			"Alex Brush — Robert Leuschke",
+			"Cormorant Garamond — Christian Thalmann, Catharsis Fonts",
+			"Jost — Owen Earl, indestructible type*",
 		],
 	},
 ]

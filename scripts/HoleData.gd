@@ -9,27 +9,44 @@ extends RefCounted
 #
 # Each hole is a CENTRELINE, not a rectangle: an array of
 # Vector3(x_offset, yards_out, corridor_width) stations, plus an ellipse
-# for the green and its bunkers. CourseShape turns that into smooth,
-# curving polygons, so doglegs dogleg, pinched holes pinch, and the greens
-# sit off-axis. Yard-space is unchanged: (0,0) at the tee, +y to the pin.
+# for the green and its bunkers. CourseShape turns that into flowing
+# shapes — the fairway a ribbon along one curve through the stations, the
+# water a shoreline through its corner points, greens and bunkers pulled
+# off the oval — so doglegs sweep, pinched holes pinch, and the greens sit
+# off-axis. The ground in play is shaped the same way: not a box round
+# the hole but everything within reach of it (see "The ground in play").
+# Yard-space is unchanged: (0,0) at the tee, +y to the pin.
 #
 # To reshape a hole, move its stations — widths and offsets in yards. To
 # add one, add an entry to HOLES; the builder does the rest.
 # ---------------------------------------------------------
 
 # The built-in course's length. The course being PLAYED may be shorter —
-# ask Course.hole_count(), not this.
+# ask Course.hole_count(), not this. (The game's other courses are course
+# files — see CourseLibrary.)
 const HOLE_COUNT := 18
 
 var par: int
 var yardage: float
 var tee_pos: Vector2
+# Where the hole is cut. build() puts it in the middle of the green; a
+# round moves it (for_round(), Pins.gd). Everything that plays to the hole
+# reads this. Everything about the GREEN — its tilt, its shape, where the
+# yardage markers measure to — hangs off green_pos, which never moves.
 var pin_pos: Vector2
+var green_pos: Vector2
+var pin_name: String = ""   # "back left", once a round has cut it; "" before
 var fairway_polygon: PackedVector2Array
 var green_polygon: PackedVector2Array
 var green_fringe_polygon: PackedVector2Array  # collar, for drawing only
 var hazards: Array  # [{ "type": "bunker"/"water", "polygon": PackedVector2Array }, ...]
-var bounds: Rect2   # playable extent in yards; outside it is out of bounds
+# The ground in play: one outline (more only if parts of a hole don't
+# connect). Outside every one of them is out of bounds. `bounds` is the
+# box that holds them — what the map frames and the aim is kept inside —
+# and is NOT itself the edge of play any more. A hole made without a play
+# area (HoleData.new() by hand) falls back to the box alone.
+var play_polygons: Array = []
+var bounds: Rect2
 
 # Elevation (see height_at()). Authored in feet, because that's how golfers
 # talk about it; everything the game computes with is in yards.
@@ -37,6 +54,17 @@ var elev_stations: Array = []     # Vector3(yards_out, height_ft, cross_grade_pc
 var spine_centres: Array = []     # Vector2(x, yards_out) — the centreline the cross-fall hangs off
 var green_tilt: Vector2 = Vector2.ZERO  # grade % the green falls TOWARD, in yard-space
 var green_radius: float = 20.0
+var green_radii: Vector2 = Vector2(20, 20)   # across, along — before rotation
+var green_rot: float = 0.0                   # degrees
+
+# The terrain the course sits on (CourseTheme), stamped on by build().
+# `roll_scale` is that terrain's firmness — the run-out multiplier — held
+# here so a shot's outcome stays a pure function of the hole it's played
+# on. `number` seeds what no two holes should share: the scenery, and
+# the lie of the land (_lie()).
+var theme: String = CourseTheme.DEFAULT
+var roll_scale: float = 1.0
+var number: int = 1
 
 # This hole's wind for the current round: mph, pointing the way it BLOWS
 # (yard-space, +y toward the pin). Not part of the hole's layout — it's
@@ -51,6 +79,7 @@ func _init(p_par: int, p_yardage: float, p_tee: Vector2, p_pin: Vector2,
 	yardage = p_yardage
 	tee_pos = p_tee
 	pin_pos = p_pin
+	green_pos = p_pin
 	fairway_polygon = p_fairway
 	green_polygon = p_green
 	hazards = p_hazards
@@ -58,15 +87,19 @@ func _init(p_par: int, p_yardage: float, p_tee: Vector2, p_pin: Vector2,
 	bounds = _compute_bounds()
 
 
-# The playable extent of the hole, in yards. Anything outside is out of
-# bounds (Rule 18 — stroke and distance).
+# --- The ground in play ----------------------------------------------
+# Anything outside it is out of bounds (Rule 18 — stroke and distance).
 #
-# Computed from the hole's own geometry rather than from the map view's
-# _yard_extent(), which depends on the size of the Control it is drawn
-# into: where the ball is out of play is a rule, and must not change when
-# the window is resized. The two are deliberately kept in agreement — the
-# view uses the same -60/+60 x floor and the same tee/pin margins — so the
-# green painted on screen is exactly the ground that counts as in play.
+# It is worked out from the hole's own shapes, never from the map view,
+# which depends on the size of the Control it is drawn into: where the
+# ball is out of play is a rule, and must not change when the window is
+# resized. build() makes it by growing each part of the hole by a margin
+# and merging the lot (see _play_area()); the map paints exactly that
+# outline and plants the white stakes along it, so the ground painted as
+# in play is the ground that counts as in play.
+#
+# This is the fallback box for a hole with no play area: the shapes'
+# extent, at least 60 yards either side of the tee line.
 func _compute_bounds() -> Rect2:
 	var min_x: float = -60.0
 	var max_x: float = 60.0
@@ -85,51 +118,124 @@ func _compute_bounds() -> Rect2:
 	return Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
 
 
-# True when a point lies outside the hole's playable extent.
+# How far the ground in play reaches beyond each part of a hole, in yards.
+# Chosen to give about the room the old 120-yard box gave beside a
+# fairway, a little less beside a green and a little more behind one.
+const PLAY_LINE := 38.0      # either side of the line of play, tee to pin
+const PLAY_FAIRWAY := 34.0   # beyond the fairway's edge
+const PLAY_GREEN := 26.0     # beyond the green's
+const PLAY_BUNKER := 12.0    # beyond a bunker's
+const PLAY_WATER := 8.0      # beyond a shoreline...
+const PLAY_WATER_REACH := 30.0  # ...but water only this far past the rest:
+                                # a burn or the sea runs on out of play
+const PLAY_NOTCH := 14.0        # notches in the outline narrower than twice this are filled
+const PLAY_EDGE_STEP := 12.0    # yards between points on the outline
+const PLAY_EDGE_WANDER := 6.0   # how far the outline strays, either way
+
+
+# True when a point lies outside the ground in play.
 func is_out_of_bounds(point: Vector2) -> bool:
-	return not bounds.has_point(point)
+	if not bounds.has_point(point):
+		return true
+	if play_polygons.is_empty():
+		return false
+	for poly in play_polygons:
+		if Geometry2D.is_point_in_polygon(point, poly):
+			return false
+	return true
+
+
+# The nearest spot in play to `point` — `point` itself if it already is.
+# For keeping an aim on the course.
+func nearest_in_bounds(point: Vector2) -> Vector2:
+	if not is_out_of_bounds(point):
+		return point
+	if play_polygons.is_empty():
+		return point.clamp(bounds.position, bounds.end)
+	var best := point
+	var best_d := INF
+	for poly in play_polygons:
+		var n: int = poly.size()
+		for i in n:
+			var c: Vector2 = Geometry2D.get_closest_point_to_segment(point, poly[i], poly[(i + 1) % n])
+			var d: float = point.distance_squared_to(c)
+			if d < best_d:
+				best_d = d
+				best = c
+	# A step over the line, so the spot itself counts as in play.
+	for nudge in [0.5, 1.5, 4.0]:
+		var inside: Vector2 = best + (best - point).normalized() * nudge
+		if not is_out_of_bounds(inside):
+			return inside
+	return best
 
 
 # Which terrain a point falls in. Priority: green > hazards > fairway >
 # rough. The fringe is cosmetic and plays as fairway.
 func terrain_at(point: Vector2) -> String:
-	# Checked first: a point off the course is out of bounds even if it
-	# would otherwise fall inside a polygon that extends past the edge.
-	if is_out_of_bounds(point):
+	if not bounds.has_point(point):
 		return "out"
+	# Green, sand and fairway are in play by construction — the play area
+	# is built outward from them — so only water and open ground need
+	# testing against its outline. (That test is the costly one, and this
+	# runs for every half-yard a ball rolls.)
 	if Geometry2D.is_point_in_polygon(point, green_polygon):
 		return "green"
 	for hazard in hazards:
 		if Geometry2D.is_point_in_polygon(point, hazard.polygon):
+			# Water can run on past the stakes: out there it's out of bounds.
+			if hazard.type == "water" and is_out_of_bounds(point):
+				return "out"
 			return hazard.type
 	if Geometry2D.is_point_in_polygon(point, fairway_polygon):
 		return "fairway"
-	return "rough"
+	return "out" if is_out_of_bounds(point) else "rough"
 
 
 # --- Elevation -------------------------------------------------------
 # One smooth height for any point on the hole, in yards. Pure function of
 # the authored data, so every machine and every preview agrees on it.
 #
-# Three layers:
+# Four layers:
 #   1. the long profile — station heights along the hole, eased so the
 #      ground never kinks at a station;
 #   2. cross-fall — the fairway tilted sideways about its own centreline;
-#   3. the green — a flat tilted plane, blended in over its surrounds, so
+#   3. the lie of the land — a hill doesn't run dead square across a hole.
+#      Off the line of play the ground is a little further up or down the
+#      profile than its yards-out says (_lie()), so a climb comes round a
+#      shoulder or up a hollow and its contours bend with it;
+#   4. the green — a flat tilted plane, blended in over its surrounds, so
 #      a green reads one way and doesn't inherit the hill it sits on.
 const FEET_PER_YARD := 3.0
+
+# The lie of the land, in yards along the profile. Two swings, each
+# changing slowly down the hole and each nothing at all on the line of
+# play, so the profile a hole was given is exactly the profile it has
+# there (and the one the elevation strip draws):
+#   slant — contours cross the line of play at an angle, not square;
+#   bow   — they curl forward or back as they run out to the sides.
+# It only moves ground along the profile, so it adds no height the
+# stations don't have, and level ground stays level.
+const LIE_SLANT := 0.3         # the most a contour slants: yards along per yard across
+const LIE_SLANT_REACH := 60.0  # yards off the line where the slant starts to level out
+const LIE_BOW := 16.0          # the most a contour bows, far out to the side
+const LIE_BOW_REACH := 28.0    # yards off the line where the bow is half grown
+const LIE_SLANT_WAVE := 200.0  # yards down the hole for the slant to swing over and back
+const LIE_BOW_WAVE := 260.0    # ...and the bow
 
 func height_at(p: Vector2) -> float:
 	var base := _ground_height(p)
 	if green_tilt == Vector2.ZERO and elev_stations.is_empty():
 		return base
-	var d: float = p.distance_to(pin_pos)
+	# Hung off the middle of the green, not the pin: the green is the same
+	# green wherever the hole is cut on it.
+	var d: float = p.distance_to(green_pos)
 	# Fully the green plane out to its edge, fully the hillside by 1.8x.
 	var w: float = 1.0 - smoothstep(green_radius, green_radius * 1.8, d)
 	if w <= 0.0:
 		return base
-	var plane: float = _profile_ft(pin_pos.y) / FEET_PER_YARD \
-		- green_tilt.dot(p - pin_pos) / 100.0
+	var plane: float = _profile_ft(green_pos.y) / FEET_PER_YARD \
+		- green_tilt.dot(p - green_pos) / 100.0
 	return lerpf(base, plane, w)
 
 
@@ -142,9 +248,24 @@ func gradient_at(p: Vector2) -> Vector2:
 
 
 func _ground_height(p: Vector2) -> float:
-	var cross_pct: float = _station_lerp(p.y, 2)
-	return _profile_ft(p.y) / FEET_PER_YARD \
-		- cross_pct / 100.0 * (p.x - centre_x_at(p.y))
+	var off: float = p.x - centre_x_at(p.y)
+	var out: float = p.y + _lie(p.y, off)
+	return _profile_ft(out) / FEET_PER_YARD \
+		- _station_lerp(out, 2) / 100.0 * off
+
+
+# How many yards further along the profile (+) or back (-) the ground is,
+# `off` yards to the side of the line of play at `y` yards out. `number`
+# sets where along the hole each swing starts, so no two holes lie alike.
+func _lie(y: float, off: float) -> float:
+	if elev_stations.size() < 2:
+		return 0.0
+	var slant: float = off / LIE_SLANT_REACH
+	var bow: float = off / LIE_BOW_REACH
+	bow *= bow
+	var turn: float = float(number) * 2.4
+	return LIE_SLANT * sin(y * TAU / LIE_SLANT_WAVE + turn) * off / sqrt(1.0 + slant * slant) \
+		+ LIE_BOW * sin(y * TAU / LIE_BOW_WAVE + turn * 1.7 + 1.0) * bow / (1.0 + bow)
 
 
 func _profile_ft(y: float) -> float:
@@ -184,6 +305,40 @@ func centre_x_at(y: float) -> float:
 		if y <= b.y:
 			return lerpf(a.x, b.x, (y - a.y) / max(b.y - a.y, 0.001))
 	return spine_centres[n - 1].x
+
+
+# --- The pin ---------------------------------------------------------
+# How much green is always left between the hole and the edge, in yards.
+const PIN_EDGE_MARGIN := 4.0
+
+# A place to cut the hole: `depth` of the way from the middle of the green
+# to its edge (0 to 1) in direction `dir`, given in the green's own axes —
+# x across it, y along it, before its rotation. Drawn back toward the
+# middle until PIN_EDGE_MARGIN yards of green lie all round it, so on a
+# small or pinched green a "tucked" pin is simply less tucked.
+func pin_spot(dir: Vector2, depth: float) -> Vector2:
+	if dir == Vector2.ZERO or green_polygon.is_empty():
+		return green_pos
+	var reach := Vector2(dir.x * green_radii.x, dir.y * green_radii.y).rotated(deg_to_rad(green_rot))
+	var d := clampf(depth, 0.0, 1.0)
+	while d > 0.049:
+		var spot := green_pos + reach * d
+		var room := true
+		for k in 8:
+			if not Geometry2D.is_point_in_polygon(spot + Vector2.from_angle(TAU * float(k) / 8.0) * PIN_EDGE_MARGIN, green_polygon):
+				room = false
+				break
+		if room:
+			return spot
+		d -= 0.05
+	return green_pos
+
+
+# Cuts the hole at `spot` (which must be on the green — pin_spot() gives
+# such spots) and names where that is.
+func cut_pin(spot: Vector2) -> void:
+	pin_pos = spot
+	pin_name = Pins.describe(self)
 
 
 # Feet above (+) or below (-) the tee — for labels.
@@ -411,54 +566,158 @@ static func hole(n: int) -> HoleData:
 	if n < 1 or n > Course.hole_count():
 		push_error("HoleData.hole(): no hole defined for index %d" % n)
 		n = 1
-	return build(Course.hole_def(n), n)
+	return build(Course.hole_def(n), n, Course.active_theme)
 
 
-# Builds a playable hole from one definition. `n` only seeds the organic
-# edge wobble, so the same definition always draws the same outline.
-static func build(d: Dictionary, n: int) -> HoleData:
+# Hole n of the active course as it plays in ONE round: the hole itself,
+# plus the two things that change from round to round — the wind, and
+# where the pin is cut. Both are pure functions of the round's seed and
+# the hole number (Wind.gd, Pins.gd), so every machine in an online round
+# builds the same hole from the one seed it was sent. Anything that plays
+# a hole should build it with this; hole() is the bare layout.
+static func for_round(n: int, seed: int) -> HoleData:
+	var h := hole(n)
+	h.wind = Wind.for_hole(seed, n)
+	h.cut_pin(Pins.for_hole(seed, n, h))
+	return h
+
+
+# Builds a playable hole from one definition. `n` seeds the organic edge
+# wobble and the lie of the land, so the same definition as the same hole
+# number always makes the same hole.
+# `p_theme` is the course's terrain: it sets the firmness and the look,
+# never the shape.
+static func build(d: Dictionary, n: int, p_theme: String = CourseTheme.DEFAULT) -> HoleData:
 	var seed: float = float(n) * 1.7
 	var spine: Array = d.spine
 	var g: Dictionary = d.green
 
-	var fairway := CourseShape.smooth(CourseShape.organic(CourseShape.corridor(spine), 26.0, 5.0, seed), 5)
-	var green := CourseShape.smooth(CourseShape.ellipse(g.pos, g.radii, g.rot, 24, 0.07, seed + 3.0), 4)
-	var fringe := CourseShape.grow(green, 6.0)
-
-	# Approach neck: only where a fairway actually runs in. The par 3s
-	# play a rough carry from the tee apron, which is what their identity
-	# text calls for.
+	# The fairway runs on into the mouth of the green: one more station,
+	# just short of the pin and about as wide as the green. Only where a
+	# fairway actually runs in — the par 3s play a rough carry from the tee
+	# apron, which is what their identity text calls for.
+	var stations: Array = spine.duplicate()
 	var last: Vector3 = spine[spine.size() - 1]
 	if last.y > 60.0:
-		var neck := PackedVector2Array([
-			Vector2(last.x - last.z * 0.46, last.y - 14.0),
-			Vector2(last.x + last.z * 0.46, last.y - 14.0),
-			Vector2(g.pos.x + g.radii.x * 0.6, g.pos.y - g.radii.y * 0.5),
-			Vector2(g.pos.x - g.radii.x * 0.6, g.pos.y - g.radii.y * 0.5),
-		])
-		var neck_shape := CourseShape.smooth(CourseShape.organic(neck, 22.0, 3.5, seed + 17.0), 4)
-		fairway = CourseShape.union_largest(fairway, neck_shape)
+		var mouth := Vector3(g.pos.x, g.pos.y - g.radii.y * 0.35,
+			clampf(g.radii.x * 1.15, 14.0, maxf(last.z, 14.0)))
+		if mouth.y > last.y + 12.0:
+			stations.append(mouth)
+	var ribbon := CourseShape.ribbon(stations, 8.0, 3.5, seed, 5.0)
+	var fairway: PackedVector2Array = ribbon.poly
+	var green := CourseShape.smooth(CourseShape.lobed(g.pos, g.radii, g.rot, 24, 0.05, 0.07, seed + 3.0), 4)
+	var fringe := CourseShape.grow(green, 6.0)
 
 	var hazards: Array = []
 	var index := 0
 	for h in d.hazards:
 		if h.type == "water":
-			hazards.append({
-				"type": "water",
-				"polygon": CourseShape.smooth(CourseShape.organic(h.poly, 13.0, 9.5, seed + 5.0 + float(index)), 4),
-			})
+			hazards.append({"type": "water", "polygon": _shoreline(h.poly, seed + 5.0 + float(index))})
 		else:
 			hazards.append({
 				"type": "bunker",
-				"polygon": CourseShape.smooth(CourseShape.ellipse(h.pos, h.radii, h.rot, 15, 0.16, seed + 9.0 + float(index)), 3),
+				"polygon": CourseShape.smooth(CourseShape.lobed(h.pos, h.radii, h.rot, 15, 0.10, 0.14, seed + 9.0 + float(index)), 3),
 			})
 		index += 1
 
 	var h := HoleData.new(d.par, d.yardage, Vector2(spine[0].x, 0.0), g.pos, fairway, green, hazards, fringe)
+	h._play_area(ribbon.centre, seed + 21.0)
 	h.elev_stations = d.get("elev", [])
 	h.green_tilt = d.get("green_tilt", Vector2.ZERO)
 	h.green_radius = max(g.radii.x, g.radii.y)
+	h.green_radii = g.radii
+	h.green_rot = float(g.rot)
+	h.theme = CourseTheme.sanitise(p_theme)
+	h.roll_scale = CourseTheme.roll_scale(h.theme)
+	h.number = n
 	for st in spine:
 		h.spine_centres.append(Vector2(st.x, st.y))
 	h.spine_centres.append(g.pos)
 	return h
+
+
+# Water: a shoreline through the authored corner points, with a little
+# wander — less on a narrow burn than on a lake, so a stream can't be
+# pinched shut. Falls back to plainer shapes if one won't triangulate.
+static func _shoreline(corners: PackedVector2Array, seed: float) -> PackedVector2Array:
+	var shore := CourseShape.flow_closed(corners, 11.0)
+	# A curve through the corners bows out past the straight edges between
+	# them, which would make every pond bigger than it was drawn. Drawn in
+	# about its middle until it covers what the corners enclose, the water
+	# is as much hazard as its author meant and no more.
+	var meant: float = absf(CourseShape.polygon_area(corners))
+	var made: float = absf(CourseShape.polygon_area(shore))
+	if made > meant and meant > 1.0:
+		var middle := Vector2.ZERO
+		for pt in shore:
+			middle += pt
+		middle /= float(shore.size())
+		var k: float = maxf(sqrt(meant / made), 0.8)
+		for i in shore.size():
+			shore[i] = middle + (shore[i] - middle) * k
+	var around := 0.0
+	for i in shore.size():
+		around += shore[i].distance_to(shore[(i + 1) % shore.size()])
+	# Twice the area over the distance round: about the width of a long
+	# thin shape, about the radius of a round one.
+	var breadth: float = 2.0 * absf(CourseShape.polygon_area(shore)) / maxf(around, 1.0)
+	var wandering := CourseShape.smooth(CourseShape.soft_edge(shore, 11.0, minf(6.0, breadth * 0.16), seed), 3)
+	for candidate in [wandering, shore]:
+		if not Geometry2D.triangulate_polygon(candidate).is_empty():
+			return candidate
+	return corners
+
+
+# Works out the ground in play (see "The ground in play", above) and the
+# box that frames it. `line` is the fairway's centreline, tee end first.
+func _play_area(line: PackedVector2Array, seed: float) -> void:
+	var to_pin := PackedVector2Array(line)
+	to_pin.append(pin_pos)
+	var land_parts: Array = []
+	land_parts.append_array(CourseShape.corridor_round(to_pin, PLAY_LINE))
+	land_parts.append_array(CourseShape.grown(fairway_polygon, PLAY_FAIRWAY))
+	land_parts.append_array(CourseShape.grown(green_polygon, PLAY_GREEN))
+	for hazard in hazards:
+		if hazard.type != "water":
+			land_parts.append_array(CourseShape.grown(hazard.polygon, PLAY_BUNKER))
+	var land := CourseShape.union_all(land_parts)
+
+	# Water joins in only where it's near the rest. A burn across the
+	# fairway is a hazard; the same burn a hundred yards off in the trees
+	# is just scenery, and out of bounds.
+	var parts: Array = land.duplicate()
+	var reach: Array = []
+	for piece in land:
+		reach.append_array(CourseShape.grown(piece, PLAY_WATER_REACH))
+	for hazard in hazards:
+		if hazard.type != "water":
+			continue
+		for shore in CourseShape.grown(hazard.polygon, PLAY_WATER):
+			for near in reach:
+				parts.append_array(CourseShape.outlines(Geometry2D.intersect_polygons(shore, near)))
+
+	play_polygons = []
+	for piece in CourseShape.union_all(parts):
+		# Where two parts meet they leave a notch, and a notch is both ugly
+		# and the place an outline is likeliest to cross itself once it's
+		# made to wander. Growing the shape and shrinking it back by the
+		# same amount fills every notch narrower than twice that.
+		var filled: PackedVector2Array = piece
+		for out in CourseShape.grown(piece, PLAY_NOTCH):
+			for back in CourseShape.grown(out, -PLAY_NOTCH):
+				if absf(CourseShape.polygon_area(back)) > absf(CourseShape.polygon_area(filled)) * 0.5:
+					filled = back
+		# Wander as far as it safely can: less, or not at all, if the full
+		# amount would tangle it.
+		for wander in [PLAY_EDGE_WANDER, PLAY_EDGE_WANDER * 0.5, 0.0]:
+			var edge := CourseShape.soft_edge(filled, PLAY_EDGE_STEP, wander, seed)
+			if edge.size() >= 3 and not Geometry2D.triangulate_polygon(edge).is_empty():
+				play_polygons.append(edge)
+				break
+	if play_polygons.is_empty():
+		return   # keep the fallback box
+	var box := Rect2(play_polygons[0][0], Vector2.ZERO)
+	for poly in play_polygons:
+		for pt in poly:
+			box = box.expand(pt)
+	bounds = box.grow(1.0)

@@ -16,6 +16,11 @@ var BotSimMain: GDScript
 # BOTSIM_VARIANT is a comma-separated list of changes for controlled
 # experiments (default: none — the game as shipped):
 #   decay=<p>            Form decay chance after a hazard (game: 0.333)
+#   rough=<p>            ...and after finishing in the rough (game: 0.2;
+#                        rough=0 is the game before rough cost a card)
+#   pins=off             every pin in the middle of its green
+#   build=off            nothing builds through the round: the wind and the
+#                        pins of the last hole are drawn like the first's
 #   wind=off | wind=<n>  no wind, or cap it at n mph
 #   norange              the bot never takes a range session
 #   gift=<A>+<B>         start with these clubs added to the bag
@@ -25,6 +30,8 @@ var BotSimMain: GDScript
 #                        for yardage coverage, plus a putter
 #   putt=<ms>            the bot's putting timing error (default 100)
 #   aim=<sd>             the bot's aim error, yards per 100 yds (default 0)
+#   course=<id>          play one of the game's other courses (a CourseLibrary
+#                        id, e.g. course=mirage-mesa; default: Bogey Links)
 #
 # Records are not written (the round runs as an editor test round), so
 # the player's course records are untouched.
@@ -39,6 +46,10 @@ func _initialize() -> void:
 	var variant := _parse(_env("BOTSIM_VARIANT", ""))
 	var out_path := _env("BOTSIM_OUT", "user://botsim.jsonl")
 	BotSimMain = load("res://scripts/BotSimMain.gd")
+	if variant.has("course") and not Course.use_shipped(str(variant.course)):
+		printerr("BotSim: no course called %s" % variant.course)
+		quit(1)
+		return
 	GameSetup.reset_to_local(1)
 	GameSetup.return_to_editor = true
 
@@ -82,6 +93,10 @@ func _play(round_seed: int, v: Dictionary) -> Dictionary:
 	main.player_count = 1
 	if v.has("decay"):
 		main.decay_chance = float(v.decay)
+	if v.has("rough"):
+		main.rough_chance = float(v.rough)
+	main.pins_off = v.get("pins", "") == "off"
+	main.build_off = v.get("build", "") == "off"
 	if v.has("wind"):
 		main.wind_cap = 0.0 if v.wind == "off" else float(v.wind)
 	main.no_draft = v.has("fixed")

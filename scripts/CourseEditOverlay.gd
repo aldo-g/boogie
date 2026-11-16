@@ -141,8 +141,12 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _move(p: Vector2) -> void:
-	p.x = clampf(p.x, -Course.X_LIMIT, Course.X_LIMIT)
-	p.y = clampf(p.y, -20.0, Course.Y_LIMIT)
+	# A shoreline can be dragged further out than anything else: water
+	# runs on past the edge of play.
+	var wet: bool = sel.kind == "water"
+	var x_limit: float = Course.WATER_X_LIMIT if wet else Course.X_LIMIT
+	p.x = clampf(p.x, -x_limit, x_limit)
+	p.y = clampf(p.y, Course.WATER_Y_MIN if wet else -20.0, Course.Y_LIMIT)
 	var i: int = sel.i
 	match sel.kind:
 		"spine":

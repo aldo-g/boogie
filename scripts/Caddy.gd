@@ -16,8 +16,8 @@ extends Control
 const CADDY_NAME := "Charlie"
 const FISH_TEXTURE := preload("res://assets/art/caddy/char.png")
 
-const FISH_SIZE := Vector2(220, 80)
-const BUBBLE_WIDTH := 280.0
+const FISH_SIZE := Vector2(184, 67)
+const BUBBLE_WIDTH := 206.0
 const EDGE_GAP := 16.0      # from the left edge of the screen
 const ABOVE_GAP := 10.0     # between the fish and the panel he sits above
 # Optional lines wait at least this long after the last one, so he
@@ -37,6 +37,7 @@ const CHANCE := {
 	"putt": 0.35,
 	"putt_result": 0.3,
 	"holed": 0.5,
+	"rival_holed": 0.5,
 }
 
 # Everything he says lives here, grouped by situation — see the file's
@@ -62,6 +63,10 @@ static var _lines: Dictionary = {}
 
 # The panel he sits on top of (the bag strip). Set by Main.
 var anchor_above: Control
+# Where he comes to rest, from the left edge of the screen. Main moves him
+# in past the shot column, so he surfaces in the margin beside the hole
+# map rather than over the numbers.
+var left_inset: float = EDGE_GAP
 
 var _rng := RandomNumberGenerator.new()
 var _rig: Control
@@ -90,18 +95,10 @@ func _init() -> void:
 	add_child(_rig)
 
 	_bubble = PanelContainer.new()
-	var s := StyleBoxFlat.new()
-	s.bg_color = BogeyTheme.CARD_BG
-	s.set_corner_radius_all(10)
-	s.border_color = Color(BogeyTheme.INK, 0.22)
-	s.set_border_width_all(1)
+	var s := BogeyUI.card_style(14, 12, BogeyTheme.NEUTRAL_400)
 	s.shadow_color = BogeyTheme.SHADOW_MD
-	s.shadow_size = 8
-	s.shadow_offset = Vector2(0, 3)
-	s.content_margin_left = 14
-	s.content_margin_right = 14
-	s.content_margin_top = 10
-	s.content_margin_bottom = 12
+	s.shadow_size = 14
+	s.shadow_offset = Vector2(0, 5)
 	_bubble.add_theme_stylebox_override("panel", s)
 	_bubble.custom_minimum_size = Vector2(BUBBLE_WIDTH, 0)
 	_bubble.tooltip_text = "Click to send %s away" % CADDY_NAME
@@ -113,10 +110,13 @@ func _init() -> void:
 	col.add_theme_constant_override("separation", 4)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_bubble.add_child(col)
-	var who := BogeyUI.kicker("%s · your caddy" % CADDY_NAME, BogeyTheme.ACCENT_700)
+	var who := BogeyUI.kicker("%s · your caddy" % CADDY_NAME, BogeyTheme.NEUTRAL_600, 9)
 	who.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(who)
-	_text = BogeyUI.body("", 15, BogeyTheme.INK)
+	# His lines are set in italic: a voice, not an instruction.
+	_text = BogeyUI.body("", 19, BogeyTheme.INK)
+	_text.add_theme_font_override("font", BogeyUI.serif_italic(500))
+	_text.add_theme_constant_override("line_spacing", -2)
 	_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(_text)
 
@@ -194,7 +194,7 @@ func say(text: String) -> void:
 	_rig.position.x = -(FISH_SIZE.x * 0.55 + BUBBLE_WIDTH + 40.0)
 	_kill_tween()
 	_tween = create_tween()
-	_tween.tween_property(_rig, "position:x", EDGE_GAP, 0.55) \
+	_tween.tween_property(_rig, "position:x", left_inset, 0.55) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_tween.tween_callback(_pop_bubble)
 
@@ -233,8 +233,9 @@ func _pop_bubble() -> void:
 
 
 # The rig is the fish, sitting just on top of the anchor panel. The bubble
-# hangs above his head (he faces right) and grows upward, so a line that
-# wraps differently never moves the fish.
+# stands directly above him and grows upward, so a line that wraps
+# differently never moves the fish — and both keep to the margin beside
+# the hole map rather than lying across it.
 func _layout() -> void:
 	var floor_y := size.y
 	if anchor_above != null and anchor_above.is_inside_tree():
@@ -249,8 +250,8 @@ func _layout() -> void:
 # Also runs on the bubble's own resized signal: an autowrapped label only
 # knows its height after a layout pass.
 func _place_bubble() -> void:
-	_bubble.position = Vector2(FISH_SIZE.x * 0.55, -_bubble.size.y - 2.0)
-	_bubble.pivot_offset = Vector2(24, _bubble.size.y)
+	_bubble.position = Vector2(0, -_bubble.size.y - 8.0)
+	_bubble.pivot_offset = Vector2(FISH_SIZE.x * 0.6, _bubble.size.y)
 
 
 func _fish_rest_y() -> float:
@@ -278,6 +279,11 @@ func _kill_tween() -> void:
 #   putt_result  result ("close" / "miss")
 #   holed        diff (strokes against par)
 #   round        diff, holes
+#   streak       count (under-par holes in a row)
+#   starter_retired  —
+#   rival_holed  diff, rival (the other golfer's name)
+#   turn, match  margin (strokes you are ahead; negative = behind), rival;
+#                match also takes diff and holes
 static func situation(kind: String, ctx: Dictionary, rng: RandomNumberGenerator) -> String:
 	match kind:
 		"tee":
@@ -319,6 +325,26 @@ static func situation(kind: String, ctx: Dictionary, rng: RandomNumberGenerator)
 			if diff < 0:
 				return "round_under"
 			return "round_level" if diff == 0 else "round_over"
+		"streak":
+			return "streak"
+		"starter_retired":
+			return "starter_retired"
+		"rival_holed":
+			# A par from the other golfer isn't worth a word.
+			var diff := int(ctx.get("diff", 0))
+			if diff == 0:
+				return ""
+			return "rival_good" if diff < 0 else "rival_bad"
+		"turn":
+			var margin := int(ctx.get("margin", 0))
+			if margin == 0:
+				return "turn_level"
+			return "turn_ahead" if margin > 0 else "turn_behind"
+		"match":
+			var margin := int(ctx.get("margin", 0))
+			if margin == 0:
+				return "match_tied"
+			return "match_won" if margin > 0 else "match_lost"
 	return ""
 
 
@@ -390,6 +416,9 @@ static func fill(text: String, ctx: Dictionary) -> String:
 		"carry": int(round(float(ctx.get("carry", 0.0)))),
 		"score": score,
 		"holes": int(ctx.get("holes", 0)),
+		"rival": str(ctx.get("rival", "")),
+		"margin": absi(int(ctx.get("margin", 0))),
+		"count": int(ctx.get("count", 0)),
 	})
 
 

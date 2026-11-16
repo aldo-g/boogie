@@ -24,6 +24,10 @@ extends RefCounted
 
 var name: String = "Player"
 
+# Which computer golfer plays this seat (a Rivals.gd skill id), or "" for
+# a human. Local rounds only — see Main.is_cpu_turn().
+var cpu_skill: String = ""
+
 # --- The Bag and its draft pool (Sections 3, 3B, 3C) ---
 var hand: Array = []
 var club_deck: Array = []

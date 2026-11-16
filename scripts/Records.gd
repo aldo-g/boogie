@@ -14,9 +14,11 @@ extends RefCounted
 #                 an unfinished one), so you can see where you've gone
 #                 low before
 #
-# A course is identified by its contents, not its name or file: edit a
-# custom course and it starts a fresh record, because it's a different
-# course. The built-in course is always "builtin".
+# A custom course is identified by its contents, not its name or file:
+# edit it and it starts a fresh record, because it's a different course.
+# The game's own courses are identified by which course they are — the
+# built-in is always "builtin", the others "course:<id>" — so their
+# records survive an update that reshapes a hole.
 #
 # Only rounds played on this machine are recorded: solo, every hot-seat
 # player, and your own seat online. Headless runs (the test harnesses)
@@ -60,11 +62,14 @@ static func _save() -> void:
 	f.close()
 
 
-# The active course's identity: "builtin", or a hash of a custom course's
-# holes so an edited course doesn't inherit the old one's records.
+# The active course's identity: "builtin" or "course:<id>" for one of the
+# game's own, else a hash of a custom course's holes so an edited course
+# doesn't inherit the old one's records.
 static func course_key() -> String:
-	if Course.is_builtin():
+	if Course.active_id == Course.BUILTIN_ID:
 		return "builtin"
+	if Course.active_id != "":
+		return "course:%s" % Course.active_id
 	return "custom:%x" % hash(JSON.stringify(Course.active().get("holes", [])))
 
 

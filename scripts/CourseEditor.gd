@@ -4,6 +4,8 @@ extends Control
 # COURSE EDITOR
 # Build a course of 1-18 holes, save it, and play it.
 #
+#   top    — the course: its name, its terrain (CourseTheme — how the
+#            ground plays and looks), and the file actions
 #   left   — the holes: pick one, add, duplicate, reorder, delete
 #   centre — the hole map with editing handles (CourseEditOverlay), and
 #            the elevation strip under it, both live
@@ -21,10 +23,11 @@ extends Control
 const TITLE_SCENE := "res://scenes/Title.tscn"
 const MAIN_SCENE := "res://scenes/Main.tscn"
 const UNDO_LIMIT := 60
+const SAVED_ID_BASE := 1000   # Open-menu ids from here up are saved files
 
 static var _session: Dictionary = {}   # { course, index, dirty } across a test round
 
-var course: Dictionary = {}    # runtime-shaped: { name, holes }
+var course: Dictionary = {}    # runtime-shaped: { name, theme, holes }
 var index := 0                 # 0-based hole being edited
 var dirty := false
 var _undo: Array = []
@@ -32,6 +35,7 @@ var _undo: Array = []
 var map: CourseMapView
 var overlay: CourseEditOverlay
 var name_field: LineEdit
+var terrain_pick: OptionButton
 var status: Label
 var hole_list: VBoxContainer
 var props: VBoxContainer
@@ -45,11 +49,15 @@ func _ready() -> void:
 		index = _session.index
 		dirty = _session.dirty
 		_session = {}
-	elif not Course.is_builtin():
+	elif not Course.is_shipped():
 		course = Course.active()
 	else:
-		course = {"name": "New course", "holes": [Course.blank_hole(4), Course.blank_hole(3), Course.blank_hole(5)]}
+		# The game's own courses aren't edited in place: start a fresh one
+		# (Open offers a copy of each).
+		course = {"name": "New course", "theme": CourseTheme.DEFAULT,
+			"holes": [Course.blank_hole(4), Course.blank_hole(3), Course.blank_hole(5)]}
 		dirty = true
+	course["theme"] = CourseTheme.sanitise(course.get("theme", CourseTheme.DEFAULT))
 	index = clampi(index, 0, course.holes.size() - 1)
 	_build_ui()
 	_show_hole(true)
@@ -58,6 +66,8 @@ func _ready() -> void:
 # --- Layout ------------------------------------------------------------
 
 func _build_ui() -> void:
+	# The same default font, tooltips and scrollbars as the title and game.
+	theme = BogeyUI.theme()
 	var bg := ColorRect.new()
 	bg.color = BogeyTheme.PARCHMENT
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -94,6 +104,18 @@ func _build_ui() -> void:
 		course.name = t
 		_mark_dirty())
 	head.add_child(name_field)
+
+	# The terrain: firmness, wind and the look of the whole course.
+	terrain_pick = OptionButton.new()
+	for id in CourseTheme.ORDER:
+		terrain_pick.add_item(CourseTheme.label(id))
+	terrain_pick.focus_mode = Control.FOCUS_NONE
+	terrain_pick.custom_minimum_size = Vector2(130, 42)
+	terrain_pick.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	BogeyUI.style_button(terrain_pick, false, 14)
+	terrain_pick.item_selected.connect(_on_terrain_picked)
+	head.add_child(terrain_pick)
+	_sync_terrain_pick()
 
 	head.add_child(_btn("New", _on_new))
 	open_menu = MenuButton.new()
@@ -203,9 +225,32 @@ func _hole() -> Dictionary:
 	return course.holes[index]
 
 
+func _theme() -> String:
+	return str(course.get("theme", CourseTheme.DEFAULT))
+
+
+func _sync_terrain_pick() -> void:
+	var at: int = CourseTheme.ORDER.find(_theme())
+	terrain_pick.select(maxi(at, 0))
+	terrain_pick.tooltip_text = "%s\n%s." % [CourseTheme.blurb(_theme()),
+		CourseTheme.play_summary(_theme()).capitalize()]
+
+
+func _on_terrain_picked(i: int) -> void:
+	var id: String = CourseTheme.ORDER[clampi(i, 0, CourseTheme.ORDER.size() - 1)]
+	if id == _theme():
+		return
+	Sound.play("ui_click")
+	_push_undo()
+	course["theme"] = id
+	_sync_terrain_pick()
+	_mark_dirty()
+	_show_hole(true)
+
+
 # `bake` = false while a handle is mid-drag (see CourseMapView.set_hole).
 func _show_hole(bake: bool) -> void:
-	var h := HoleData.build(_hole(), index + 1)
+	var h := HoleData.build(_hole(), index + 1, _theme())
 	map.set_hole(h, bake)
 	map.set_ball(h.tee_pos, [])
 	map.set_aim_target(h.tee_pos)
@@ -421,7 +466,7 @@ func _spin(value: float, lo: float, hi: float, step: float, apply: Callable, res
 		if resort:
 			_hole().elev.sort_custom(func(a, b): return a.x < b.x)
 		_mark_dirty()
-		var h := HoleData.build(_hole(), index + 1)
+		var h := HoleData.build(_hole(), index + 1, _theme())
 		map.set_hole(h, true)
 		overlay.queue_redraw()
 		if resort:
@@ -529,6 +574,7 @@ func _undo_last() -> void:
 	course = snap.course
 	index = clampi(snap.index, 0, course.holes.size() - 1)
 	name_field.text = str(course.name)
+	_sync_terrain_pick()
 	overlay.set_def({})
 	_mark_dirty()
 	_show_hole(true)
@@ -538,9 +584,10 @@ func _undo_last() -> void:
 
 func _on_new() -> void:
 	_push_undo()
-	course = {"name": "New course", "holes": [Course.blank_hole(4)]}
+	course = {"name": "New course", "theme": CourseTheme.DEFAULT, "holes": [Course.blank_hole(4)]}
 	index = 0
 	name_field.text = course.name
+	_sync_terrain_pick()
 	overlay.set_def({})
 	_mark_dirty()
 	_show_hole(true)
@@ -548,7 +595,9 @@ func _on_new() -> void:
 
 func _on_save() -> void:
 	var name := str(course.name).strip_edges()
-	if name == "" or name == Course.BUILTIN_NAME:
+	# The game's own courses keep their names to themselves: the picker
+	# would otherwise show two of them.
+	if name == "" or CourseLibrary.has_name(name):
 		status.text = "Give the course its own name first."
 		return
 	for h in course.holes:
@@ -567,24 +616,30 @@ func _on_save() -> void:
 func _fill_open_menu() -> void:
 	var pop := open_menu.get_popup()
 	pop.clear()
-	pop.add_item("Copy of %s" % Course.BUILTIN_NAME, 0)
+	# Ids below SAVED_ID_BASE are the game's own courses, opened as copies.
+	var shipped := CourseLibrary.all()
+	for i in shipped.size():
+		pop.add_item("Copy of %s" % shipped[i].name, i)
 	var saved := Course.list_saved()
 	if not saved.is_empty():
 		pop.add_separator()
 	for i in saved.size():
-		pop.add_item(str(saved[i].name), i + 1)
+		pop.add_item(str(saved[i].name), SAVED_ID_BASE + i)
 	pop.set_meta("saved", saved)
 
 
 func _on_open_picked(id: int) -> void:
 	var pop := open_menu.get_popup()
 	var saved: Array = pop.get_meta("saved", [])
+	var shipped := CourseLibrary.all()
 	var loaded: Dictionary
-	if id == 0:
-		loaded = Course.builtin()
-		loaded.name = "%s copy" % Course.BUILTIN_NAME
-	elif id - 1 < saved.size():
-		loaded = Course.load_file(str(saved[id - 1].path))
+	var is_copy := id < SAVED_ID_BASE
+	if is_copy and id < shipped.size():
+		var src: Dictionary = shipped[id]
+		loaded = {"name": "%s copy" % src.name, "theme": src.theme,
+			"holes": (src.holes as Array).duplicate(true)}
+	elif not is_copy and id - SAVED_ID_BASE < saved.size():
+		loaded = Course.load_file(str(saved[id - SAVED_ID_BASE].path))
 	if loaded.is_empty():
 		status.text = "Couldn't open that course."
 		return
@@ -592,8 +647,9 @@ func _on_open_picked(id: int) -> void:
 	course = loaded
 	index = 0
 	name_field.text = str(course.name)
+	_sync_terrain_pick()
 	overlay.set_def({})
-	dirty = id == 0
+	dirty = is_copy
 	_show_hole(true)
 
 
@@ -618,6 +674,6 @@ func _on_back() -> void:
 	Sound.play("ui_back")
 	# Leave the title on a playable course: the saved version of this one
 	# if it's been saved, else whatever was chosen before.
-	if not dirty and str(course.name) != Course.BUILTIN_NAME:
+	if not dirty and not CourseLibrary.has_name(str(course.name)):
 		Course.use_file(Course.path_for(str(course.name)))
 	get_tree().change_scene_to_file(TITLE_SCENE)

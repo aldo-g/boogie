@@ -2,12 +2,17 @@ class_name Course
 extends RefCounted
 
 # ---------------------------------------------------------
-# The course being played: a name and 1-18 hole definitions.
+# The course being played: a name, a terrain and 1-18 hole definitions.
 #
 # A hole definition is the same Dictionary HoleData.HOLES uses (spine,
 # green, hazards, elev, green_tilt — Vector-typed), so HoleData builds a
 # custom hole exactly the way it builds a built-in one. The built-in
-# course is just HOLES under the name "Bogey Links".
+# course is just HOLES under the name "Bogey Links"; the game's other
+# courses ship as course files (see CourseLibrary).
+#
+# The terrain ("theme": parkland, links, desert, alpine — see CourseTheme)
+# sets how firm the ground is, what wind the course gets and how it's
+# painted. It belongs to the course, not the hole.
 #
 # Two shapes of the same data:
 #   runtime — Vector2/Vector3 values, what the game reads
@@ -21,6 +26,7 @@ extends RefCounted
 # ---------------------------------------------------------
 
 const BUILTIN_NAME := "Bogey Links"
+const BUILTIN_ID := "bogey-links"
 const SAVE_DIR := "user://courses"
 const MAX_HOLES := 18
 const FORMAT_VERSION := 1
@@ -34,17 +40,42 @@ const MAX_WATER_POINTS := 16
 const MAX_ELEV := 12
 const X_LIMIT := 150.0
 const Y_LIMIT := 700.0
+# Water may be drawn well past where anything else can go: a burn or a
+# coastline runs on out of play to the edge of the map (HoleData counts
+# only the part near the hole as in play).
+const WATER_X_LIMIT := 260.0
+const WATER_Y_MIN := -80.0
 const MIN_GREEN_Y := 40.0
 
 static var active_name: String = BUILTIN_NAME
+static var active_theme: String = CourseTheme.DEFAULT
 static var _active_holes: Array = []   # runtime hole defs; empty = built-in
 static var active_path: String = ""     # the saved file it came from, if any
+# Which of the game's own courses this is (a CourseLibrary id), or "" for
+# a custom one. Decided by what the course IS, not where it came from
+# (CourseLibrary.id_of: same name, terrain and holes), so one of the
+# game's courses arriving from an online host is recognised as itself —
+# and its records land where a local round's would.
+static var active_id: String = BUILTIN_ID
 
 
 # --- The active course -------------------------------------------------
 
 static func hole_count() -> int:
 	return HoleData.HOLES.size() if _active_holes.is_empty() else _active_holes.size()
+
+
+# How late in the round hole `n` (1-based) is, 0 to 1 — for the things
+# that build as a round goes on: the wind gets up (Wind) and the pins get
+# tucked away (Pins). Nothing for the first quarter of the round, so the
+# opening holes play as kindly as they always did, then rising to 1 on
+# the last hole. On eighteen holes: 0 through the 5th, 0.2 at the turn,
+# 0.5 on the 12th, 0.9 on the 16th. A one-hole course never builds.
+static func late(n: int) -> float:
+	var count := hole_count()
+	if count <= 1:
+		return 0.0
+	return smoothstep(0.25, 1.0, clampf(float(n - 1) / float(count - 1), 0.0, 1.0))
 
 
 # 1-based, matching current_hole_index.
@@ -58,21 +89,44 @@ static func is_builtin() -> bool:
 	return _active_holes.is_empty()
 
 
+# True for any course that ships with the game, the built-in included.
+static func is_shipped() -> bool:
+	return active_id != ""
+
+
 static func use_builtin() -> void:
 	active_name = BUILTIN_NAME
+	active_theme = CourseTheme.DEFAULT
 	_active_holes = []
 	active_path = ""
+	active_id = BUILTIN_ID
 
 
-# `course` is runtime-shaped: { "name": String, "holes": Array }.
+# `course` is runtime-shaped: { "name": String, "theme": String, "holes": Array }.
 static func use(course: Dictionary) -> void:
 	var holes: Array = course.get("holes", [])
 	if holes.is_empty():
 		use_builtin()
 		return
 	active_name = str(course.get("name", "Custom course"))
+	active_theme = CourseTheme.sanitise(course.get("theme", CourseTheme.DEFAULT))
 	_active_holes = holes.duplicate(true)
 	active_path = ""
+	active_id = CourseLibrary.id_of(course)
+
+
+# One of the game's own courses, by its CourseLibrary id. False (and the
+# active course untouched) if there's no such course.
+static func use_shipped(id: String) -> bool:
+	if id == BUILTIN_ID:
+		use_builtin()
+		return true
+	var c := CourseLibrary.course(id)
+	if c.is_empty():
+		return false
+	use(c)
+	active_id = id
+	return true
 
 
 static func use_file(path: String) -> bool:
@@ -96,14 +150,14 @@ static func summary(course: Dictionary) -> String:
 static func active() -> Dictionary:
 	if is_builtin():
 		return builtin()
-	return {"name": active_name, "holes": _active_holes.duplicate(true)}
+	return {"name": active_name, "theme": active_theme, "holes": _active_holes.duplicate(true)}
 
 
 static func builtin() -> Dictionary:
 	var holes: Array = []
 	for n in range(1, HoleData.HOLES.size() + 1):
 		holes.append((HoleData.HOLES[n] as Dictionary).duplicate(true))
-	return {"name": BUILTIN_NAME, "holes": holes}
+	return {"name": BUILTIN_NAME, "theme": CourseTheme.DEFAULT, "holes": holes}
 
 
 # A plain starter hole for the editor: a straight par 4 with a flat green.
@@ -154,7 +208,8 @@ static func to_wire(course: Dictionary) -> Dictionary:
 			"elev": _v3s_out(h.get("elev", [])),
 			"green_tilt": _v2_out(h.get("green_tilt", Vector2.ZERO)),
 		})
-	return {"version": FORMAT_VERSION, "name": str(course.get("name", "Custom course")), "holes": holes}
+	return {"version": FORMAT_VERSION, "name": str(course.get("name", "Custom course")),
+		"theme": CourseTheme.sanitise(course.get("theme", CourseTheme.DEFAULT)), "holes": holes}
 
 
 # Returns a runtime course, or {} if there's nothing playable in `d`.
@@ -176,7 +231,9 @@ static func from_wire(d) -> Dictionary:
 	var name := str(d.get("name", "Custom course")).strip_edges().left(40)
 	if name == "":
 		name = "Custom course"
-	return {"name": name, "holes": holes}
+	# A file from before terrains existed has no "theme": it's parkland,
+	# which is what it was drawn and played as.
+	return {"name": name, "theme": CourseTheme.sanitise(d.get("theme", CourseTheme.DEFAULT)), "holes": holes}
 
 
 static func _hole_from_wire(rh) -> Dictionary:
@@ -215,7 +272,7 @@ static func _hole_from_wire(rh) -> Dictionary:
 			var poly := PackedVector2Array()
 			for p in _list(z.get("poly", [])).slice(0, MAX_WATER_POINTS):
 				var v := _v2_in(p)
-				poly.append(Vector2(clampf(v.x, -X_LIMIT, X_LIMIT), clampf(v.y, -20.0, Y_LIMIT)))
+				poly.append(Vector2(clampf(v.x, -WATER_X_LIMIT, WATER_X_LIMIT), clampf(v.y, WATER_Y_MIN, Y_LIMIT)))
 			if poly.size() >= 3:
 				hazards.append({"type": "water", "poly": poly})
 				waters += 1

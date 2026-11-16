@@ -20,6 +20,9 @@ const SITUATIONS := [
 	"putt_long", "putt_mid", "putt_short", "putt_close", "putt_miss",
 	"holed_eagle", "holed_birdie", "holed_par", "holed_bogey", "holed_double",
 	"round_under", "round_level", "round_over",
+	"streak", "starter_retired", "rival_good", "rival_bad",
+	"turn_ahead", "turn_behind", "turn_level",
+	"match_won", "match_lost", "match_tied",
 ]
 
 
@@ -51,7 +54,8 @@ func _initialize() -> void:
 
 	# A filled line with a brace left in it used a placeholder fill() lacks.
 	var ctx := {"wind": Vector2(10, 0), "yards": 400, "par": 4, "distance_cap": 0.8,
-		"dist_text": "9 ft", "carry": 240.0, "diff": 2, "holes": 18}
+		"dist_text": "9 ft", "carry": 240.0, "diff": 2, "holes": 18,
+		"rival": "Dory Mulligan", "margin": 2, "count": 3}
 	for key in known:
 		for line in Caddy.lines_for(key):
 			var out := Caddy.fill(str(line), ctx)

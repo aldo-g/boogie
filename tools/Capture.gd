@@ -12,6 +12,11 @@ func _ready() -> void:
 	get_window().size = Vector2i(w, h)
 	get_window().content_scale_size = Vector2i(w, h)
 	get_window().content_scale_mode = Window.CONTENT_SCALE_MODE_DISABLED
+	# CAP_COURSE=<id> boots the scene on one of the game's other courses
+	# (a CourseLibrary id, e.g. mirage-mesa) instead of Bogey Links.
+	var course_id := OS.get_environment("CAP_COURSE")
+	if course_id != "" and not Course.use_shipped(course_id):
+		printerr("Capture: no course called ", course_id)
 	var scene_path := OS.get_environment("CAP_SCENE")
 	if scene_path == "":
 		scene_path = "res://scenes/Main.tscn"

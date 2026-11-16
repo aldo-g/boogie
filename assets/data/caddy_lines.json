@@ -1,9 +1,11 @@
 {
-	"_comment": "Everything Charlie the caddy can say, loaded by scripts/Caddy.gd. Each key is a situation and holds a list of lines; one is picked at random. Placeholders filled in from the game: {name} caddy's name, {mph} wind speed, {yards} hole length, {par} hole par, {pct} distance the rough takes off, {dist} putt length ('12 yds' / '9 ft'), {carry} yards carried, {score} round score ('3 over'), {holes} holes played. Keys listed in _forced are always spoken; every other line is only spoken sometimes, and never straight after another one. Add lines freely; a key with no lines just keeps him quiet.",
+	"_comment": "Everything Charlie the caddy can say, loaded by scripts/Caddy.gd. Each key is a situation and holds a list of lines; one is picked at random. Placeholders filled in from the game: {name} caddy's name, {mph} wind speed, {yards} hole length, {par} hole par, {pct} distance the rough takes off, {dist} putt length ('12 yds' / '9 ft'), {carry} yards carried, {score} round score ('3 over'), {holes} holes played, {rival} the other golfer's name, {margin} strokes between you and them, {count} under-par holes in a row. Keys listed in _forced are always spoken; every other line is only spoken sometimes, and never straight after another one. Add lines freely; a key with no lines just keeps him quiet.",
 
 	"_forced": [
 		"intro", "land_water", "land_out", "land_bunker", "rim_out", "hole_out", "hole_in_one",
-		"holed_eagle", "holed_birdie", "round_under", "round_level", "round_over"
+		"holed_eagle", "holed_birdie", "round_under", "round_level", "round_over",
+		"streak", "starter_retired", "turn_ahead", "turn_behind", "turn_level",
+		"match_won", "match_lost", "match_tied"
 	],
 
 	"intro": [
@@ -386,5 +388,61 @@
 		"That's the round: {score} over {holes} holes. Same time tomorrow? I'll bring the bag.",
 		"Round done, {score}. There's plenty more fish in the sea, and plenty more rounds.",
 		"{score}. We'll get them next time. I'm going for a swim."
+	],
+
+	"streak": [
+		"That's {count} under-par holes on the spin. You're running like a salmon in spring.",
+		"{count} in a row under par! Don't change a thing. Don't even blink.",
+		"{count} straight under par. I'd high-five you, but, well. Fins.",
+		"{count} on the bounce. Whatever you had for breakfast, have it again tomorrow."
+	],
+	"starter_retired": [
+		"That's the last of the Bogey-Mart clubs gone. I won't miss carrying them. They rattled.",
+		"No more Bogey-Mart in the bag. You're a proper golfer now. Sort of.",
+		"The supermarket set has left the building. Every club in here, you chose. No excuses now.",
+		"Goodbye, Bogey-Mart. The bag's lighter and so is my heart."
+	],
+
+	"rival_good": [
+		"{rival} just went under par there. Don't look. Play your own game.",
+		"Tidy hole from {rival}. Annoying. Let's answer it.",
+		"That's a good one for {rival}. We'll get it back.",
+		"{rival} is swimming well. So we swim faster."
+	],
+	"rival_bad": [
+		"{rival} dropped a shot there. I'm not smiling. Fish can't smile. But I would.",
+		"Bogey or worse for {rival}. There's blood in the water.",
+		"{rival} made a mess of that. The door's open, so walk through it.",
+		"A wobble from {rival}. I do love a wobble."
+	],
+	"turn_ahead": [
+		"Halfway, and you're {margin} up on {rival}. Keep your head. There's plenty of water still to cross.",
+		"{margin} ahead at the turn. {rival} looks rattled. Keep it boring.",
+		"Up by {margin} at the halfway mark. Same again, please."
+	],
+	"turn_behind": [
+		"Halfway. {rival} is {margin} ahead. That's nothing. I've swum further upstream than that.",
+		"{margin} behind at the turn. Half a round is a long time. Chip away.",
+		"{rival} leads by {margin} at halfway. Good. I like a chase."
+	],
+	"turn_level": [
+		"All square at the turn. Lovely. It's a proper match.",
+		"Halfway, and level with {rival}. Winner takes the bragging rights.",
+		"Nothing in it at the turn. This is where it gets good."
+	],
+	"match_won": [
+		"You beat {rival} by {margin}! I'm going to be insufferable in the clubhouse pond.",
+		"Won by {margin}. {rival} never stood a chance. Well, a bit of a chance. Not enough of one.",
+		"That's the match, by {margin}. Drinks are on {rival}. Mine's a small pond water."
+	],
+	"match_lost": [
+		"{rival} takes it by {margin}. We'll get them next time. I'll be sulking at the bottom of the lake.",
+		"Lost by {margin}. It happens. {rival} had a good day and we had a day.",
+		"Beaten by {margin}. I blame the caddy. Hang on."
+	],
+	"match_tied": [
+		"A tie with {rival}. Nobody wins, nobody loses, everybody's slightly annoyed.",
+		"Level with {rival} at the finish. Honours even. Rematch?",
+		"All square after {holes} holes. You can't split them, and neither can I."
 	]
 }

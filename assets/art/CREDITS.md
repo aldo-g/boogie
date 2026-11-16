@@ -48,3 +48,14 @@ never reaches the screen.
 | `bump_and_run.svg` | [Bowling propulsion](https://game-icons.net/1x1/lorc/bowling-propulsion.html) | Lorc |
 | `steady_hands.svg` | [Hand](https://game-icons.net/1x1/lorc/hand.html) | Lorc |
 | `in_the_zone.svg` | [Meditation](https://game-icons.net/1x1/lorc/meditation.html) | Lorc |
+
+## Typefaces (in `assets/fonts/`)
+Not art, but credited here so everything borrowed is in one place. All three
+are under the [SIL Open Font License 1.1](https://openfontlicense.org); the
+licence texts for the two that ship as variable fonts sit beside them.
+
+| File | Typeface | Author |
+| --- | --- | --- |
+| `AlexBrush-Regular.ttf` | [Alex Brush](https://fonts.google.com/specimen/Alex+Brush) — the wordmark | Robert Leuschke |
+| `CormorantGaramond-VF.ttf`, `CormorantGaramond-Italic-VF.ttf` | [Cormorant Garamond](https://fonts.google.com/specimen/Cormorant+Garamond) — names, numbers, the caddy's voice | Christian Thalmann (Catharsis Fonts) |
+| `Jost-VF.ttf` | [Jost](https://fonts.google.com/specimen/Jost) — labels and running text | Owen Earl (indestructible type*) |

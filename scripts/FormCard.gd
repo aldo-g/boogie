@@ -33,6 +33,12 @@ var mishit: bool = false
 # A created card exhausts: played or not, it never goes back into the
 # Form deck.
 var created: bool = false
+# The club family this card belongs to (Section 4 "Form by club family"):
+# one of FAMILIES. A swing is only dealt cards of the family of the club
+# in hand, so the same Hook is a different card in the Wood pile and the
+# Iron pile. "" for a card that belongs to no family — the cards a club
+# creates for itself.
+var family: String = ""
 
 
 func _init(p_name: String, p_good: bool, p_side: int = 0, p_degrees: float = 0.0,
@@ -69,6 +75,48 @@ func effect_text() -> String:
 		bits.append("+%d%% distance" % int(round((distance_mult - 1.0) * 100.0)))
 	if to_max_band:
 		bits.append("flies the club's full carry, whatever you aimed")
+	bits.append_array(_other_bits())
+	if bits.is_empty():
+		bits.append("No deviation, standard distance")
+	return "; ".join(bits)
+
+
+# --- The card face (see CardFace.gd) -------------------------------------
+# The same effect, split the way a card is set: two figures — how far,
+# then how straight — as [datum, label] pairs, and the rest in words.
+# A club's face carries the same two figures, so the pair reads across.
+
+func distance_figure() -> Array:
+	if to_max_band:
+		return ["Max", "carry"]
+	if distance_mult < 0.999:
+		return ["%d%%" % int(round(distance_mult * 100.0)), "distance"]
+	if distance_mult > 1.001:
+		return ["+%d%%" % int(round((distance_mult - 1.0) * 100.0)), "distance"]
+	return ["Full", "distance"]
+
+
+func line_figure() -> Array:
+	if degrees > 0.0:
+		return ["%d°" % int(degrees), side_label().to_lower()]
+	return ["Straight", ""]
+
+
+# Everything effect_text() says beyond the two figures, as one sentence.
+# Empty for a card that only bends the line or changes the distance.
+func detail_text() -> String:
+	var bits := _other_bits()
+	if to_max_band:
+		bits.push_front("the club's full carry, whatever you aimed")
+	if bits.is_empty():
+		return ""
+	var text := "; ".join(bits)
+	return text[0].to_upper() + text.substr(1)
+
+
+# What the card does besides bend the line and change the distance.
+func _other_bits() -> Array:
+	var bits: Array = []
 	if ignores_hazard_penalty:
 		bits.append("ignores rough/bunker penalty")
 	if run_share > 0.0:
@@ -89,9 +137,7 @@ func effect_text() -> String:
 		bits.append("taints your next putt if played")
 	if purges_bad > 0:
 		bits.append("removes a bad card from your Form deck")
-	if bits.is_empty():
-		bits.append("No deviation, standard distance")
-	return "; ".join(bits)
+	return bits
 
 
 func _mult_text(m: float) -> String:
@@ -120,6 +166,11 @@ func as_mishit() -> FormCard:
 
 func as_created() -> FormCard:
 	created = true
+	return self
+
+
+func of_family(f: String) -> FormCard:
+	family = f
 	return self
 
 
@@ -208,17 +259,75 @@ const GOOD_NAMES := ["Pure Strike", "Stinger", "Controlled Draw", "Controlled Fa
 	"Power Draw", "Soft Fade", "Flushed", "Spinner", "Punch Out",
 	"Flop Shot", "Bump and Run", "Steady Hands", "In the Zone", "Big Strike"]
 
-# How many of each card the Form deck starts with: 28 good / 14 bad (67%).
-# The workhorse cards come in threes and the situational ones in twos;
-# among the bad, Hook and Slice are the common miss and the rest turn up
-# once each. Pure Strike, Big Strike and Steady Hands are deliberately
-# absent: they only ever come from a club's ability (Section 4 "Created
-# cards"), so they're a resource you spend rather than a lucky draw.
-const DECK_MIX := {
-	"Stinger": 3, "Controlled Draw": 3, "Controlled Fade": 3,
-	"Flop Shot": 3, "Bump and Run": 3, "In the Zone": 3,
-	"Power Draw": 2, "Soft Fade": 2, "Flushed": 2, "Spinner": 2, "Punch Out": 2,
-	"Hook": 2, "Slice": 2,
-	"Pull": 1, "Push": 1, "Duck Hook": 1, "Overswing": 1,
-	"Top": 1, "Thin": 1, "Chunk": 1, "Skied": 1, "Shank": 1, "Yips": 1,
+# --- Form by club family (Section 4) -------------------------------------
+# Your form is not one thing: it is how you are striking each kind of
+# club. Every card in the Form deck belongs to one family, and a swing is
+# dealt only from the family of the club in hand — a driver is never
+# handed a Flop Shot, and a bad day with the driver leaves the wedges
+# alone.
+const FAMILIES := ["wood", "iron", "wedge", "putter"]
+const FAMILY_LABEL := {"wood": "Wood", "iron": "Iron", "wedge": "Wedge", "putter": "Putter"}
+
+# What the Form deck starts with, family by family: about two good cards
+# to every bad one in each. Each family has its own shots and its own way
+# of missing:
+#   wood   — length and shape; the misses are big and off line
+#   iron   — precision; the misses are small
+#   wedge  — height and spin; the misses are the strike itself
+#   putter — played from off the green: it rolls true or it doesn't
+# Pure Strike, Big Strike and Steady Hands are deliberately absent: they
+# only ever come from a club's ability (Section 4 "Created cards"), so
+# they're a resource you spend rather than a lucky draw.
+const FAMILY_MIX := {
+	"wood": {
+		"Power Draw": 2, "Flushed": 2, "Stinger": 2, "Controlled Fade": 2,
+		"Controlled Draw": 1, "In the Zone": 1,
+		"Hook": 1, "Slice": 1, "Duck Hook": 1, "Overswing": 1, "Skied": 1, "Top": 1,
+	},
+	"iron": {
+		"Controlled Draw": 2, "Controlled Fade": 2, "Punch Out": 2, "Stinger": 1,
+		"Spinner": 1, "Soft Fade": 1, "In the Zone": 1,
+		"Pull": 1, "Push": 1, "Hook": 1, "Slice": 1, "Thin": 1,
+	},
+	"wedge": {
+		"Flop Shot": 3, "Bump and Run": 3, "Spinner": 2, "Soft Fade": 1, "In the Zone": 1,
+		"Chunk": 1, "Thin": 1, "Shank": 1, "Yips": 1, "Pull": 1,
+	},
+	# No In the Zone here: in a pile this small it would turn up on most
+	# chips, and clear the whole deck of bad cards.
+	"putter": {
+		"Bump and Run": 3, "Stinger": 1, "Punch Out": 1,
+		"Thin": 1, "Top": 1,
+	},
 }
+
+# The bad cards a family can be handed — left by a hazard, or created on
+# the spot by a bunker or a swing below the club's range. Wider than what
+# the family starts with: an iron begins without a Chunk or a Shank in it,
+# and a rough round can put them there.
+const FAMILY_BAD := {
+	"wood": ["Hook", "Slice", "Duck Hook", "Overswing", "Skied", "Top"],
+	"iron": ["Pull", "Push", "Hook", "Slice", "Thin", "Chunk", "Shank"],
+	"wedge": ["Chunk", "Thin", "Shank", "Yips", "Pull", "Push"],
+	"putter": ["Thin", "Top", "Yips"],
+}
+
+
+# The family a club's swing is dealt from: its type.
+static func family_of(club: Dictionary) -> String:
+	var t: String = club.get("type", "iron")
+	return t if FAMILIES.has(t) else "iron"
+
+
+# The bad cards `family` can be handed; every bad card for no family.
+static func bad_names_for(fam: String) -> Array:
+	return FAMILY_BAD.get(fam, BAD_NAMES)
+
+
+# A family for a bad card that arrives without one: the first whose misses
+# include it.
+static func home_family(card_name: String) -> String:
+	for fam in FAMILIES:
+		if (FAMILY_BAD[fam] as Array).has(card_name) or (FAMILY_MIX[fam] as Dictionary).has(card_name):
+			return fam
+	return "iron"

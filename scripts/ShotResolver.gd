@@ -118,9 +118,11 @@ static func clamp_aim(target: Vector2, ball_pos: Vector2, max_reach: float,
 	return clamp_to_bounds(point, bounds)
 
 
-# Keeps a yard-space point inside the hole's playable rectangle. The drawn
-# extent IS the playable extent (see HoleData.bounds), so the picture and
-# the rule are the same number.
+# Keeps a yard-space point inside the box that frames the hole (see
+# HoleData.bounds). The ground in play is a shape INSIDE that box, so a
+# point this lets through can still be out of bounds — the map keeps a
+# player's crosshair off those corners (CourseMapView._clamp_to_range),
+# and for anything else it's the shot's preview that says so.
 static func clamp_to_bounds(p: Vector2, bounds: Rect2) -> Vector2:
 	return Vector2(
 		clamp(p.x, bounds.position.x, bounds.position.x + bounds.size.x),
@@ -258,9 +260,16 @@ const WIND_DRIFT_PER_MPH := 0.004   # yards of drift per yard flown per mph acro
 const CLUB_LOFT := {"wood": 0.9, "iron": 1.0, "wedge": 1.2, "putter": 0.0}
 
 
+# How high a shot flies, relative to a stock iron shot (1.0): the club's
+# loft times the Form card's flight. What the wind acts on — and what the
+# map draws, so a Stinger looks as low as it plays and a Flop as high.
+static func flight_height(club: Dictionary, result: Dictionary) -> float:
+	return CLUB_LOFT.get(club.get("type", "iron"), 1.0) * float(result.get("flight", 1.0))
+
+
 # Returns { "distance": flat carry after wind, "drift": Vector2 sideways push }.
 static func apply_wind(wind: Vector2, dir: Vector2, flat: float, club: Dictionary, result: Dictionary) -> Dictionary:
-	var height: float = CLUB_LOFT.get(club.get("type", "iron"), 1.0) * float(result.get("flight", 1.0))
+	var height: float = flight_height(club, result)
 	if wind == Vector2.ZERO or flat <= 0.0 or height <= 0.0:
 		return {"distance": flat, "drift": Vector2.ZERO}
 	var along: float = wind.dot(dir)
@@ -348,6 +357,9 @@ static func shot_outcome(hole: HoleData, from_pos: Vector2, aim_dir: Vector2,
 
 	var budget: float = carry * ROLL_SHARE.get(club.get("type", "iron"), 0.05) \
 		* float(result.get("roll_mult", 1.0)) + float(result.get("extra_roll", 0.0))
+	# Firmness of the course's terrain: a links runs, a mountain course
+	# holds. 1.0 on parkland, which is what the shares above were tuned on.
+	budget *= hole.roll_scale
 	if land_terrain == "green":
 		budget *= GREEN_CHECK
 	var roll := simulate_roll(hole, carry_pos, dir, budget)

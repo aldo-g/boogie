@@ -83,8 +83,9 @@ func _build() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(spacer)
-	var reset := BogeyUI.style_link_button(Button.new())
+	var reset := Button.new()
 	reset.text = "Reset to defaults"
+	BogeyUI.style_link_button(reset)
 	reset.focus_mode = Control.FOCUS_NONE
 	reset.pressed.connect(_on_reset_pressed)
 	footer.add_child(reset)
