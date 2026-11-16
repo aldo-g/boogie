@@ -119,7 +119,13 @@ func _build() -> void:
 	_header = Label.new()
 	# Non-breaking hyphens, so "7-Iron" never splits across lines as "7-"
 	# and "Iron".
-	_header.text = str(card.get("name", "?")).replace("-", "\u2011")
+	var name_text := str(card.get("name", "?"))
+	# The bag card's brand badge already says "Bogey-Mart", so a name that
+	# opens with the brand would say it twice in a narrow column.
+	var brand_name := Brands.display_name(card.get("brand", ""))
+	if compact and brand_name != "" and name_text.begins_with(brand_name + " "):
+		name_text = name_text.substr(brand_name.length() + 1)
+	_header.text = name_text.replace("-", "\u2011")
 	_header.add_theme_font_size_override("font_size", 15)
 	_header.add_theme_color_override("font_color", BogeyTheme.INK)
 	_header.autowrap_mode = TextServer.AUTOWRAP_WORD

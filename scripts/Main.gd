@@ -404,6 +404,7 @@ func build_ui() -> void:
 	settings_btn.custom_minimum_size = Vector2(84, 32)
 	settings_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	settings_btn.focus_mode = Control.FOCUS_NONE
+	BogeyUI.style_button(settings_btn, false, 14)
 	settings_btn.pressed.connect(_on_header_settings_pressed)
 	header_row.add_child(settings_btn)
 
@@ -413,6 +414,7 @@ func build_ui() -> void:
 	restart_btn.custom_minimum_size = Vector2(84, 32)
 	restart_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	restart_btn.focus_mode = Control.FOCUS_NONE
+	BogeyUI.style_button(restart_btn, false, 14)
 	restart_btn.pressed.connect(_on_header_restart_pressed)
 	header_row.add_child(restart_btn)
 
@@ -424,6 +426,7 @@ func build_ui() -> void:
 	menu_btn.custom_minimum_size = Vector2(72, 32)
 	menu_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	menu_btn.focus_mode = Control.FOCUS_NONE
+	BogeyUI.style_button(menu_btn, false, 14)
 	menu_btn.pressed.connect(_on_header_menu_pressed)
 	header_row.add_child(menu_btn)
 
@@ -2004,6 +2007,7 @@ func build_putt_controls() -> void:
 	var strike_btn := Button.new()
 	strike_btn.text = "Strike  (%s)" % Settings.putt_key_name()
 	strike_btn.custom_minimum_size = Vector2(0, 42)
+	BogeyUI.style_button(strike_btn, true, 16)
 	strike_btn.pressed.connect(_on_strike_pressed)
 	col.add_child(strike_btn)
 
@@ -2652,6 +2656,7 @@ func refresh_ui() -> void:
 			var restart_btn := Button.new()
 			restart_btn.text = "Restart Round"
 			restart_btn.custom_minimum_size = Vector2(180, 60)
+			BogeyUI.style_button(restart_btn, true, 17)
 			restart_btn.pressed.connect(restart_round)
 			options_container.add_child(restart_btn)
 			build_form_placeholders("")
@@ -2722,23 +2727,35 @@ func make_form_card_view(card: FormCard, interactive: bool = true) -> FormCardVi
 # PanelContainer, so this builds an equivalent Button instead.
 func make_form_deck_chip_button() -> Button:
 	var b := Button.new()
-	b.text = "FORM DECK %d/%d" % [form_deck.deck.size(), form_deck.discard.size()]
+	var left: int = form_deck.deck.size()
+	var used: int = form_deck.discard.size()
+	b.text = "FORM DECK  %d" % left if used == 0 else "FORM DECK  %d · %d used" % [left, used]
+	b.tooltip_text = "%d Form cards left to draw, %d in the discard pile.\nClick to see what's in the deck." % [left, used]
 	b.flat = false
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	# The stat blocks beside it are taller; without this the pill stretches
+	# to their height and reads as an oval.
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0, 0, 0, 0)
 	style.set_corner_radius_all(99)
 	style.border_color = COLOR_SAND
 	style.set_border_width_all(1)
-	style.content_margin_left = 9
-	style.content_margin_right = 9
-	style.content_margin_top = 3
-	style.content_margin_bottom = 3
+	style.content_margin_left = 12
+	style.content_margin_right = 12
+	style.content_margin_top = 5
+	style.content_margin_bottom = 5
+	var hover := style.duplicate() as StyleBoxFlat
+	hover.bg_color = BogeyTheme.ACCENT_200
 	b.add_theme_stylebox_override("normal", style)
-	b.add_theme_stylebox_override("hover", style)
-	b.add_theme_stylebox_override("pressed", style)
-	b.add_theme_font_size_override("font_size", 10)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", hover)
+	b.add_theme_stylebox_override("hover_pressed", hover)
+	b.add_theme_font_size_override("font_size", 11)
 	b.add_theme_color_override("font_color", COLOR_SAND)
-	b.add_theme_color_override("font_hover_color", COLOR_SAND)
+	b.add_theme_color_override("font_hover_color", BogeyTheme.ACCENT_900)
+	b.add_theme_color_override("font_pressed_color", BogeyTheme.ACCENT_900)
 	b.pressed.connect(_on_form_deck_chip_pressed)
 	return b
 

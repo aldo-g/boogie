@@ -1,6 +1,6 @@
 extends Node
 
-# Dev-only screenshot harness: boots Main.tscn at a fixed size, lets the UI
+# Dev-only screenshot harness: boots Main.tscn (or CAP_SCENE) at a fixed size, lets the UI
 # settle, then writes a PNG. Not shipped with the game.
 
 func _ready() -> void:
@@ -12,7 +12,10 @@ func _ready() -> void:
 	get_window().size = Vector2i(w, h)
 	get_window().content_scale_size = Vector2i(w, h)
 	get_window().content_scale_mode = Window.CONTENT_SCALE_MODE_DISABLED
-	var scene := load("res://scenes/Main.tscn")
+	var scene_path := OS.get_environment("CAP_SCENE")
+	if scene_path == "":
+		scene_path = "res://scenes/Main.tscn"
+	var scene := load(scene_path)
 	add_child(scene.instantiate())
 	# Let _ready, layout, and any deferred UI build finish.
 	for i in range(12):

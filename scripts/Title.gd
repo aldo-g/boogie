@@ -254,6 +254,9 @@ func _build_menu() -> void:
 	panel.add_child(BogeyUI.hairline(0.12))
 
 	var footer := HBoxContainer.new()
+	# Link buttons carry no box, so without a gap the three run together
+	# into one phrase.
+	footer.add_theme_constant_override("separation", 18)
 	panel.add_child(footer)
 	for link in [["Records", _on_records_pressed], ["Settings", _on_settings_pressed],
 			["Credits", _on_credits_pressed]]:
