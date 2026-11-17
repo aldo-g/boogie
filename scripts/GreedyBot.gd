@@ -20,6 +20,9 @@ extends RefCounted
 #   Draft  — the club that most improves the bag: yardage coverage (Mid
 #            tier worth most), set progress, and abilities. A range session
 #            when the Form deck has soured and the draft offers little.
+#   Hunt   — the draft's other moves (DraftRules.gd): it calls birdie on a
+#            hole it fancies, trades in a club the bag would not miss, and
+#            digs when the rack offers next to nothing.
 #   Putt   — the meter's real bands (PuttMeter.bands) against a human-ish
 #            timing error, so putting is neither perfect nor random.
 #
@@ -28,6 +31,7 @@ extends RefCounted
 # ---------------------------------------------------------
 
 const Tier := ShotResolver.Tier
+const DraftRules := preload("res://scripts/DraftRules.gd")
 
 # A human stopping the putt marker: timing error, standard deviation in
 # seconds. 100 ms averages ~1.2 putts from 10 yds and ~1.6 from 30 — a
@@ -45,6 +49,23 @@ var aim_error: float = 0.0
 # ...or one fewer bad card than that when the draft offers this little.
 var range_weak_gain: float = 1.0
 var allow_range: bool = true
+# Whether it uses the draft's other moves at all (off for controlled runs).
+var allow_hunt: bool = true
+# It calls birdie when it rates its chance at least this. At 0.22 the
+# scratch rival called nearly every hole (17 a round), which is a tic, not
+# a decision; at three in ten a call means it fancies the hole.
+var call_at: float = 0.30
+# It digs when the best club on the rack improves the bag by less than
+# this, and trades in a club whose loss would cost the bag less than that.
+var dig_below: float = 0.5
+var trade_below: float = 0.4
+# BotSim's `allout`: chase one maker's top set with everything it has —
+# every club of that maker it is offered, and a dig, then a trade-in,
+# whenever the rack shows none. No rival plays like this. It is the measure
+# of whether the top set can be reached by a player who goes all out for
+# it, and of what that costs in strokes.
+var all_out: bool = false
+var _chase: String = ""      # the maker it is chasing, once it has one
 # Points scored per yard band in draft valuation, see bag_score().
 const COVER_MIN := 25
 const COVER_MAX := 235
@@ -70,6 +91,8 @@ var rng := RandomNumberGenerator.new()
 var _putts: PackedFloat32Array = PackedFloat32Array()  # expected putts, index = half-yards
 var _plan: Dictionary = {}
 var _planned: bool = false   # _plan was made ahead by plan_shot() for the shot now due
+var _call_hole: int = -1     # the hole it last weighed a call on
+var _last_gain: float = 0.0  # what the best club in the last draft it read was worth
 
 # What happened, for the harness. Reset with reset_log().
 var notes: Dictionary = {}
@@ -83,7 +106,7 @@ func _init(seed_value: int = 0) -> void:
 
 func reset_log() -> void:
 	notes = {"shots": [], "created_seen": 0, "created_played": 0, "abilities": [],
-		"range": false, "draft": "", "cut": ""}
+		"range": false, "draft": "", "cut": "", "called": false, "digs": 0, "trades": 0}
 
 
 # Works out the next shot without playing it; act() then plays that plan
@@ -112,6 +135,13 @@ func planned_aim(fallback: Vector2) -> Vector2:
 func act(main) -> bool:
 	match main.state:
 		main.State.CLUB_SELECT:
+			# On the tee, once a hole: is this one worth calling?
+			if allow_hunt and _call_hole != main.current_hole_index and main.can_call_hole():
+				_call_hole = main.current_hole_index
+				if not main.me.called and birdie_chance(main) >= call_at:
+					notes.called = true
+					main.on_call_hole()
+					return true
 			if _can(main, "improve_lie"):
 				_planned = false
 				_use(main, "improve_lie")
@@ -130,15 +160,28 @@ func act(main) -> bool:
 			if pick >= 0:
 				main.on_form_pick(pick)
 		main.State.DRAFT:
-			var pick := choose_draft(main)
-			if pick < 0:
-				notes.range = true
-				main.on_range_session()
-			else:
-				notes.draft = str(main.current_draft_options[pick].name)
-				main.on_draft_pick(pick)
+			var move := choose_draft_move(main)
+			match str(move.kind):
+				"dig":
+					notes.digs += 1
+					main.on_dig()
+				"trade":
+					notes.trades += 1
+					main.on_trade_in(int(move.index))
+				"done":
+					main.on_draft_done()
+				"range":
+					notes.range = true
+					main.on_range_session()
+				_:
+					var taken := str(main.current_draft_options[int(move.index)].name)
+					notes.draft = taken if notes.draft == "" else "%s + %s" % [notes.draft, taken]
+					main.on_draft_pick(int(move.index))
 		main.State.DISCARD_FOR_DRAFT, main.State.DISCARD_FOR_HAZARD:
-			var cut := choose_discard(main.hand, main.pending_new_card)
+			# Going all out, never a club of the maker it is chasing.
+			var cut := _cut_outside(main.hand, _chase, main.pending_new_card) if all_out and _chase != "" else -1
+			if cut < 0:
+				cut = choose_discard(main.hand, main.pending_new_card)
 			notes.cut = str(main.hand[cut].name)
 			main.on_discard_pick(cut)
 		main.State.PUTTING:
@@ -300,7 +343,7 @@ func expected_shot(main, club: Dictionary, aim: Vector2, armed: Dictionary, mix:
 		for bad in misses:
 			total += minf(shot_cost(main, club, aim, FormCard.make(bad), lie, armed), cap)
 		return total / misses.size()
-	var n := ShotRules.form_choice_count(bag, tier, lie)
+	var n := ShotRules.form_choice_count(bag, tier, lie, 0, club)
 	if Brands.drops_worst_draw(bag):
 		n += 1
 	var costs: Array = []
@@ -492,7 +535,12 @@ func _maybe_form_ability(main) -> bool:
 					notes.created_seen += 1
 					_plan["seen_created"] = true
 				return true
-	if _can(main, "redraw"):
+	# A re-draw: the Titanist 7-set's, or The Surgeon's.
+	var redraw_id := ""
+	for id in ["redraw", "surgeon"]:
+		if redraw_id == "" and _can(main, id):
+			redraw_id = id
+	if redraw_id != "":
 		var drawn := options.filter(func(c): return not c.created)
 		var costs: Array = []
 		var probs: Array = []
@@ -500,7 +548,7 @@ func _maybe_form_ability(main) -> bool:
 			costs.append(shot_cost(main, club, aim, m.card, lie, armed))
 			probs.append(m.p)
 		if best_now - expected_best(costs, probs, drawn.size()) > 0.08:
-			_use(main, "redraw")
+			_use(main, redraw_id)
 			return true
 	return false
 
@@ -608,18 +656,26 @@ static func bag_score(bag: Array) -> float:
 	for b in counts:
 		var n := int(counts[b])
 		top = maxi(top, n)
-		match Brands.tier_reached(n):
-			2:
-				score += 2.5
-			4:
-				score += 6.0
-			7:
-				score += 10.0
+		var tier := Brands.tier_reached(n)
+		if Brands.is_top(tier):
+			score += 10.0
+		elif tier >= Brands.TIER_SET:
+			score += 6.0
+		elif tier >= Brands.TIER_PAIR:
+			score += 2.5
 	# Progress toward a set, for the brand the bag leans on most.
 	score += 0.6 * top
 	for c in bag:
 		if ClubAbilities.power(c) != "":
 			score += 2.5
+		# A Staff club is a liability asleep and a prize awake.
+		if ClubAbilities.is_staff(c):
+			score += 2.0 if ClubAbilities.is_awake(bag, c) else -1.5
+		# The shot a maker's club brings to the Form deck, and what comes with it.
+		if Brands.signature(c) != "":
+			score += 0.3
+		if Brands.baggage(c) != "":
+			score -= 0.4
 	return score
 
 
@@ -638,12 +694,140 @@ func choose_draft(main) -> int:
 		if gain > best_gain:
 			best_gain = gain
 			best = i
+	_last_gain = best_gain
 	if allow_range and main.form_deck.bad_count() > 0:
 		var bad: int = main.form_deck.bad_count()
 		if bad >= range_bad_at or (bad >= range_bad_at - 1 and best_gain < range_weak_gain) \
 				or best_gain <= 0.0:
 			return -1
 	return best
+
+
+# The draft's next move: {kind, index} — "pick" a club, a "range" session,
+# or one of the hunting moves (DraftRules.gd): "dig", "trade", "done".
+func choose_draft_move(main) -> Dictionary:
+	var p = main.me
+	if all_out:
+		var chasing := _all_out_move(main)
+		if not chasing.is_empty():
+			return chasing
+	var pick := choose_draft(main)
+	var gain := _last_gain
+	if p.draft_taken > 0:
+		# A called hole made keeps two: the second only if it earns its place.
+		if pick < 0:
+			return {"kind": "range"}
+		return {"kind": "pick", "index": pick} if gain > 0.0 else {"kind": "done"}
+	if allow_hunt:
+		var shown: int = main.current_draft_options.size()
+		# A club the bag would not miss buys one more offer.
+		if DraftRules.can_trade(main.hand, p.draft_taken, p.draft_traded, shown):
+			var dead := _dead_club(main.hand)
+			if dead >= 0:
+				return {"kind": "trade", "index": dead}
+		# A rack with next to nothing on it is worth a bad card to replace —
+		# while the Form deck can still take one.
+		if pick >= 0 and gain < dig_below \
+				and DraftRules.can_dig(main.hand, p.draft_taken, p.draft_digs, shown) \
+				and (not DraftRules.dig_costs_card(main.hand)
+					or main.form_deck.bad_count() <= range_bad_at - 2):
+			return {"kind": "dig"}
+	if pick < 0:
+		return {"kind": "range"}
+	return {"kind": "pick", "index": pick}
+
+
+# Going all out for one maker's top set: the move that serves the chase, or
+# {} to draft as usual (nothing to chase with on this rack, or the set is in).
+func _all_out_move(main) -> Dictionary:
+	var bag: Array = main.hand
+	var options: Array = main.current_draft_options
+	var counts := Brands.counts(bag)
+	# It chases the live maker it holds most of — the first one it is
+	# offered, to begin with.
+	if _chase == "":
+		var most := 0
+		for b in main.live_brands:
+			if int(counts.get(b, 0)) > most:
+				most = int(counts[b])
+				_chase = b
+	if _chase == "":
+		for i in range(options.size()):
+			if main.live_brands.has(options[i].get("brand", "")):
+				_chase = options[i].brand
+				return {"kind": "pick", "index": i}
+		return {}
+	var held := int(counts.get(_chase, 0))
+	if held >= Brands.top_tier:
+		return {}
+	# Any club that adds to the count is taken (a wild card counts).
+	for i in range(options.size()):
+		if int(Brands.counts(bag + [options[i]]).get(_chase, 0)) > held:
+			return {"kind": "pick", "index": i}
+	var p = main.me
+	if p.draft_taken > 0:
+		return {}
+	# Nothing for the chase on the rack: dig for it, then trade in for one
+	# more look — while the Form deck can still take the card a dig costs.
+	var shown: int = options.size()
+	if DraftRules.can_dig(bag, p.draft_taken, p.draft_digs, shown) \
+			and (not DraftRules.dig_costs_card(bag) or main.form_deck.bad_count() <= range_bad_at - 2):
+		return {"kind": "dig"}
+	if bag.size() >= 5 and DraftRules.can_trade(bag, p.draft_taken, p.draft_traded, shown):
+		var cut := _cut_outside(bag, _chase)
+		if cut >= 0:
+			return {"kind": "trade", "index": cut}
+	return {}
+
+
+# The club to give up that is not one of `maker`'s (nor a wild card counting
+# as one): the one whose loss hurts the bag least, or -1.
+func _cut_outside(bag: Array, maker: String, incoming = null) -> int:
+	var held := int(Brands.counts(bag).get(maker, 0))
+	var best := -1
+	var best_score := -INF
+	for i in range(bag.size()):
+		var after: Array = bag.duplicate()
+		after.remove_at(i)
+		if int(Brands.counts(after).get(maker, 0)) < held:
+			continue
+		if incoming != null:
+			after.append(incoming)
+		var s := bag_score(after)
+		if s > best_score:
+			best_score = s
+			best = i
+	return best
+
+
+# A club whose loss would cost the bag less than trade_below, or -1.
+func _dead_club(bag: Array) -> int:
+	if bag.size() < 4:
+		return -1
+	var base := bag_score(bag)
+	var best := -1
+	var least := trade_below
+	for i in range(bag.size()):
+		var after: Array = bag.duplicate()
+		after.remove_at(i)
+		var loss := base - bag_score(after)
+		if loss < least:
+			least = loss
+			best = i
+	return best
+
+
+# Its chance of a birdie or better on the hole in front of it, roughly:
+# how good a player it is, how gettable the hole is for its length and
+# par, and how much of a bag it has to play it with. A rule of thumb, set
+# against what BotSim's medium rival actually makes on Bogey Links (about
+# one hole in five on the front nine, one in three on the back, and one in
+# two on a par 5 with a full bag).
+func birdie_chance(main) -> float:
+	var expected := _lerp_table(OFF_GREEN, main.hole.tee_pos.distance_to(main.hole.pin_pos))
+	var skill := 0.50 - 0.016 * aim_error - 1.1 * (putt_timing_sd - 0.10)
+	var bag := 0.012 * float(maxi(main.hand.size() - 3, 0))
+	return clampf(skill + bag + 0.3 * (float(main.hole_par) - expected), 0.0, 0.9)
 
 
 # Which club to cut so `incoming` fits: the one whose loss hurts least.

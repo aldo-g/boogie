@@ -3,7 +3,7 @@ extends RefCounted
 # ---------------------------------------------------------
 # Fixed bags for the headless harnesses. Dev tool, not shipped.
 #
-# A randomly drafted bag almost never holds a limited edition or a 7-set,
+# A randomly drafted bag almost never holds a limited edition or a top set,
 # so the flow harnesses would barely touch club abilities. These loadouts
 # put every ability in someone's bag — one per seat — so a 2-4 player
 # round exercises them end to end, online included.
@@ -13,28 +13,28 @@ extends RefCounted
 # ---------------------------------------------------------
 
 const LOADOUTS := [
-	# Titanist 7 (re-draw) + the Gold Cleek with its Titanist Wood rider,
+	# Titanist 8 (re-draw) + the Gold Cleek with its Titanist Wood rider,
 	# the Blade Putter's retry, and the Bulger with a wedge.
 	["Titanist Pro Driver", "Titanist Fairway 5", "Titanist 4-Iron", "Titanist 6-Iron",
 		"Titanist 8-Iron", "Titanist Tour Wedge", "Titanist Blade Putter", "Gold Cleek",
 		"The Bulger", "Sand Wedge"],
-	# MacGregorian 7 (improve lie), Old Tom's Niblick with a MacGregorian
+	# MacGregorian 8 (improve lie), Old Tom's Niblick with a MacGregorian
 	# Wood, the Persimmon Spoon, the Jigger, and the Rutter with a
 	# Callowell Iron.
 	["MacGregorian Persimmon Driver", "MacGregorian Brassie", "MacGregorian Spoon",
 		"MacGregorian Mashie", "MacGregorian Mid-Mashie", "MacGregorian Niblick",
 		"MacGregorian Jigger", "Old Tom's Niblick", "Persimmon Spoon", "The Rutter",
 		"Callowell Rescue"],
-	# Nimbus 7 (tier boost, ideal club, every type), the Utility Wedge,
+	# Nimbus 8 (tier boost, ideal club, every type), the Utility Wedge,
 	# and the Equaliser beside two other brands.
 	["Nimbus Driver", "Nimbus Hybrid 3", "Nimbus Hybrid 5", "Nimbus Hybrid 7",
 		"Nimbus All-Rounder", "Nimbus Utility Wedge", "Nimbus Putter", "The Equaliser",
 		"Ping-Well Lob Wedge", "Callowell Gap Wedge"],
-	# Slazinger 7 (once-per-round abilities every hole), Old Reliable's
+	# Slazinger 8 (once-per-round abilities every hole), Old Reliable's
 	# Steady Hands with another Ping-Well club, and the Callowell Mallet.
 	["Slazinger Cannon Driver", "Slazinger Launch Wood", "Slazinger Long Iron",
 		"Slazinger Power Iron", "Slazinger Deep Iron", "Slazinger Blast Wedge",
-		"Slazinger Heavy Putter", "Old Reliable Putter", "Ping-Well Mallet Putter",
+		"Slazinger Heavy Putter", "Slazinger Short Iron", "Old Reliable Putter", "Ping-Well Mallet Putter",
 		"Callowell Mallet Putter"],
 ]
 
@@ -67,3 +67,31 @@ static func pick_ability(main, chance: float) -> String:
 
 static func wants_range(main, chance: float) -> bool:
 	return main.state == main.State.DRAFT and main.form_deck.bad_count() > 0 and randf() < chance
+
+
+const _DraftRules := preload("res://scripts/DraftRules.gd")
+
+
+# One of the hunting moves a bot might make (DraftRules.gd), `chance` of
+# the time: a call on the tee, or in the draft a dig, a trade-in, or
+# stopping a draft that keeps two. {kind, payload}, or {} for none.
+static func pick_hunt(main, chance: float) -> Dictionary:
+	if randf() >= chance:
+		return {}
+	if main.can_call_hole():
+		return {"kind": "call", "payload": {}}
+	if main.state != main.State.DRAFT:
+		return {}
+	var p = main.me
+	var shown: int = main.current_draft_options.size()
+	var moves: Array = []
+	if _DraftRules.can_dig(main.hand, p.draft_taken, p.draft_digs, shown):
+		moves.append({"kind": "dig", "payload": {}})
+	# Not from a small bag: the harnesses expect a bag to stay playable.
+	if main.hand.size() > 3 and _DraftRules.can_trade(main.hand, p.draft_taken, p.draft_traded, shown):
+		moves.append({"kind": "trade", "payload": {"index": randi() % main.hand.size()}})
+	if p.draft_taken > 0:
+		moves.append({"kind": "done", "payload": {}})
+	if moves.is_empty():
+		return {}
+	return moves.pick_random()

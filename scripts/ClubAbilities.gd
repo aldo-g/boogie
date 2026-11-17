@@ -20,7 +20,7 @@ extends RefCounted
 #     the current Form hand and exhausts whether played or not — so the
 #     decision is which shot to spend it on, not whether to hoard it.
 #
-# Set bonuses that are activated (Titanist 7, MacGregorian 7, Nimbus 2/7)
+# Set bonuses that are activated (Titanist 8, MacGregorian 8, Nimbus 2/8)
 # are listed and charged here too, so the player sees one list of things
 # they can do.
 #
@@ -39,8 +39,38 @@ const STEADY_HANDS_WIDEN := 0.6
 
 # --- Reading a club's effects ------------------------------------------
 
-static func effect(club: Dictionary, key: String, default: Variant = null) -> Variant:
+# One of a club's effects. With a `bag`, a Staff club that is awake in it
+# answers from its `staff` effects first — so every rule that hands over
+# the bag sees the club as it plays there, and nothing has to be rewritten
+# on the club when the bag changes.
+static func effect(club: Dictionary, key: String, default: Variant = null, bag: Array = []) -> Variant:
+	if not bag.is_empty() and is_awake(bag, club):
+		var woken: Dictionary = club.get("staff", {})
+		if woken.has(key):
+			return woken[key]
 	return (club.get("effects", {}) as Dictionary).get(key, default)
+
+
+# --- Staff clubs (Section 3C) -------------------------------------------
+# Built for a maker's staff players. Poor in a mixed bag; once the bag
+# holds four of the maker's clubs (this one included) its `staff` effects
+# take over from its own.
+
+static func is_staff(club: Dictionary) -> bool:
+	return not (club.get("staff", {}) as Dictionary).is_empty()
+
+
+static func is_awake(bag: Array, club: Dictionary) -> bool:
+	return is_staff(club) and Brands.has(bag, club.get("brand", Brands.NONE), Brands.STAFF_TIER)
+
+
+# The Staff clubs in `bag` that are awake there, by name.
+static func awake_names(bag: Array) -> Array:
+	var out: Array = []
+	for club in bag:
+		if is_awake(bag, club):
+			out.append(str(club.get("name", "")))
+	return out
 
 
 static func power(club: Dictionary) -> String:
@@ -88,29 +118,70 @@ static func bag_has(bag: Array, brand: String, t: String, except: String = "") -
 # --- Club modifiers (applied by ShotRules) -------------------------------
 
 # Share of a Form card's deviation this club lets through, before brands.
-static func buffer(club: Dictionary) -> float:
-	return ShotResolver.buffer_for_club(club) * float(effect(club, "buffer", 1.0))
+static func buffer(club: Dictionary, bag: Array = []) -> float:
+	return ShotResolver.buffer_for_club(club) * float(effect(club, "buffer", 1.0, bag))
 
 
 # The share of the aim this club flies from `lie`, or -1 for "use the
 # terrain table".
-static func lie_cap(club: Dictionary, lie: String) -> float:
+static func lie_cap(club: Dictionary, lie: String, bag: Array = []) -> float:
 	match lie:
 		"rough":
-			return float(effect(club, "rough_cap", -1.0))
+			return float(effect(club, "rough_cap", -1.0, bag))
 		"bunker":
-			return float(effect(club, "bunker_cap", -1.0))
+			return float(effect(club, "bunker_cap", -1.0, bag))
 	return -1.0
 
 
 static func mid_span(bag: Array, club: Dictionary) -> float:
-	return maxf(Brands.mid_tier_span(bag), float(effect(club, "mid_span", 0.0)))
+	return maxf(Brands.mid_tier_span(bag), float(effect(club, "mid_span", 0.0, bag)))
+
+
+# A club with no Mid tier at all: every swing in its band is Full or
+# Finesse (a Ping-Well Staff club out of its set).
+static func no_mid(bag: Array, club: Dictionary) -> bool:
+	return bool(effect(club, "no_mid", false, bag))
+
+
+# A club every swing of which is Mid, even below its range (a Ping-Well
+# Staff club in its set, The Metronome always).
+static func all_mid(bag: Array, club: Dictionary) -> bool:
+	return bool(effect(club, "all_mid", false, bag))
+
+
+# Form cards this club adds to (or takes from) its own draw: its own
+# figure, and `trouble_draw` when it is played from rough or sand.
+static func draw_bonus(bag: Array, club: Dictionary, lie: String = "") -> int:
+	var n := int(effect(club, "draw_bonus", 0, bag))
+	if HAZARD_LIES.has(lie):
+		n += int(effect(club, "trouble_draw", 0, bag))
+	return n
+
+
+# How much harder (or softer) a bad card hits when played with this club,
+# on top of the bag's own (Brands.severity_mult).
+static func severity(bag: Array, club: Dictionary) -> float:
+	return float(effect(club, "severity", 1.0, bag))
+
+
+# What becomes of a bad card played with this club: "" (the discard pile,
+# like any other), "top" (straight back on top of the Form deck) or "gone"
+# (out of the Form deck for good). The Callowell Staff clubs.
+static func bad_fate(bag: Array, club: Dictionary) -> String:
+	return str(effect(club, "bad_fate", "", bag))
+
+
+# The Metronome with a Ping-Well Wood beside it: Stock Shots are struck
+# pure from any tier, with any club.
+static func stock_always(bag: Array) -> bool:
+	var metronome := club_with_power(bag, "metronome")
+	return not metronome.is_empty() and bag_has(bag, "pingwell", "wood", metronome.name)
 
 
 # Woods are barred from sand, except the Persimmon Driver, and the
 # Persimmon Spoon once a second MacGregorian club is in the bag.
 static func bunker_playable(bag: Array, club: Dictionary) -> bool:
-	if bool(effect(club, "bunker_playable", false)):
+	if bool(effect(club, "bunker_playable", false, bag)):
 		return true
 	return power(club) == "persimmon_spoon" and _persimmon_rider(bag)
 
@@ -197,7 +268,7 @@ static func record(charges: Dictionary, id: String, hole_n: int) -> void:
 	charges[id] = hist
 
 
-# How often an ability may be used: [period, limit]. Slazinger 7 turns
+# How often an ability may be used: [period, limit]. Slazinger 8 turns
 # once-per-round and once-per-six-holes into once per hole.
 static func allowance(bag: Array, id: String) -> Array:
 	var out := [Period.HOLE, 1]
@@ -210,6 +281,9 @@ static func allowance(bag: Array, id: String) -> Array:
 			out = [Period.SIX_HOLES if pingwell >= 2 else Period.ROUND, 1]
 		"putt_retry":
 			out = [Period.ROUND, 1]
+		"surgeon":
+			# Once every six holes with a Titanist Iron alongside.
+			out = [Period.SIX_HOLES if bag_has(bag, "titanist", "iron") else Period.ROUND, 1]
 	if out[0] != Period.HOLE and Brands.round_abilities_per_hole(bag):
 		out[0] = Period.HOLE
 	return out
@@ -249,14 +323,14 @@ static func actives(bag: Array, phase: String, ctx: Dictionary) -> Array:
 		"club_select":
 			if Brands.can_improve_lie(bag) and HAZARD_LIES.has(lie):
 				out.append(_entry(bag, ctx, "improve_lie", "Improve your lie to %s" % lie_improved(lie),
-					"MacGregorian 7-set", false))
+					"MacGregorian %d-set" % Brands.top_tier, false))
 		"aim":
 			if Brands.can_boost_tier(bag):
 				out.append(_entry(bag, ctx, "boost_tier", "Play this shot one swing tier better",
 					"Nimbus 2-set", true))
 			if Brands.can_play_ideal(bag):
 				out.append(_entry(bag, ctx, "ideal_club", "Play this as the ideal club",
-					"Nimbus 7-set", true))
+					"Nimbus %d-set" % Brands.top_tier, true))
 		"form":
 			if has_power(bag, "gold_cleek") and not _holds_created(options, "Pure Strike"):
 				out.append(_entry(bag, ctx, "gold_cleek", "Create a Pure Strike", "Gold Cleek", false))
@@ -265,9 +339,11 @@ static func actives(bag: Array, phase: String, ctx: Dictionary) -> Array:
 					and (HAZARD_LIES.has(lie) or bag_has(bag, "", "wedge")):
 				out.append(_entry(bag, ctx, "bulger", "Create a Big Strike", "The Bulger", false))
 			# Re-drawing only touches drawn cards, so it needs one in hand.
-			if Brands.can_redraw(bag) and not bool(ctx.get("forced", false)) \
-					and options.any(func(c): return not c.created):
-				out.append(_entry(bag, ctx, "redraw", "Re-draw your Form hand", "Titanist 7-set", false))
+			if not bool(ctx.get("forced", false)) and options.any(func(c): return not c.created):
+				if Brands.can_redraw(bag):
+					out.append(_entry(bag, ctx, "redraw", "Re-draw your Form hand", "Titanist %d-set" % Brands.top_tier, false))
+				if has_power(bag, "surgeon"):
+					out.append(_entry(bag, ctx, "surgeon", "Re-draw your Form hand", "The Surgeon", false))
 		"putting":
 			if has_power(bag, "old_reliable"):
 				out.append(_entry(bag, ctx, "old_reliable", "Steady Hands on this putt",

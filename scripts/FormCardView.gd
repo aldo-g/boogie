@@ -101,9 +101,10 @@ func _build() -> void:
 
 	# At the right, where a club card names its type, the club family the
 	# card was dealt from. A created card says that instead: it belongs to
-	# no family, and exhausts rather than returning to the deck.
+	# no family, and exhausts rather than returning to the deck. A card of
+	# no family that a club brought (a Utility Swing) is any club's.
 	col.add_child(CardFace.header(accent, "Good form" if form_card.good else "Bad form", deep,
-		"Created" if form_card.created else str(FormCard.FAMILY_LABEL.get(form_card.family, ""))))
+		"Created" if form_card.created else str(FormCard.FAMILY_LABEL.get(form_card.family, "Any club"))))
 	col.add_child(CardFace.name_label(form_card.name, CardFace.NAME_SIZE, 0.0))
 	col.add_child(CardFace.figure([form_card.distance_figure(), form_card.line_figure()]))
 

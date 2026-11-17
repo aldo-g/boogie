@@ -146,6 +146,10 @@ func _step(main) -> bool:
 	if TestBags.wants_range(main, 0.15):
 		main.on_range_session()
 		return true
+	var hunt := TestBags.pick_hunt(main, 0.25)
+	if not hunt.is_empty():
+		main._apply_action(hunt.kind, hunt.payload)
+		return true
 	match main.state:
 		main.State.CLUB_SELECT:
 			if main.hand.is_empty():

@@ -16,9 +16,13 @@ extends SceneTree
 #   7. club effects in clubs.json are ones the rules know
 #   8. club modifiers and set bonuses change the shot as their text says
 #   9. ability charges, created cards and purges
+#  10. Staff clubs sleep out of their set and wake in it
+#  11. the signature shots, and the Form deck taking and giving them up
+#  12. the draft's rules: the call, the dig, the trade-in
 # ---------------------------------------------------------
 
 const Tier := ShotResolver.Tier
+const DraftRules := preload("res://scripts/DraftRules.gd")
 
 var failures: Array = []
 
@@ -36,6 +40,10 @@ func _initialize() -> void:
 	_check_abilities()
 	_check_draft_advice()
 	_check_breakdown()
+	_check_staff()
+	_check_top_tier()
+	_check_signatures()
+	_check_draft_rules()
 	if failures.is_empty():
 		print("\nRULES: OK")
 	else:
@@ -79,12 +87,22 @@ func _check_roster() -> void:
 		_expect(not names.has(c.name), "club name %s is unique" % c.name)
 		names[c.name] = true
 
+	var limited_by_brand := {}
 	for b in Brands.DRAFTABLE:
-		# Section 3A: every brand must be able to reach a 7-set.
-		_expect(ClubRoster.branded_clubs(b).size() >= 7, "%s has 7+ clubs" % b)
+		# Section 3C: ten a brand (the top set has to be reachable), two of
+		# them Staff clubs.
+		var clubs := ClubRoster.branded_clubs(b)
+		_expect(clubs.size() == 10, "%s has 10 clubs (got %d)" % [b, clubs.size()])
+		_expect(clubs.filter(func(c): return ClubAbilities.is_staff(c)).size() == 2,
+			"%s has 2 Staff clubs" % b)
+		_expect(clubs.any(func(c): return c.type == "putter"), "%s makes a putter" % b)
 	for c in ClubRoster.limited_clubs():
 		_expect(c.limited, "%s is marked limited" % c.name)
 		_expect(c.ability != "", "%s has ability text" % c.name)
+		_expect(c.ability.contains("With ") or c.ability.contains("With a"), "%s has a pair rider" % c.name)
+		limited_by_brand[c.brand] = int(limited_by_brand.get(c.brand, 0)) + 1
+	for b in Brands.DRAFTABLE:
+		_expect(int(limited_by_brand.get(b, 0)) == 2, "%s has 2 limited editions" % b)
 
 
 func _check_pool() -> void:
@@ -95,6 +113,9 @@ func _check_pool() -> void:
 
 	var live := ["titanist", "callowell", "pingwell", "nimbus"]
 	var pool := ClubRoster.build_pool(live)
+	# 24 standards, 40 branded, 8 limited: more than the 54 offers a round
+	# deals, so a given club is not certain to come past.
+	_expect(pool.size() == standards * copies + 40 + 8, "a 4-brand pool is 72 clubs (got %d)" % pool.size())
 	for c in pool:
 		_expect(c.brand != Brands.STARTER, "Bogey-Mart never enters the pool (%s)" % c.name)
 		_expect(c.brand == Brands.NONE or live.has(c.brand), "%s is from a live brand" % c.name)
@@ -129,8 +150,8 @@ func _check_tiers() -> void:
 	_expect(ShotRules.swing_tier(_brand_bag("pingwell", 2), club, 118) == Tier.MID, "Ping-Well 2 widens MID")
 	_expect(ShotRules.swing_tier(_brand_bag("pingwell", 4), club, 155) == Tier.MID, "Ping-Well 4 lifts FULL to MID")
 	_expect(ShotRules.swing_tier(_brand_bag("pingwell", 4), club, 90) == Tier.FINESSE, "Ping-Well 4 lifts EXTREME to FINESSE")
-	_expect(ShotRules.upgrade_tier(_brand_bag("pingwell", 7), Tier.EXTREME_FINESSE) != Tier.EXTREME_FINESSE,
-		"Ping-Well 7 abolishes EXTREME_FINESSE")
+	_expect(ShotRules.upgrade_tier(_brand_bag("pingwell", Brands.top_tier), Tier.EXTREME_FINESSE) != Tier.EXTREME_FINESSE,
+		"Ping-Well 8 abolishes EXTREME_FINESSE")
 
 
 func _check_form_counts() -> void:
@@ -301,12 +322,12 @@ func _check_settle() -> void:
 			_expect(is_equal_approx(float(s.form_risk), risk),
 				"%s risks a bad card %.2f of the time, not %.2f (hole %d)" % [kind, float(s.form_risk), risk, n])
 
-		# A Shank downgrades the lie, unless Callowell 7 blocks it.
+		# A Shank downgrades the lie, unless Callowell 8 blocks it.
 		var shank := ShotRules.settle(hole, fairway, fairway, true, [])
 		_expect(shank.lie_downgraded and shank.lie == ShotResolver.lie_downgrade("fairway"), "Shank downgrades the lie")
 		_expect(is_equal_approx(float(shank.form_risk), ShotRules.FORM_DECAY_CHANCE), "a Shanked lie risks a card like a hazard")
-		var blocked := ShotRules.settle(hole, fairway, fairway, true, _brand_bag("callowell", 7))
-		_expect(not blocked.lie_downgraded and blocked.lie == "fairway", "Callowell 7 blocks the Shank downgrade")
+		var blocked := ShotRules.settle(hole, fairway, fairway, true, _brand_bag("callowell", Brands.top_tier))
+		_expect(not blocked.lie_downgraded and blocked.lie == "fairway", "Callowell 8 blocks the Shank downgrade")
 	for kind in ["out", "water", "bunker", "rough", "green", "fairway"]:
 		_expect(seen.has(kind), "the built-in course has some %s to test against" % kind)
 
@@ -331,8 +352,8 @@ func _check_putting() -> void:
 		_expect(ShotRules.yips_putt_leave(start) >= 1.0, "the Yips always leaves a putt")
 	_expect(ShotRules.is_gimme(0.5) and not ShotRules.is_gimme(1.0), "the gimme is about 2 feet")
 	_expect(ShotRules.yips_effect([], FormCard.make("Yips")) == ShotRules.Yips.TAINTS_PUTT, "the Yips taints a putt")
-	_expect(ShotRules.yips_effect(_brand_bag("callowell", 7), FormCard.make("Yips")) == ShotRules.Yips.BLOCKED,
-		"Callowell 7 shrugs off the Yips")
+	_expect(ShotRules.yips_effect(_brand_bag("callowell", Brands.top_tier), FormCard.make("Yips")) == ShotRules.Yips.BLOCKED,
+		"Callowell 8 shrugs off the Yips")
 	_expect(ShotRules.yips_effect([], FormCard.make("Pure Strike")) == ShotRules.Yips.NONE, "other cards don't trigger it")
 
 
@@ -340,9 +361,11 @@ func _check_putting() -> void:
 
 const KNOWN_EFFECTS := ["buffer", "rough_cap", "bunker_cap", "bunker_playable", "soft_mishits",
 	"no_lie_downgrade", "mid_span", "bump_run_share", "categories", "blocks_form_decay",
-	"fringe_putt", "big_strike_bonus", "putt_long_band", "putt_short_band", "steady_mult", "power"]
+	"fringe_putt", "big_strike_bonus", "putt_long_band", "putt_short_band", "steady_mult", "power",
+	"draw_bonus", "trouble_draw", "severity", "bad_fate", "no_mid", "all_mid"]
 const KNOWN_POWERS := ["gold_cleek", "bulger", "old_tom", "rutter", "old_reliable",
-	"persimmon_spoon", "equaliser", "putt_retry", "lob_flop", "utility_any_lie"]
+	"persimmon_spoon", "equaliser", "putt_retry", "lob_flop", "utility_any_lie",
+	"surgeon", "gambler", "old_faithful", "metronome", "chameleon"]
 
 
 func _club(name: String) -> Dictionary:
@@ -357,6 +380,10 @@ func _check_effect_data() -> void:
 	for c in _all_clubs():
 		for key in c.effects:
 			_expect(KNOWN_EFFECTS.has(key), "%s: unknown effect '%s'" % [c.name, key])
+		for key in c.staff:
+			_expect(KNOWN_EFFECTS.has(key) and key != "power", "%s: unknown staff effect '%s'" % [c.name, key])
+		_expect(not ClubAbilities.is_staff(c) or c.ability.begins_with("Staff club"),
+			"%s says it is a Staff club" % c.name)
 		var pw := ClubAbilities.power(c)
 		_expect(pw == "" or KNOWN_POWERS.has(pw), "%s: unknown power '%s'" % [c.name, pw])
 	for pw in KNOWN_POWERS:
@@ -418,7 +445,7 @@ func _check_modifiers() -> void:
 	_expect(_degrees([], titanist, "Hook") < _degrees([], plain, "Hook"), "Titanist irons buffer better")
 	_expect(_degrees([], slazinger, "Hook") > _degrees([], plain, "Hook"), "Slazinger irons buffer worse")
 	_expect(_degrees([], plain, "Hook", "fairway", {"ideal_club": true}) < _degrees([], plain, "Hook"),
-		"Nimbus 7's ideal club buffers like a wedge")
+		"Nimbus 8's ideal club buffers like a wedge")
 
 	var spoon := _club("MacGregorian Spoon")
 	_expect(is_equal_approx(_distance([], spoon, "Stinger", "rough", 150), _distance([], spoon, "Stinger", "fairway", 150)),
@@ -446,13 +473,13 @@ func _check_modifiers() -> void:
 	_expect(is_equal_approx(ShotRules.resolve([], launch, 150, "fairway", big).distance, launch.max_yard + 10),
 		"Slazinger Launch Wood's Big Strike flies +10")
 
-	_expect(_distance(_brand_bag("callowell", 7), plain, "Thin") > _distance([], plain, "Thin"), "Callowell 7 softens a Thin")
-	_expect(is_equal_approx(_distance(_brand_bag("callowell", 7), plain, "Pull"), _distance([], plain, "Pull")),
-		"Callowell 7 leaves a Pull's distance alone")
+	_expect(_distance(_brand_bag("callowell", Brands.top_tier), plain, "Thin") > _distance([], plain, "Thin"), "Callowell 8 softens a Thin")
+	_expect(is_equal_approx(_distance(_brand_bag("callowell", Brands.top_tier), plain, "Pull"), _distance([], plain, "Pull")),
+		"Callowell 8 leaves a Pull's distance alone")
 	_check_new_cards(plain)
 	# Chunk and Top: half severity means half the distance loss.
 	var chunk_plain := _distance([], plain, "Chunk")
-	_expect(_distance(_brand_bag("callowell", 7), plain, "Chunk") > chunk_plain, "Callowell 7 softens a Chunk")
+	_expect(_distance(_brand_bag("callowell", Brands.top_tier), plain, "Chunk") > chunk_plain, "Callowell 8 softens a Chunk")
 	_expect(_distance([], _club("Callowell Big Deal Driver"), "Chunk", "fairway", 200) > _distance([], driver, "Chunk", "fairway", 200),
 		"Callowell Big Deal Driver softens a Chunk")
 
@@ -512,8 +539,8 @@ func _check_abilities() -> void:
 	_expect(not _ids([reliable], "putting", putt_ctx).has("old_reliable"), "Old Reliable is once per round")
 	_expect(_ids([reliable, _club("Ping-Well i-Series 5")], "putting", putt_ctx).has("old_reliable"),
 		"...once every six holes with another Ping-Well")
-	_expect(_ids([reliable] + _brand_bag("slazinger", 7), "putting", putt_ctx).has("old_reliable"),
-		"...every hole under Slazinger 7")
+	_expect(_ids([reliable] + _brand_bag("slazinger", Brands.top_tier), "putting", putt_ctx).has("old_reliable"),
+		"...every hole under Slazinger 8")
 
 	var bulger := _club("The Bulger")
 	var bctx := {"lie": "fairway", "club": bulger, "options": [], "charges": {}, "hole": 1}
@@ -523,13 +550,13 @@ func _check_abilities() -> void:
 	bctx.lie = "fairway"
 	_expect(_ids([bulger, _club("Sand Wedge")], "form", bctx).has("bulger"), "...or anywhere with a wedge in the bag")
 
-	var titan7 := _brand_bag("titanist", 7)
+	var titan7 := _brand_bag("titanist", Brands.top_tier)
 	var hand := [FormCard.make("Hook")]
-	_expect(_ids(titan7, "form", {"options": hand, "charges": {}, "hole": 1}).has("redraw"), "Titanist 7 can re-draw")
+	_expect(_ids(titan7, "form", {"options": hand, "charges": {}, "hole": 1}).has("redraw"), "Titanist 8 can re-draw")
 	_expect(not _ids(titan7, "form", {"options": [FormCard.make("Hook").as_created()], "forced": false,
 		"charges": {}, "hole": 1}).has("redraw"), "...but not a hand of only created cards")
-	_expect(_ids(_brand_bag("macgregorian", 7), "club_select", {"lie": "bunker", "charges": {}, "hole": 1}).has("improve_lie"),
-		"MacGregorian 7 improves a bunker lie")
+	_expect(_ids(_brand_bag("macgregorian", Brands.top_tier), "club_select", {"lie": "bunker", "charges": {}, "hole": 1}).has("improve_lie"),
+		"MacGregorian 8 improves a bunker lie")
 	_expect(ClubAbilities.lie_improved("bunker") == "rough" and ClubAbilities.lie_improved("rough") == "fairway",
 		"a lie improves one step")
 
@@ -637,3 +664,242 @@ func _check_breakdown() -> void:
 	_expect(cross.wind_across > 1.0, "a left-to-right wind pushes it right (%.1f)" % cross.wind_across)
 	var text := ShotRules.breakdown_text(cross)
 	_expect(text.begins_with("Carried") and text.contains("right"), "the breakdown reads (%s)" % text)
+
+
+# --- Staff clubs (Section 3C) --------------------------------------------
+
+# `club` in a bag with three more of its maker's clubs: awake.
+func _staff_bag(club: Dictionary) -> Array:
+	var bag: Array = [club]
+	for c in ClubRoster.branded_clubs(club.brand):
+		if bag.size() < 4 and not ClubAbilities.is_staff(c):
+			bag.append(c)
+	return bag
+
+
+func _check_staff() -> void:
+	for b in Brands.DRAFTABLE:
+		for c in ClubRoster.branded_clubs(b):
+			if not ClubAbilities.is_staff(c):
+				continue
+			_expect(not ClubAbilities.is_awake([c], c), "%s is asleep on its own" % c.name)
+			_expect(not ClubAbilities.is_awake(_staff_bag(c).slice(0, 3), c), "%s is asleep with 3 of its maker" % c.name)
+			_expect(ClubAbilities.is_awake(_staff_bag(c), c), "%s wakes with 4 of its maker" % c.name)
+	_expect(not ClubAbilities.is_staff(_club("Driver")) and not ClubAbilities.is_awake(_brand_bag("titanist", 4), _club("Titanist 4-Iron")),
+		"an ordinary club is never a Staff club")
+
+	# Titanist: one Form card fewer asleep, one more awake (on top of the
+	# 4-set's own extra card).
+	var t := _club("Titanist Staff 7-Iron")
+	_expect(ShotRules.form_choice_count([t], Tier.MID, "fairway", 0, t) == 2, "a Titanist Staff club asleep draws one fewer")
+	_expect(ShotRules.form_choice_count([t], Tier.FULL, "fairway", 0, t) == 1, "...and never fewer than one")
+	_expect(ShotRules.form_choice_count(_staff_bag(t), Tier.MID, "fairway", 0, t) == 5, "awake it draws one more")
+	_expect(ShotRules.form_choice_count(_staff_bag(t), Tier.MID, "fairway", 0, _club("Titanist 4-Iron")) == 4,
+		"...and only with the Staff club itself")
+	for bag in [[t], _staff_bag(t)]:
+		var drawn := ShotRules.draw_form(FormDeck.new(), bag, t, 122, "fairway")
+		_expect(drawn.cards.size() == ShotRules.form_choice_count(bag, drawn.tier, "fairway", 0, t),
+			"a Staff club's real draw matches its preview (%d-club bag)" % bag.size())
+
+	# Slazinger: bad cards hit 50% harder asleep; awake, no harder than
+	# they would with no Slazinger in the bag at all.
+	var s := _club("Slazinger Staff Iron")
+	var plain_hook := _degrees([], _club("5-Iron"), "Hook")
+	_expect(_degrees([s], s, "Hook") > plain_hook * 1.4, "a Slazinger Staff club asleep hits bad cards harder")
+	_expect(is_equal_approx(_degrees(_staff_bag(s), s, "Hook"), plain_hook), "awake it cancels the Slazinger penalty")
+	_expect(is_equal_approx(_degrees([s], s, "Controlled Draw"), _degrees([], _club("5-Iron"), "Controlled Draw")),
+		"...and never touches a good card")
+
+	# Ping-Well: no Mid tier asleep; awake, Mid everywhere — below its range too.
+	var p := _club("Ping-Well Staff 7-Iron")
+	_expect(ShotRules.swing_tier([p], p, 122) != Tier.MID and ShotRules.swing_tier([p], p, 124) != Tier.MID,
+		"a Ping-Well Staff club asleep has no Mid tier")
+	_expect(ShotRules.swing_tier([p], p, 60) == Tier.EXTREME_FINESSE, "...and still has a bottom to its range")
+	for d in [60.0, 101.0, 122.0, 144.0]:
+		_expect(ShotRules.swing_tier(_staff_bag(p), p, d) == Tier.MID, "awake it is Mid at %d yds" % int(d))
+	_expect(ShotRules.swing_tier([], _club("The Metronome"), 40) == Tier.MID, "The Metronome is always Mid")
+
+	# MacGregorian: poor from trouble asleep; awake, an extra card from it.
+	var m := _club("MacGregorian Staff Cleek")
+	_expect(is_equal_approx(ShotRules.lie_distance_cap([m], "rough", m), 0.5), "a MacGregorian Staff club asleep flies half from rough")
+	_expect(is_equal_approx(ShotRules.lie_distance_cap(_staff_bag(m), "rough", m), 1.0), "awake the rough costs it nothing")
+	_expect(ShotRules.form_choice_count(_staff_bag(m), Tier.MID, "rough", 0, m) == 4, "...and it draws one more from rough")
+	_expect(ShotRules.form_choice_count(_staff_bag(m), Tier.MID, "fairway", 0, m) == 3, "...but not from the fairway")
+	var baffy := _club("MacGregorian Staff Baffy")
+	_expect(not ShotRules.club_playable([baffy], baffy, "bunker") and ShotRules.club_playable(_staff_bag(baffy), baffy, "bunker"),
+		"the Staff Baffy plays from sand only once awake")
+
+	# Callowell: what becomes of a bad card played with it.
+	var c := _club("Callowell Staff Wedge")
+	_expect(ClubAbilities.bad_fate([c], c) == "top" and ClubAbilities.bad_fate(_staff_bag(c), c) == "gone",
+		"a Callowell Staff club sends a bad card back asleep and away awake")
+	_expect(ClubAbilities.bad_fate(_staff_bag(c), _club("Callowell 6-Iron")) == "", "...and only the Staff club does")
+	var top := FormDeck.new()
+	var shank := FormCard.make("Shank").of_family("wedge")
+	top.return_to_top(shank)
+	_expect(top.draw_cards(1, "wedge")[0] == shank, "a card sent back on top is the next its family is dealt")
+
+	# Nimbus: more deviation than a driver asleep, less than a wedge awake.
+	var n := _club("Nimbus Staff Hybrid")
+	_expect(ClubAbilities.buffer(n, [n]) > 1.0, "a Nimbus Staff club asleep lets through more than a driver")
+	_expect(ClubAbilities.buffer(n, _staff_bag(n)) < 0.5, "awake, less than a wedge")
+	_expect(is_equal_approx(ClubAbilities.buffer(n), ClubAbilities.buffer(n, [n])), "with no bag it reads as asleep")
+
+	# The advice says so at the draft and at the cut.
+	var three: Array = _brand_bag("titanist", 3)
+	var taking := _texts(DraftAdvisor.gains(three, t))
+	_expect(taking.contains("Completes your Titanist 4-set") and taking.contains("awake in this bag"),
+		"a Staff club that completes the set is awake on arrival (%s)" % taking)
+	_expect(_texts(DraftAdvisor.gains(_brand_bag("titanist", 1), t)).contains("asleep until you carry 4 Titanist (2/4)"),
+		"a Staff club offered early says it is asleep")
+	var waking := _texts(DraftAdvisor.gains(_brand_bag("titanist", 2) + [t], ClubRoster.branded_clubs("titanist")[2]))
+	_expect(waking.contains("Wakes your Titanist Staff 7-Iron"), "the club that makes the set wakes the Staff club (%s)" % waking)
+	var four := _staff_bag(t)
+	_expect(_texts(DraftAdvisor.losses(four, four[1])).contains("Puts your Titanist Staff 7-Iron to sleep"),
+		"cutting from the set puts it back to sleep")
+
+	# The Chameleon counts as the brand the rest of the bag holds most of.
+	var cham := _club("The Chameleon")
+	var counted := Brands.counts(three + [cham])
+	_expect(int(counted.get("titanist", 0)) == 4 and not counted.has("nimbus"), "the Chameleon makes a 4th Titanist (%s)" % [counted])
+	counted = Brands.counts(three + [cham, _club("Nimbus Driver")])
+	_expect(int(counted.get("titanist", 0)) == 4 and int(counted.get("nimbus", 0)) == 2,
+		"with a Nimbus Wood it counts as both (%s)" % [counted])
+	_expect(int(Brands.counts([cham]).get("nimbus", 0)) == 1, "alone it is a Nimbus club")
+
+
+# --- Signature shots (Section 4 "Clubs bring their shots") ---------------
+
+func _check_signatures() -> void:
+	for b in Brands.DRAFTABLE:
+		var shot: String = Brands.SIGNATURE.get(b, "")
+		_expect(FormCard.SIGNATURE_NAMES.has(shot), "%s has a signature shot (%s)" % [b, shot])
+		for c in ClubRoster.branded_clubs(b):
+			_expect(Brands.signature(c) == ("" if c.type == "putter" else shot), "%s brings %s" % [c.name, shot])
+	for c in ClubRoster.standard_clubs() + ClubRoster.starter_bag():
+		_expect(Brands.signature(c) == "", "%s brings nothing" % c.name)
+	for n in FormCard.SIGNATURE_NAMES:
+		_expect(FormCard.make(n).good, "%s is a good card" % n)
+		_expect(FormDeck.new().count_of(n) == 0, "%s is not in the deck a round starts with" % n)
+	_expect(Brands.signature_family(_club("Titanist 4-Iron")) == "iron" and Brands.signature_family(_club("Nimbus Driver")) == "",
+		"a signature shot joins its club's family; a Nimbus one joins none")
+	_expect(Brands.baggage(_club("Slazinger Cannon Driver")) == "Duck Hook" and Brands.baggage(_club("Slazinger Power Iron")) == "Hook"
+		and Brands.baggage(_club("Slazinger Heavy Putter")) == "" and Brands.baggage(_club("Titanist Pro Driver")) == "",
+		"only Slazinger clubs bring a bad card, one of their family's")
+
+	# The deck takes a card and gives it up again.
+	var deck := FormDeck.new()
+	var total := deck.deck.size()
+	var iron_good: int = deck.family_form()["iron"].good
+	deck.add_card("Knockdown", "iron")
+	_expect(deck.deck.size() == total + 1 and int(deck.family_form()["iron"].good) == iron_good + 1
+		and deck.count_of("Knockdown") == 1, "a club's shot joins its family")
+	_expect(not deck.remove_card("Knockdown", "wood"), "...and is not taken from another family")
+	_expect(deck.remove_card("Knockdown", "iron") and deck.deck.size() == total and not deck.remove_card("Knockdown", "iron"),
+		"...and leaves when the club does")
+
+	# A card of no family is part of every family's form and dealt to any.
+	var wild := FormDeck.new()
+	var before := wild.family_form()
+	wild.add_card("Utility Swing", "")
+	var after := wild.family_form()
+	for fam in FormCard.FAMILIES:
+		_expect(int(after[fam].good) == int(before[fam].good) + 1, "a Utility Swing counts in the %s form" % fam)
+	var only := FormDeck.new()
+	only.deck = []
+	only.add_card("Utility Swing", "")
+	_expect(only.draw_cards(1, "wedge")[0].name == "Utility Swing", "...and any swing can be dealt it")
+
+	# What each of them does.
+	var iron := _club("7-Iron")
+	_expect(_distance([], iron, "Bomb") > _distance([], iron, "Flushed"), "a Bomb outflies a Flushed")
+	_expect(_distance([], iron, "Knockdown") < _distance([], iron, "Spinner") and FormCard.make("Knockdown").flight < 0.8,
+		"a Knockdown is short and low")
+	_expect(is_equal_approx(_distance([], iron, "Safe Swing", "rough"), 130.0 * 0.9), "a Safe Swing takes no cut from rough")
+	_expect(is_equal_approx(_distance([], iron, "Scotch Runner", "rough"), 130.0) and FormCard.make("Scotch Runner").roll_mult >= 2.0,
+		"a Scotch Runner takes no cut and runs")
+	# Stock Shot: pure from the Mid tier, a push from anywhere else. A 7-Iron
+	# is 95-145: 120 is Mid, 140 Full.
+	var stock := FormCard.make("Stock Shot")
+	_expect(int(ShotRules.resolve([], iron, 120, "fairway", stock).degree) == 0, "a Stock Shot is straight from the Mid tier")
+	var pushed := ShotRules.resolve([], iron, 140, "fairway", stock)
+	_expect(int(pushed.degree) > 0 and pushed.side == ShotResolver.Side.FADE, "...and pushed from a full swing")
+	_expect(ShotRules.card_for_shot([], iron, 140, stock).off_tier and not ShotRules.card_for_shot([], iron, 120, stock).off_tier,
+		"the hand shows it as it will play")
+	_expect(not stock.off_tier, "...without changing the card in the deck")
+	var fitted := [_club("The Metronome"), _club("Ping-Well Driver")]
+	_expect(int(ShotRules.resolve(fitted, iron, 140, "fairway", stock).degree) == 0,
+		"The Metronome with a Ping-Well Wood strikes it pure from anywhere")
+	_expect(int(ShotRules.resolve([_club("The Metronome")], iron, 140, "fairway", stock).degree) > 0, "...but not on its own")
+
+	var bringing := _texts(DraftAdvisor.gains([], _club("Titanist 4-Iron")))
+	_expect(bringing.contains("Brings a Knockdown to your iron form"), "the draft says what a club brings (%s)" % bringing)
+	_expect(_texts(DraftAdvisor.gains([], _club("Slazinger Cannon Driver"))).contains("and a Duck Hook with it"),
+		"...and what comes with it")
+	_expect(_texts(DraftAdvisor.gains([], _club("Nimbus Driver"))).contains("every club's form"), "...and that a Nimbus shot is anyone's")
+
+
+# --- The draft's rules (DraftRules.gd) ------------------------------------
+
+# The top set: eight of a maker, where it was seven (Section 3A).
+func _check_top_tier() -> void:
+	_expect(Brands.top_tier == Brands.DEFAULT_TOP and Brands.tiers() == [2, 4, 8], "the tiers are 2 / 4 / 8")
+	_expect(Brands.tier_reached(7) == 4 and Brands.tier_reached(8) == 8 and Brands.tier_reached(12) == 8,
+		"seven of a maker is still the 4-set; eight is the top set")
+	_expect(Brands.next_tier(7) == 8 and Brands.next_tier(8) == 0, "the next tier after 4 is 8")
+	for b in Brands.DRAFTABLE:
+		for t in Brands.tiers():
+			_expect(Brands.bonus_text(b, t) != "" and Brands.stamp_text(b, t) != "", "%s has a bonus and a stamp at %d" % [b, t])
+		_expect(not Brands.has_top(_brand_bag(b, 7), b) and Brands.has_top(_brand_bag(b, 8), b), "%s's top set needs eight" % b)
+	var seven: Array = _brand_bag("titanist", 7)
+	_expect(not Brands.can_redraw(seven) and Brands.can_redraw(_brand_bag("titanist", 8)), "Titanist's re-draw comes with the eighth club")
+	var eighth := _texts(DraftAdvisor.gains(seven, ClubRoster.branded_clubs("titanist")[7]))
+	_expect(eighth.contains("Completes your Titanist 8-set"), "the eighth Titanist completes the top set (%s)" % eighth)
+	_expect(_ids(_brand_bag("titanist", 8), "form", {"options": [FormCard.make("Hook")], "charges": {}, "hole": 1}).has("redraw"),
+		"...and its power is listed")
+
+
+func _check_draft_rules() -> void:
+	_expect(DraftRules.call_result(false, 3, 4) == "", "no call, no result")
+	_expect(DraftRules.call_result(true, 3, 4) == DraftRules.MADE and DraftRules.call_result(true, 2, 4) == DraftRules.MADE,
+		"a birdie or better makes the call")
+	_expect(DraftRules.call_result(true, 4, 4) == DraftRules.MISSED, "a par misses it")
+
+	var plain: Array = [_club("Driver"), _club("7-Iron"), _club("Putter")]
+	_expect(DraftRules.offer_count(plain, "") == 3 and DraftRules.keep_count(plain, "") == 1, "a draft is three, keep one")
+	_expect(DraftRules.offer_count(plain, DraftRules.MADE) == 5 and DraftRules.keep_count(plain, DraftRules.MADE) == 2,
+		"a call made is five, keep two")
+	_expect(DraftRules.offer_count(plain, DraftRules.MISSED) == 2 and DraftRules.keep_count(plain, DraftRules.MISSED) == 1,
+		"a call missed is two, keep one")
+	_expect(DraftRules.offer_count(plain, DraftRules.MADE) <= DraftRules.MAX_OFFERS, "the rack never shows more than its limit")
+
+	var gambler: Array = plain + [_club("The Gambler")]
+	_expect(DraftRules.keep_count(gambler, DraftRules.MADE) == 3 and DraftRules.offer_count(gambler, DraftRules.MISSED) == 2,
+		"The Gambler keeps a third club from a call made")
+	_expect(DraftRules.offer_count(gambler + [_club("Slazinger Launch Wood")], DraftRules.MISSED) == 3,
+		"...and with a Slazinger Wood softens a call missed")
+
+	_expect(DraftRules.can_dig(plain, 0, 0, 3) and DraftRules.dig_costs_card(plain), "one dig a draft, at the cost of a card")
+	_expect(not DraftRules.can_dig(plain, 0, 1, 3) and not DraftRules.can_dig(plain, 1, 0, 3) and not DraftRules.can_dig(plain, 0, 0, 0),
+		"no second dig, none after a pick, none of an empty rack")
+	var faithful: Array = plain + [_club("Old Faithful")]
+	_expect(not DraftRules.dig_costs_card(faithful) and DraftRules.dig_limit(faithful) == 1, "Old Faithful digs for nothing")
+	_expect(DraftRules.dig_limit(faithful + [_club("Callowell Gap Wedge")]) == 2 and DraftRules.can_dig(faithful + [_club("Callowell Gap Wedge")], 0, 1, 3),
+		"...and twice with a Callowell Wedge")
+
+	_expect(DraftRules.can_trade(plain, 0, false, 3), "a club can be traded in for a fourth offer")
+	_expect(not DraftRules.can_trade(plain, 0, true, 4) and not DraftRules.can_trade(plain, 1, false, 3),
+		"one trade a draft, and not after a pick")
+	_expect(not DraftRules.can_trade(plain, 0, false, DraftRules.MAX_OFFERS), "no trade into a full rack")
+	_expect(not DraftRules.can_trade([_club("Putter")], 0, false, 3), "the last club can't be traded")
+
+	# The new riders switch on at the draft like the old ones.
+	_expect(_texts(DraftAdvisor.gains([_club("The Surgeon")], _club("Titanist 4-Iron"))).contains("Switches on: The Surgeon"),
+		"a Titanist Iron switches on The Surgeon")
+	_expect(_texts(DraftAdvisor.gains([_club("Old Faithful")], _club("Callowell Gap Wedge"))).contains("Switches on: Old Faithful"),
+		"a Callowell Wedge switches on Old Faithful")
+	var surgeon_ctx := {"options": [FormCard.make("Hook")], "charges": {}, "hole": 3}
+	_expect(_ids([_club("The Surgeon")], "form", surgeon_ctx).has("surgeon"), "The Surgeon offers a re-draw")
+	_expect(int(ClubAbilities.allowance([_club("The Surgeon")], "surgeon")[0]) == ClubAbilities.Period.ROUND
+		and int(ClubAbilities.allowance([_club("The Surgeon"), _club("Titanist 4-Iron")], "surgeon")[0]) == ClubAbilities.Period.SIX_HOLES,
+		"...once a round, or every six holes with a Titanist Iron")

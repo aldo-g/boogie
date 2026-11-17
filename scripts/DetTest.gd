@@ -192,6 +192,12 @@ func _assert_match(context: String) -> void:
 		_cmp(context, who + ".holed_out", pa.holed_out, pb.holed_out)
 		_cmp(context, who + ".putt_dist", snappedf(pa.putt_dist, 0.0001), snappedf(pb.putt_dist, 0.0001))
 		_cmp(context, who + ".yips_pending", pa.yips_pending, pb.yips_pending)
+		_cmp(context, who + ".called", pa.called, pb.called)
+		_cmp(context, who + ".call_result", pa.call_result, pb.call_result)
+		_cmp(context, who + ".draft_keeps", pa.draft_keeps, pb.draft_keeps)
+		_cmp(context, who + ".draft_digs", pa.draft_digs, pb.draft_digs)
+		_cmp(context, who + ".draft_traded", pa.draft_traded, pb.draft_traded)
+		_cmp(context, who + ".draft_options", str(_club_names(pa.current_draft_options)), str(_club_names(pb.current_draft_options)))
 		_cmp(context, who + ".bag", str(_club_names(pa.hand)), str(_club_names(pb.hand)))
 		_cmp(context, who + ".form_deck", str(_card_names(pa.form_deck.deck)), str(_card_names(pb.form_deck.deck)))
 		_cmp(context, who + ".scores", str(pa.round_scores), str(pb.round_scores))
@@ -241,7 +247,7 @@ func _step_both() -> bool:
 	# three club options — so those are the two actions after which the
 	# decks must be re-synced.
 	if kind == "aim" or kind == "draft" or kind == "discard" or kind == "putt" or kind == "form" \
-			or kind == "ability" or kind == "range":
+			or kind == "ability" or kind == "range" or kind == "dig" or kind == "trade" or kind == "done":
 		_sync_decks()
 
 	_assert_match("%s #%d (hole %d)" % [kind, actions, a.current_hole_index])
@@ -257,6 +263,9 @@ func _choose_action() -> Array:
 		return ["ability", ability]
 	if TestBags.wants_range(a, 0.15):
 		return ["range", null]
+	var hunt := TestBags.pick_hunt(a, 0.25)
+	if not hunt.is_empty():
+		return [hunt.kind, hunt.payload.get("index", null)]
 	match a.state:
 		a.State.CLUB_SELECT:
 			if a.hand.is_empty():
@@ -317,3 +326,7 @@ func _apply_action(m, kind: String, arg) -> void:
 		"putt": m.on_putt_stopped(arg.result, arg.accuracy)
 		"ability": m.on_ability(arg)
 		"range": m.on_range_session()
+		"call": m.on_call_hole()
+		"dig": m.on_dig()
+		"trade": m.on_trade_in(arg)
+		"done": m.on_draft_done()

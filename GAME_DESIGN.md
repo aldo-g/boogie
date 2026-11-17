@@ -22,7 +22,7 @@ Each course is a **fixed, designed layout** — all 18 holes have known yardage,
 6. **Repeat** steps 2-5 until on the green.
 7. **Putt** — switch to the putting meter, a timing check that gets harder the further you are from the hole.
 8. **Score the hole.**
-9. **End-of-hole draft**: draw 3 cards from the shared club deck, look at all 3, pick 1 to add permanently to your Bag. If your Bag is at the 14-card cap, discard a card first to make room. There is no draft after the last hole: the round ends on the final putt, since there is no shot left to play a new club with.
+9. **End-of-hole draft**: draw 3 cards from the shared club deck, look at all 3, pick 1 to add permanently to your Bag. If your Bag is at the 14-card cap, discard a card first to make room. There is no draft after the last hole: the round ends on the final putt, since there is no shot left to play a new club with. A hole you **called** on the tee changes those numbers, and a draft can be **dug** or widened by **trading in** a club (Section 3D).
 10. Move to the next hole.
 
 ---
@@ -36,6 +36,7 @@ Each course is a **fixed, designed layout** — all 18 holes have known yardage,
 - Over an 18-hole round, this means up to 17 potential additions (until 2026-11-17 the game also dealt a draft after the 18th, for a club that could never be hit) — you'll likely hit the 14-card cap somewhere on the back nine, adding escalating "what do I cut" tension as the round progresses. **14 is fixed** — it's golf's actual club limit, and keeping it means the cap needs no explanation. The real squeeze comes from having to cover the course's yardage gaps with those 14 slots (Section 3A), not from the number itself.
 - **Limited edition cards** are shuffled into the same shared club deck at lower odds. They follow the same club categories (Wood/Iron/Wedge/Putter) but have stronger yardage bands and a bonus ability tied to the Form Card System (see Section 4).
 - No currency involved — this is the entire acquisition system. Drafting happens once per hole, at the end of it.
+- **A maker's club brings a Form card with it** (Section 4, "Clubs bring their shots"), so the draft builds the Form deck as well as the Bag. And the draft can be **hunted in** rather than waited on: call the hole, dig, or trade in a club (Section 3D).
 
 ### Starting Bag (baseline, tune in playtesting)
 | Club | Brand | Category | Yardage Band | Handicap |
@@ -89,7 +90,7 @@ They have **no set bonus**. Collecting Bogey-Mart clubs does nothing; there are 
 
 **The narrow-band penalty is the sharpest of the three**, because it compounds with Section 4's swing tiers: a club with a tight yardage band drops you into 2-card draws far more often than a club with a wide one. The starter set doesn't just hit shorter — it hands you *less choice*, on every hole, until you replace it.
 
-**Retiring the set**: dropping your last Bogey-Mart club is worth marking with a small moment (a UI beat, a scorecard note). It's the run's first real milestone. **As built (2026-11-16):** cutting the last one stamps "BOGEY-MART RETIRED" over the hole map and Charlie has a line for it. Note when it can happen: a club only leaves a full bag, and the bag fills after hole 11, so the moment arrives on the back nine — late for a "first arc". Letting a draft pick *replace* a starter club before the bag is full would move it to where the design wants it; that is a rules change and has not been made.
+**Retiring the set**: dropping your last Bogey-Mart club is worth marking with a small moment (a UI beat, a scorecard note). It's the run's first real milestone. **As built (2026-11-16):** cutting the last one stamps "BOGEY-MART RETIRED" over the hole map and Charlie has a line for it. Note when it can happen: a club only leaves a full bag, and the bag fills after hole 11, so the moment arrives on the back nine — late for a "first arc". Letting a draft pick *replace* a starter club before the bag is full would move it to where the design wants it; that is a rules change and has not been made. **Made 2026-11-17:** a club can be **traded in** at any draft (Section 3D), so a starter club can go on the front nine and the moment arrives when the player chooses.
 
 ### Brand set bonuses (count-based, always on)
 
@@ -97,9 +98,9 @@ Set bonuses check the **whole Bag** and are always active — no activation, no 
 
 **The design rule for every bonus on this table: a set bonus must be a rules effect, never a yardage effect.** "Draw an extra Form card," "ignore terrain penalties," "bad cards hit at half severity" — these mean the same thing on a 7,200-yard parkland course and a 6,100-yard links. A bonus like "+15 yards on Woods" is worth wildly different amounts depending on the course's distances, and would need rebalancing with every expansion. Yardage lives on **individual club cards** (Section 3C), where it's a local stat; **sets bend the rules of the game instead.**
 
-The tiers are **2 / 4 / 7**. Seven is chosen deliberately: it's half your Bag, so a 7-set is an identity, not a bonus — and it leaves exactly 7 slots for everything else, which is not quite enough to cover a course comfortably. A 7-set player is choosing to be excellent at one thing and to have a real hole in their bag.
+The tiers are **2 / 4 / 8**. Eight is chosen deliberately: it is more than half your Bag, so the top set is an identity, not a bonus — and it leaves six slots for everything else, which is not enough to cover a course comfortably. A player with the top set has chosen to be excellent at one thing and to have a real hole in their bag. (It was 7, half the Bag, until 2026-11-17 — see "The top set" below.)
 
-| Brand | 2 in Bag | 4 in Bag | 7 in Bag |
+| Brand | 2 in Bag | 4 in Bag | 8 in Bag |
 |---|---|---|---|
 | **Titanist** *(draw quality)* | Your Form draw **discards the worst card** before you pick | **Draw +1 Form card** at every tier | Once per hole, **re-draw your entire Form hand** before picking |
 | **Callowell** *(severity)* | Bad Form cards played from **rough** lose half their deviation | **Ignore all terrain penalties** — rough, bunker, and lie downgrades no longer apply | Bad Form cards **cannot downgrade your lie or taint a putt**; mishits (Top, Thin, Chunk, Skied) hit at half severity everywhere |
@@ -122,6 +123,21 @@ The tiers are **2 / 4 / 7**. Seven is chosen deliberately: it's half your Bag, s
 **Callowell's 4-set is deliberately enormous** — ignoring all terrain penalties invalidates most of Section 5. That's correct for a half-Bag commitment: it turns the hazard game off, and a player who builds it has spent their whole draft buying that. Its counterweight is that Callowell does nothing for your draw quality, so you'll be safely in the rough with a mediocre hand.
 
 **MacGregorian and Callowell both answer hazards, but at different points in the chain** — and that separation has to be maintained or the two brands collapse into one. Callowell reduces the *consequence* of a bad card once you're in trouble; MacGregorian attacks the *lie itself*, stopping the Form deck degrading and restoring your draw quality. Stacked, they make a player almost immune to hazards, which is a legitimate and expensive thing to build. Alone, Callowell keeps you safe with a poor hand while MacGregorian gives you a good hand in a bad spot.
+
+### The top set (2026-11-17)
+
+The top tier was **7** — half the Bag — until this date. With seven clubs a maker it was reached in 8% of the bot's rounds. With ten a maker and two limited editions (Section 3C) it was reached in 28%, which made it a thing that happens rather than a thing you build. Alastair's call: *it should be rare, but achievable in a game if you go all out.* So the tier went to **8**, and both halves of that sentence were measured — BotSim at Coley Niblick's settings on seeds 101-124, all four courses for the 8 row, Bogey Links and Windlestraw for the 9 row:
+
+| Top tier | An ordinary round reaches it | Going all out reaches it | ...on which tee (median) | What the chase costs |
+|---|---|---|---|---|
+| 7 (before) | 28% | not measured | — | — |
+| **8 (as built)** | **8%** (96 rounds) | **99%** (96 rounds) | the 14th | 0.8 ± 0.7 strokes (+3.96 against +3.19) |
+| 9 | 2% (48 rounds) | 90% (48 rounds) | the 16th | 0.6 ± 1.1 strokes |
+
+- **An ordinary round** is the bot as the rivals play it: it likes sets, but drafts for the whole bag. Eight puts it back at the 8% the old roster gave at seven.
+- **Going all out** is BotSim's `allout` (`GreedyBot.all_out`): settle on the first maker offered, take every club of it, dig and then trade in whenever the rack shows none, and call holes freely. It gets there in practically every round, and pays for the chase in digs (2.4 a round, each a bad Form card), clubs traded away (4.3) and a bag that ends at 12.4 clubs — about three-quarters of a stroke, which 96 rounds cannot quite tell from nothing. No rival plays this way.
+- **Nine was the alternative.** It is rarer still, but even all out it arrives on the 16th tee, with three holes left to use it. Eight arrives on the 14th. A set that lands with five holes to play is one worth chasing.
+- **As built**: the tier is one number, `Brands.top_tier` (default `DEFAULT_TOP`), so every label, bonus, stamp and test follows it, and BotSim's `top=<n>` measures another size from the same tree. The 2 and 4 tiers, and the Staff clubs' waking at 4, are unchanged.
 
 ### Yardage coverage — what actually makes 14 slots tight
 
@@ -152,6 +168,11 @@ Individual cards — mostly limited editions — carry pairwise riders printed d
 | **Old Reliable Putter** | Putter / Ping-Well | While any other **Ping-Well** club is in your Bag, Steady Hands becomes **once every six holes** rather than once per round |
 | **Persimmon Spoon** | Wood / MacGregorian | While a second MacGregorian club is in your Bag, playable from **any** lie with no penalty |
 | **The Equaliser** | Iron / Nimbus | While your Bag holds **3+ distinct brands**, this club counts as **every** brand for set-bonus purposes |
+| **The Surgeon** | Wood / Titanist | While a Titanist **Iron** is in your Bag, its re-draw is **once every six holes** rather than once per round |
+| **The Gambler** | Putter / Slazinger | While a Slazinger **Wood** is in your Bag, a called hole you miss still shows **three** clubs |
+| **Old Faithful** | Iron / Callowell | While a Callowell **Wedge** is in your Bag, you may dig **twice** a draft |
+| **The Metronome** | Iron / Ping-Well | While a Ping-Well **Wood** is in your Bag, your Stock Shots are straight from **any** tier |
+| **The Chameleon** | Wood / Nimbus | While a Nimbus **Wood** is in your Bag, it counts as Nimbus **as well as** the brand you carry most of |
 
 **The Equaliser** is the deliberate release valve: a player whose draft went badly and ended up with a scattered Bag has one card that turns that scatter into an asset. It should be rare, and it should feel like a rescue.
 
@@ -238,7 +259,7 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 
 | Club | Category | Band | Rider |
 |---|---|---|---|
-| Slazinger Cannon Driver | Wood | 190-255 | **Longest in the game**; buffers deviation **30% worse** |
+| Slazinger Cannon Driver | Wood | 190-255 | **Longest in the game** but for the Slazinger Staff Driver (below); buffers deviation **30% worse** |
 | Slazinger Power Iron | Iron | 145-190 | +15 yds over a standard 5-Iron; buffers 20% worse |
 | Slazinger Launch Wood | Wood | 170-215 | Big Strike created by this club grants **max band +10** |
 
@@ -263,7 +284,76 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 | **Persimmon Spoon** | Wood / MacGregorian | 155-200 | Playable from rough with no distance penalty | 2nd MacGregorian → playable from any lie, no penalty |
 | **The Equaliser** | Iron / Nimbus | 115-160 | — | Bag holds 3+ brands → counts as **every** brand for sets |
 
-**Roster totals**: 8 standard, 19 branded, 7 limited — 34 distinct clubs. With a per-run pool of 4 brands, roughly 8 standard + 12-13 branded + 7 limited are live in any given run, which is enough to fill 18 drafts with real choices without the pool being so deep that sets never complete.
+**Roster totals (2026-11-17)**: 8 standard, 60 branded (ten a maker, two of them Staff clubs — below) and 12 limited (two a maker): 80 distinct clubs, and the 3 Bogey-Mart starters. `assets/data/clubs.json` is the roster of record; the per-maker tables above show each maker's character rather than every club. With 4 makers live a run's pool is **72 clubs** — 24 standards (three copies of each), 40 branded, 8 limited — against the 51 offers a round deals (17 drafts of three; there is none after the last hole). It was about 57 before this date, which meant every club came past roughly once whatever the player did; now a given club turns up in about seven rounds in ten, and finding it is the business of Section 3D.
+
+### Staff clubs (2026-11-17)
+
+Two of each maker's ten clubs are **Staff clubs**: built for the maker's staff players, poor in a mixed bag, and excellent once the bag holds **four** of the maker's clubs (the Staff club itself counts). Taking one early is a bet on the set. The club that completes the set then wakes every Staff club of that maker at once, and that moment is marked: a stamp over the map ("TITANIST 4-SET · The Staff Driver wakes"), a sound, and a word from Charlie. Completing any set tier gets the stamp; the top set gets it in gilt.
+
+| Maker | Staff clubs (carry) | Asleep | Awake — 4 of the maker in the bag |
+|---|---|---|---|
+| **Titanist** | Staff Driver 190-235, Staff 7-Iron 105-140 | Draws one Form card **fewer** (never fewer than one) | Draws one **more** |
+| **Callowell** | Staff Hybrid 140-190, Staff Wedge 30-80 | A bad card played with it goes back on **top** of the Form deck: its family's next deal | A bad card played with it **leaves the Form deck for good** |
+| **Ping-Well** | Staff 4-Wood 160-205, Staff 7-Iron 100-145 | **No Mid tier**: the band is half Full, half Finesse, so every swing draws two | Every swing is **Mid, even below its range** |
+| **MacGregorian** | Staff Cleek 140-180, Staff Baffy 160-205 | Flies **half** the aim from rough (the Cleek a quarter from sand) | From rough or sand it draws **one more** Form card; the Baffy becomes playable from sand |
+| **Slazinger** | Staff Driver 195-260 (the longest club in the game), Staff Iron 150-200 | Bad cards played with it hit **50% harder** | The Slazinger set's +25% no longer applies to it |
+| **Nimbus** | Staff Hybrid 95-185, Staff Wood 150-235 | Lets through **more deviation than a driver** (120% / 150%) | **Less than a wedge** (38% / 45%) |
+
+Each awake effect is something the maker's own 4-set does not already give, or the wake would be nothing: Ping-Well 4 already lifts every swing a tier, so its Staff clubs go further and have no bottom to their range; MacGregorian 4 already plays trouble as fairway, so its Staff clubs draw an extra card from it instead.
+
+**As built**: a Staff club carries a second set of effects (`staff`, beside `effects`, in `clubs.json`). Nothing is stored on the club when the bag changes: `ClubAbilities.effect(club, key, default, bag)` answers from the `staff` effects whenever the bag it is handed holds the 4-set, so every rule that passes the bag — and the bot weighing a bag it doesn't have yet — sees the club as it would play there. The card says "Staff" in its header, in green once awake; the draft says "asleep until you carry 4 Titanist (2/4)", "awake in this bag" or "Wakes your Staff Driver", and a cut that would send one back to sleep says so.
+
+### The limited editions added 2026-11-17
+
+Five more, so every maker has two. Each has a pair rider, like the first seven.
+
+| Club | Cat / Brand | Band | Ability | Pair rider |
+|---|---|---|---|---|
+| **The Surgeon** | Wood / Titanist | 185-230 | Once per round, re-draw your Form hand | Titanist Iron in Bag → once every six holes |
+| **The Gambler** | Putter / Slazinger | Green | A called hole you make keeps 3 clubs, not 2 (Section 3D) | Slazinger Wood → a called hole you miss still shows 3 |
+| **Old Faithful** | Iron / Callowell | 120-170 | Digging at the draft costs no bad card (Section 3D) | Callowell Wedge → dig twice a draft |
+| **The Metronome** | Iron / Ping-Well | 130-170 | Every swing with it is Mid, even below its range | Ping-Well Wood → your Stock Shots are straight from any tier |
+| **The Chameleon** | Wood / Nimbus | 160-215 | Counts as the brand the rest of your bag holds most of, not as Nimbus — the wild card that makes a set | Nimbus Wood → counts as both |
+
+One new plain club a maker rounds each out to ten: Titanist Lob Wedge, Callowell Fairway Wood, Ping-Well i-Series 6, MacGregorian Mashie-Niblick, Slazinger Short Iron, Nimbus Gap Hybrid.
+
+---
+
+## 3D. Hunting for a Club (2026-11-17)
+
+Until this date the draft could only be waited on. Every club came past about once a round, at a hole of its own choosing, and nothing the player did changed when; and a player who committed to a maker reached its 4-set every time (Open Questions), so no single club was ever the one that mattered. Alastair's brief: *it should be rewarding to get the club that you want or that makes the set, and you should be incentivised to take risks in building the perfect deck.* Four things answer it — the deeper pool and the Staff clubs (Section 3C), the signature shots (Section 4, "Clubs bring their shots"), and the three moves here, which let a player go looking for a club, each at a price.
+
+| Move | When | What it does | The price |
+|---|---|---|---|
+| **Call the hole** | On the tee, before the first stroke | Call birdie. Make birdie or better and the draft shows **5**, and you keep **2** | Miss, and the draft shows **2** |
+| **Dig** | In the draft, before anything is kept — once | The whole offer goes back and as many fresh clubs are dealt | A **bad Form card** joins your deck: a miss of the wood, iron or wedge family, and you don't choose which |
+| **Trade in** | In the draft, before anything is kept — once | Give up a club from the bag for **one more offer** (the rack never shows more than five) | The club, for good, and the shot it brought leaves the Form deck with it |
+
+- **The call is the one place the way you play a hole changes what you draft.** Before it, a birdie and a triple bogey were followed by the same three clubs. It is known information like everything else in the long game: made on the tee, free to take back until the first Form hand is drawn, shown in the shot panel for as long as the hole is played, and stamped with how it came out ("BIRDIE · called it").
+- **Keeping two.** After the first club is kept the draft stays open on what is left. A range session takes the place of one of the two. "That'll do" stops at one.
+- **A dig's card is a price, not a hazard.** It is rolled through the same gate as hazard decay, so online every machine adds the same card; MacGregorian's decay block does not stop it.
+- **Trading in is how Bogey-Mart goes early.** A club only used to leave a full bag, and the bag fills after hole 11, so the starter set could not be retired before the back nine (Section 3A). Any club can now be traded from the first draft. A bag cannot trade its last club.
+- **Two limited editions bend these** (Section 3C): The Gambler pays a made call better and softens a missed one; Old Faithful digs for nothing.
+- **The computer golfers hunt too.** GreedyBot calls a hole it rates itself three-in-ten or better to birdie (`call_at`), trades in a club its bag would not miss, and digs when the rack offers next to nothing. It does not change how it plays a called hole, which a person would.
+
+**As built**: the rules are pure functions in `scripts/DraftRules.gd` (how many offers, how many kept, whether a dig or a trade is open), checked by RulesTest; `Main.gd` owns the decks, the rolls and the screen (`on_call_hole`, `on_dig`, `on_trade_in`, `on_draft_done`). Online they are actions like any other — the three draft moves are legal for any seat still drafting — and DetTest, NetTest and MPTest make them at random alongside picks. On screen the draft's other moves are a column beside the offers ("Instead: Range session · Dig · Trade in"), and with four or five on the rack each offer is cut narrow, with the one thing that most matters about taking it underneath.
+
+**Measured (2026-11-17)** — BotSim at Coley Niblick's settings (`aim=13,putt=185`), 24 rounds on each of the four courses per arm on seeds 101-124, so 96 rounds an arm. The new arms are one tree with a switch (`nohunt`, `call=<p>`); the game before is the tree as it stood the night before. All of it was run while a draft was still dealt after the last hole; the set figures are read on the 18th tee, which that draft could not touch.
+
+| Arm | Against par | A 4-set by the 18th tee | Seven of a maker (then the top set) | No Bogey-Mart left |
+|---|---|---|---|---|
+| The game before | +3.75 ± 0.50 | 96% | 8% | 3% |
+| New roster, Staff clubs and signature shots, no hunting | +3.57 ± 0.46 | 99% | 28% | 5% |
+| ...with digging and trading in | +3.23 ± 0.49 | 96% | 29% | 21% |
+| ...and calling, as built: the bot calls a hole it rates 30% or better (0.8 a round) | +3.20 ± 0.49 | 97% | 28% | 21% |
+| ...calling freely instead, at 22% (6.4 a round, 2.2 made) | +2.96 ± 0.50 | 99% | 44% | 39% |
+
+- **Scores did not move by more than chance.** As built the game is 0.5 ± 0.7 strokes easier than the game before, 0.8 ± 0.7 for a bot that calls freely, and no one layer is worth more than a third of a stroke. The deck a round ends with is bigger (56 cards on the 18th tee, against 44) and no cleaner (11 bad cards against 9): what the signature shots add, the baggage and the digs take back, and the bot spends a little more of its draft at the range for it (4.2 sessions a round against 3.8).
+- **What the bot does with the moves**, per round: it digs 0.6 times and trades in 3.0 clubs, and ends with 1.1 Staff clubs and 4.1 limited editions in the bag, where it used to end with 3.1 limited. Calling depends on the golfer, as it should: at the shipped threshold the weekend hacker never calls, the club regular calls less than one hole a round and makes 37% of them, and the scratch golfer calls eleven and makes just over half. The threshold was 22% for a morning, at which the scratch golfer called seventeen holes of eighteen — a tic rather than a decision.
+- **Seven of a maker was three and a half times as common: 8% of rounds to 28%**, and 44% for a player who calls freely and makes a third of them. The first step is the roster — ten clubs a maker and two limited editions where there were seven and one — and the second is the extra club a made call keeps. The 4-set was near-certain before and still is. The bot did not score better for those sets, which says the top set costs in coverage about what it pays; but at seven it was no longer rare. **Decided the same day: it should be rare, and reachable by going all out — so the top tier is now eight** (Section 3A, "The top set"), where an ordinary round reaches it 8% of the time and an all-out one 99%.
+- **Bogey-Mart goes early when the player wants it to.** The bot trades whichever club its bag would miss least, which is often not a starter club, and still ends 21% of rounds with none (3% before). A person who wants them gone can be rid of all three by the fourth tee.
+- **The rivals shoot what they shot**: on Bogey Links 85.8 (48 rounds), 74.5 and 66.9 (72 rounds each), against 85.8, 74.5 and 66.6 the night before, so `Rivals.gd` still says +15, +4 and -4.
+- **Not measured: people.** The bot plays a called hole exactly as it plays any other, where a person will fire at the flag — so the size of the bet (five-keep-two against two) is still a guess. And a simulation cannot say whether a stamp feels like a reward.
 
 ---
 
@@ -320,7 +410,7 @@ Clubs modulate how strongly a Form card's effect applies: a forgiving Wedge migh
 | Thin | 80% distance, low (0.6x flight), runs out 1.5x — a milder Top |
 | Skied | 70% distance, stops quickly (0.4x roll), balloons (1.8x flight) — short, and the wind's plaything |
 
-Top, Thin, Chunk and Skied are **mishits** (bad contact rather than a bad line); Callowell 7 and the Callowell Big Deal Driver play them at half severity.
+Top, Thin, Chunk and Skied are **mishits** (bad contact rather than a bad line); Callowell 8 and the Callowell Big Deal Driver play them at half severity.
 
 ### Good Form cards
 
@@ -340,6 +430,7 @@ Top, Thin, Chunk and Skied are **mishits** (bad contact rather than a bad line);
 | Bump and Run | Low running shot — carries half the aimed distance (0.5x flight, so the wind barely touches it) and runs the rest to the target. The run is judged: struck with the pace the slope asks for, up to 1.6x the planned run — so rough on the way leaves it short, sand or water in its path stops it, and side slope still bends its line. No green check, since a low runner arrives without backspin. |
 | Steady Hands | Widens the putt meter's bands on this putt (+60%; Ping-Well Mallet doubles that). **Created only**, used on the green |
 | In the Zone | Plays straight at standard distance, and removes the worst bad card from your Form deck — from the family it was played with first, from any other only once that family has none |
+| Knockdown, Bomb, Safe Swing, Scotch Runner, Stock Shot, Utility Swing | The **signature shots**: never in the deck a round starts with, only ever brought to it by a maker's club — see "Clubs bring their shots" below |
 
 ### Form by club family (decided 2026-11-16)
 
@@ -363,6 +454,26 @@ What follows from the one rule:
 - **Created cards belong to no family** — a club makes them for itself — so they are unaffected.
 - **Brand bonuses are unchanged.** They count cards, change tiers and soften bad cards; none of them cared which card it was.
 - **Range sessions and The Rutter** still take the worst bad cards wherever they are. **In the Zone** mends the family it was played with first.
+
+### Clubs bring their shots (2026-11-17)
+
+The Form deck could be cleaned (range sessions, In the Zone) and dirtied (hazards), but never **built**: the deck every shot is drawn from had no good card to chase, so "deckbuilder" described the bag and not the deck. Now **every maker has a signature shot, and drafting one of its clubs puts that card into your Form deck — in the family of the club that brought it. Cutting or trading the club takes the card out again.** One pick builds the bag and the deck together, and a maker is something you can feel on every swing, not only at its set tiers.
+
+| Maker | Signature shot | What it does |
+|---|---|---|
+| **Titanist** | Knockdown | Straight, 95% distance, flies low (0.5x flight), stops quickly (0.5x roll) — the wind barely finds it |
+| **Slazinger** | Bomb | Straight, **+15% distance**, runs out 1.5x — the longest shot in the game. **A bad card joins the same family with it**: Duck Hook (wood), Hook (iron), Chunk (wedge). The bad card stays when the club goes |
+| **Callowell** | Safe Swing | Straight, 90% distance, takes no cut from rough or sand |
+| **MacGregorian** | Scotch Runner | Straight, full distance, low (0.4x flight), runs out 2x, no cut from rough or sand |
+| **Ping-Well** | Stock Shot | Straight and full **from the Mid tier**; from any other tier it is pushed 8° right. The Form hand shows it as it will play for the swing in hand |
+| **Nimbus** | Utility Swing | Straight, 95% distance. It belongs to **no family**: any club can be dealt it, and it counts in every family's form |
+
+- **Putters bring nothing.** They are played on the meter, and the putter's pile of chips (seven cards) is too small to take a card without changing its nature.
+- **Standard clubs and Bogey-Mart bring nothing** — one more reason to leave them behind.
+- **The risk is the baggage.** A Slazinger bag hits Bombs and owns Duck Hooks, and cutting the driver later does not take the Duck Hook back. That is the brand's set bonus (more cards, harder bad ones) said again in the deck.
+- **They are ordinary deck cards**: dealt, discarded and reshuffled with their family, counted in the form table, listed in the deck popup, and named in the draft ("Brings a Knockdown to your iron form").
+- **Stock Shot is the one card whose effect depends on the swing**, and nothing is remembered on the card to do it: `ShotRules.card_for_shot()` works out the shot from the tier each time it is shown or played, so there is nothing to send online.
+- **A correction to the proposal**: it said "about 18 new Form cards". It is six shots, each of which can sit in the wood, iron or wedge family — 18 places, six cards to learn.
 
 ### Form deck composition & hazards
 
@@ -398,7 +509,7 @@ To stop top-tier good cards (like Pure Strike) from being either "always in the 
 - **Passives** add their card to the player's *next* Form draw (Old Tom's Niblick after a bunker) or to the club's own draw (the Lob Wedge from rough or sand).
 - **A created card always exhausts**, played or not. That includes the bad card a bunker or an Extreme Finesse shot forces on you, so that card never reaches the discard pile.
 - **A created card turns a forced draw into a choice**: in sand the club still forces a bad card, but a created card beside it is the bail-out.
-- Activated set bonuses (Titanist 7 re-draw, MacGregorian 7 improve lie, Nimbus 2 tier boost, Nimbus 7 ideal club) sit in the same box with the same charges. **Slazinger 7** was "created cards don't exhaust", which means nothing once nothing is held, so it became **once-per-round abilities recharge every hole**.
+- Activated set bonuses (Titanist 8 re-draw, MacGregorian 8 improve lie, Nimbus 2 tier boost, Nimbus 8 ideal club) sit in the same box with the same charges. **Slazinger 8** was "created cards don't exhaust", which means nothing once nothing is held, so it became **once-per-round abilities recharge every hole**.
 
 **Limited Edition club abilities:**
 
@@ -667,13 +778,14 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 4. **Full 18 holes + scoring vs. par** (solo mode complete).
 5. **Add the end-of-hole club draft** (shared club deck, permanent growing Bag, 14-card cap, forced discard when full).
 6. **Add brands and the Bogey-Mart starting set** (Section 3A): brand field on every club, the starter set's three handicaps, and the full branded roster (Section 3C). Playable and meaningful *before* any set bonus exists — the roster alone gives the draft real choices.
-7. **Add brand set bonuses** (2/4/7 tiers) with the live Bag-UI counter. This is the step that turns drafting into building; validate it before adding pair riders on top.
+7. **Add brand set bonuses** (2/4/7 tiers; the top tier became 8 on 2026-11-17) with the live Bag-UI counter. This is the step that turns drafting into building; validate it before adding pair riders on top.
 8. **Add per-run pool shaping** (Section 3B): seed 4 of 6 brands per round, with the axis-coverage constraint, and the pre-round reveal.
 9. **Add pair riders** on limited editions — the last synergy layer, and the easiest to cut if sets alone already carry the draft.
 10. **Add limited edition cards** into the shared club deck, including their Created-card abilities.
 11. ~~**Add local multiplayer**~~ **Done** — hot-seat for 2-4 players, turn order by distance (furthest from the pin plays first), independent per-player drafts.
 12. ~~**Add online multiplayer**~~ **Done** — ENet, host-authoritative, 2-4 players, with disconnect recovery. See Section 7. Simultaneous/secret declaration remains unbuilt by choice, not by limitation.
 13. ~~**Add a computer opponent**~~ **Done** (2026-11-16) — three rivals by skill, played by GreedyBot as a hot-seat seat. See Section 7.
+14. ~~**Deepen the draft**~~ **Done** (2026-11-17) — ten clubs a maker with two Staff clubs each, twelve limited editions, signature shots that clubs bring to the Form deck, and three ways to hunt for a club: call the hole, dig, trade in. See Sections 3C, 3D and 4.
 
 ---
 
@@ -683,11 +795,11 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 - How many bad cards enter the Form deck economy per hazard hit, and how fast it should degrade — needs playtesting to avoid a death spiral where one bad hole compounds into an unplayable back nine. **Measured 2026-11-16 (BotSim, Bogey Links, 14-40 rounds per skill level): the opposite problem.** A hazard (sand, water, out of bounds, or a Shank's downgraded lie — as built, rough is not one, though Section 5 says it should be) turns up 0.25 times a round for a perfect aimer and 1-3 times for human-like ones, and adds a bad card a third of the time: at most half a bad card a round. Range sessions (1-1.5 a round) and In the Zone remove them far faster: the deck starts with 14 bad cards and reaches hole 18 with 1-4 at every skill level. The deck gets cleaner as the round goes on, not worse, and the two brands built around hazards (Callowell, MacGregorian) have almost nothing to answer.
 - **Whether the round gets easier as it goes.** Same simulations: every skill level plays the back nine better than the front, by 1.6 to 4 strokes (at scratch level, 1.1 under on the front and 4.8 under on the back). That is the bag and the Form deck, not the holes: the same bot given a fixed 13-club bag from the first tee, with no draft, plays the front in 3.1 under and the back in 1.0 under — the back nine is the harder half of the course and still plays the easier. The player grows and the course does not push back, so the back nine is a lap of honour rather than a climax. Levers, none pulled yet: let hazards bite (wider trouble, or decay on every hazard rather than one in three), make range sessions rarer or dearer, or let the course push back late (tougher pins or more wind on the back nine).
 - **How to create Bag pressure without touching the 14-card cap.** The cap is **fixed at 14** — it's the real rule, players already know it, and an invented number would cost that recognition for nothing. But 14 slots across 18 drafts is loose enough that a player could complete two sets without ever making a painful cut. The pressure must therefore come from the *draft*, not the cap — see "Yardage coverage" in Section 3A. Do not solve this by shrinking the Bag.
-- ~~**Brand set thresholds (2/4/7)** — whether 7 of one brand is reachable inside 18 drafts.~~ **Answered by simulation (2026-09-09, 3,000 runs per strategy):** a player who commits to a brand reaches a 4-set **100%** of the time and a 7-set **74%**; a player drafting without a plan reaches a 4-set **61%** and a 7-set **0.2%**. The thresholds hold as designed — intent is strongly rewarded, and the 7-set is aspirational rather than accidental. Re-run this if the pool size, brand card counts, or draft width change. (It counted 18 drafts. A round has had 17 since 2026-11-17, when the draft after the last hole was removed, and the 18th pick never reached a shot before that, so read these figures as slightly high.)
+- ~~**Brand set thresholds (2/4/7)** — whether 7 of one brand is reachable inside 18 drafts.~~ **Answered by simulation (2026-09-09, 3,000 runs per strategy):** a player who commits to a brand reaches a 4-set **100%** of the time and a 7-set **74%**; a player drafting without a plan reaches a 4-set **61%** and a 7-set **0.2%**. The thresholds hold as designed — intent is strongly rewarded, and the 7-set is aspirational rather than accidental. Re-run this if the pool size, brand card counts, or draft width change. (It counted 18 drafts. A round has had 17 since 2026-11-17, when the draft after the last hole was removed, and the 18th pick never reached a shot before that, so read these figures as slightly high.) **2026-11-17:** with ten clubs a maker the old top tier of 7 stopped being rare, and it was raised to 8 — measured in Section 3A, "The top set".
 - **Whether wind is too swingy at 35 mph** — chosen deliberately "wild". If gale holes feel like they decide rounds rather than test them, lower Wind.MAX_MPH or steepen the calm skew before touching the per-mph effects.
 - **Whether terrain, elevation and wind carry enough variety** (slope and wind came back 2026-10-16). Terrain is currently the only thing the environment does to you, and two brands (Callowell, MacGregorian) both feed on it. If the round feels flat, weather is the first thing to reconsider — but only after the Form/draft loop is proven.
 - **Whether Callowell and MacGregorian are too close** — both answer hazards. The intended split is consequence (Callowell) vs. lie quality (MacGregorian); if that reads as one brand in play, merge them and add a genuinely new axis rather than keeping two hazard brands.
-- **Whether Callowell's 4-set (ignore all terrain penalties) is too strong** — it switches off most of Section 5. Intended as a half-Bag payoff, but it may need to move to the 7-tier if a 4-set is reachable too early.
+- **Whether Callowell's 4-set (ignore all terrain penalties) is too strong** — it switches off most of Section 5. Intended as a half-Bag payoff, but it may need to move to the top tier if a 4-set is reachable too early.
 - **How many brands should be live per run** — 4 of 6 is the starting guess. 3 makes commitment easier but runs samier; 5 makes the pool noisy and sets hard to complete.
 - **Whether Bogey-Mart clubs should be cuttable from hole 1** or locked in for a few holes — cutting the starter Driver on hole 1 for a good Wood may end the "escape the starter set" arc before it's felt.
 - **Whether the four live brands should be revealed pre-round** (current stance: yes, Section 3B) or discovered — the reveal fits the game's known-information stance, but discovery may make the early draft more exciting.
@@ -699,3 +811,4 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 - ~~How many Created-card sources should exist across the full club list~~ **Decided 2026-10-17:** only clubs whose text says so (limited editions and a few branded riders). Standard clubs create nothing.
 - ~~Whether "Active" abilities need an explicit UI/UX moment~~ **Decided 2026-10-17:** yes — a button with its charges shown, in an Abilities box under the shot panel.
 - Whether the Bulger, Gold Cleek and Old Reliable charges are the right size. Gold Cleek in particular hands out a Pure Strike every hole; if it decides rounds, make it once per round with the Titanist Wood rider raising it to once every six holes.
+- **Whether the hunting moves, the signature shots and the Staff clubs do what they were built for (2026-11-17).** See Section 3D, "Measured". Still to learn from people rather than the bot: whether "five, keep two" against "only two" is the right size of bet (the bot's play does not change on a called hole, a person's will); whether a signature shot should stay in the deck once earned rather than leave with its club; whether Bomb's baggage is too cheap or too dear; and whether Staff clubs are taken early as bets or only once the set is nearly in.

@@ -23,6 +23,7 @@ static func gains(bag: Array, club: Dictionary, bag_cap: int = 14) -> Array:
 	var out: Array = []
 	out.append_array(_set_changes(bag, after, true))
 	out.append_array(_rider_changes(bag, after, true))
+	out.append_array(_staff_changes(bag, after, club, true))
 	var gaps := _uncovered(club, bag)
 	if not gaps.is_empty():
 		out.append({"text": "Fills a gap in your bag: %s yds" % _ranges_text(gaps), "strong": true})
@@ -33,6 +34,12 @@ static func gains(bag: Array, club: Dictionary, bag_cap: int = 14) -> Array:
 		var next := Brands.next_tier(n)
 		if next > 0:
 			out.append({"text": "%s %d/%d toward the next set" % [Brands.display_name(brand), n, next], "strong": false})
+	# The shot it brings to the Form deck — and anything bad that comes too.
+	var shot := Brands.signature(club)
+	if shot != "":
+		var bad := Brands.baggage(club)
+		out.append({"text": "Brings a %s to %s%s" % [shot, _form_place(club),
+			"" if bad == "" else " — and a %s with it" % bad], "strong": false})
 	if bag.size() >= bag_cap:
 		out.append({"text": "Bag is full — taking it means cutting a club", "strong": false})
 	# Strong lines first, keeping each group in the order it was built.
@@ -51,12 +58,56 @@ static func losses(bag: Array, club: Dictionary) -> Array:
 	var out: Array = []
 	out.append_array(_set_changes(bag, after, false))
 	out.append_array(_rider_changes(bag, after, false))
+	out.append_array(_staff_changes(bag, after, club, false))
 	var gaps := _uncovered(club, after)
 	if not gaps.is_empty() and club.get("type", "") != "putter":
 		out.append({"text": "Leaves a gap: %s yds" % _ranges_text(gaps), "strong": true})
 	if club.get("type", "") == "putter" and not after.any(func(c): return c.get("type", "") == "putter"):
 		out.append({"text": "Your only putter", "strong": true})
+	var shot := Brands.signature(club)
+	if shot != "":
+		out.append({"text": "Its %s leaves %s" % [shot, _form_place(club)], "strong": false})
 	return out
+
+
+# Where a club's signature shot lives in the Form deck, in words.
+static func _form_place(club: Dictionary) -> String:
+	var fam := Brands.signature_family(club)
+	if fam == "":
+		return "every club's form"
+	return "your %s form" % str(FormCard.FAMILY_LABEL.get(fam, "")).to_lower()
+
+
+# --- Staff clubs -----------------------------------------------------
+
+# Staff clubs that wake or go back to sleep between the two bags, and —
+# when the club on offer is one — whether it would be awake in yours.
+static func _staff_changes(before: Array, after: Array, club: Dictionary, gaining: bool) -> Array:
+	var out: Array = []
+	var was := ClubAbilities.awake_names(before)
+	var now := ClubAbilities.awake_names(after)
+	var own := str(club.get("name", ""))
+	if gaining:
+		var woken: Array = now.filter(func(n): return not was.has(n) and n != own)
+		if not woken.is_empty():
+			out.append({"text": "Wakes your %s" % _name_list(woken), "strong": true})
+		if ClubAbilities.is_staff(club):
+			if now.has(own):
+				out.append({"text": "A Staff club, and awake in this bag", "strong": true})
+			else:
+				var brand: String = club.get("brand", Brands.NONE)
+				out.append({"text": "A Staff club: asleep until you carry %d %s (%d/%d)" % [
+					Brands.STAFF_TIER, Brands.display_name(brand),
+					int(Brands.counts(after).get(brand, 0)), Brands.STAFF_TIER], "strong": true})
+	else:
+		var slept: Array = was.filter(func(n): return not now.has(n) and n != own)
+		if not slept.is_empty():
+			out.append({"text": "Puts your %s to sleep" % _name_list(slept), "strong": true})
+	return out
+
+
+static func _name_list(names: Array) -> String:
+	return " and ".join(PackedStringArray(names))
 
 
 # --- Sets ------------------------------------------------------------
@@ -80,10 +131,10 @@ static func _set_changes(before: Array, after: Array, gaining: bool) -> Array:
 		var name := Brands.display_name(brand)
 		if gaining and t1 > t0:
 			out.append({"text": "Completes your %s %d-set: %s" % [name, t1,
-				String(Brands.BONUS_TEXT.get(brand, {}).get(t1, ""))], "strong": true})
+				Brands.bonus_text(brand, t1)], "strong": true})
 		elif not gaining and t1 < t0:
 			out.append({"text": "Breaks your %s %d-set: %s" % [name, t0,
-				String(Brands.BONUS_TEXT.get(brand, {}).get(t0, ""))], "strong": true})
+				Brands.bonus_text(brand, t0)], "strong": true})
 	return out
 
 
@@ -97,6 +148,11 @@ const RIDERS := {
 	"rutter": "The Rutter purges two bad cards per hazard",
 	"old_reliable": "Old Reliable's Steady Hands every six holes, not once a round",
 	"persimmon_spoon": "The Persimmon Spoon plays from any lie, sand included",
+	"surgeon": "The Surgeon re-draws every six holes, not once a round",
+	"gambler": "The Gambler: a called hole missed still shows 3",
+	"old_faithful": "Old Faithful digs twice a draft",
+	"metronome": "The Metronome strikes your Stock Shots pure from any tier",
+	"chameleon": "The Chameleon counts as Nimbus too",
 }
 
 
@@ -117,6 +173,16 @@ static func _rider_on(bag: Array, power: String) -> bool:
 			return int(Brands.counts(bag).get("pingwell", 0)) >= 2
 		"persimmon_spoon":
 			return int(Brands.counts(bag).get("macgregorian", 0)) >= 2
+		"surgeon":
+			return ClubAbilities.bag_has(bag, "titanist", "iron")
+		"gambler":
+			return ClubAbilities.bag_has(bag, "slazinger", "wood", owner.name)
+		"old_faithful":
+			return ClubAbilities.bag_has(bag, "callowell", "wedge", owner.name)
+		"metronome":
+			return ClubAbilities.bag_has(bag, "pingwell", "wood", owner.name)
+		"chameleon":
+			return Brands._has_nimbus_wood(bag, owner)
 	return false
 
 

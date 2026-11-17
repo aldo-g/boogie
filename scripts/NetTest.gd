@@ -242,6 +242,9 @@ func _pick_action(g) -> Dictionary:
 		return {"kind": "ability", "payload": {"id": ability}}
 	if TestBags.wants_range(g, 0.15):
 		return {"kind": "range", "payload": {}}
+	var hunt := TestBags.pick_hunt(g, 0.25)
+	if not hunt.is_empty():
+		return hunt
 	match g.state:
 		g.State.CLUB_SELECT:
 			if g.hand.is_empty():
@@ -293,6 +296,12 @@ func _check_agreement() -> void:
 		_cmp(ctx, who + ".scores", str(a.round_scores), str(b.round_scores))
 		_cmp(ctx, who + ".form_deck_size", a.form_deck.deck.size(), b.form_deck.deck.size())
 		_cmp(ctx, who + ".draft_stage", a.draft_stage, b.draft_stage)
+		_cmp(ctx, who + ".called", a.called, b.called)
+		_cmp(ctx, who + ".call_result", a.call_result, b.call_result)
+		_cmp(ctx, who + ".draft_keeps", a.draft_keeps, b.draft_keeps)
+		_cmp(ctx, who + ".draft_taken", a.draft_taken, b.draft_taken)
+		_cmp(ctx, who + ".draft_digs", a.draft_digs, b.draft_digs)
+		_cmp(ctx, who + ".draft_traded", a.draft_traded, b.draft_traded)
 		_cmp(ctx, who + ".draft_options", str(_names(a.current_draft_options)), str(_names(b.current_draft_options)))
 
 

@@ -19,6 +19,9 @@ extends RefCounted
 # the Form deck stopped draining. Before all that they were 80.2, 72.9
 # and 65.1. With no misjudgement at all the same bot shot about 58 then;
 # that figure has not been re-measured.
+# Re-measured 2026-11-17 with the deeper draft (Staff clubs, signature
+# shots, calling, digging and trading in): 85.8 over 48 rounds, 74.5 and
+# 66.9 over 72 each — unchanged, so `typical` stands.
 # ---------------------------------------------------------
 
 const ORDER := ["easy", "medium", "hard"]

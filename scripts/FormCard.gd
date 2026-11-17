@@ -29,6 +29,11 @@ var purges_bad: int = 0           # In the Zone: bad cards it removes from your 
 # A bad strike off the face (Top, Thin, Chunk, Skied) rather than a bad
 # line — what Callowell 7 and the Big Deal Driver soften.
 var mishit: bool = false
+# Stock Shot: struck pure from the Mid tier and pushed from any other. The
+# card in the deck is the Mid-tier shot; played_at() gives the shot it is
+# for the swing in hand, and `off_tier` marks that pushed copy.
+var mid_only: bool = false
+var off_tier: bool = false
 # Created by a club ability rather than drawn (Section 4 "Created cards").
 # A created card exhausts: played or not, it never goes back into the
 # Form deck.
@@ -137,6 +142,10 @@ func _other_bits() -> Array:
 		bits.append("taints your next putt if played")
 	if purges_bad > 0:
 		bits.append("removes a bad card from your Form deck")
+	if off_tier:
+		bits.append("off the Mid tier, so it is pushed")
+	elif mid_only:
+		bits.append("only from the Mid tier — from any other it is pushed %d° right" % int(STOCK_OFF_DEGREES))
 	return bits
 
 
@@ -172,6 +181,25 @@ func as_created() -> FormCard:
 func of_family(f: String) -> FormCard:
 	family = f
 	return self
+
+
+# How far off line a Stock Shot is pushed from any tier but Mid — a Push.
+const STOCK_OFF_DEGREES := 8.0
+
+
+# The card as it plays for this swing. Every card is itself, except a Stock
+# Shot swung from outside the Mid tier, which comes out as a push. A pure
+# function of the card and the tier, so nothing has to be remembered on the
+# card between the draw and the shot (or sent to another machine).
+func played_at(is_mid: bool) -> FormCard:
+	if not mid_only or is_mid or off_tier:
+		return self
+	var off := FormCard.new(name, good, 1, STOCK_OFF_DEGREES, distance_mult)
+	off.family = family
+	off.created = created
+	off.mid_only = true
+	off.off_tier = true
+	return off
 
 
 # --- Card definitions (Section 4) ---
@@ -243,6 +271,32 @@ static func make(card_name: String) -> FormCard:
 			var zone := FormCard.new("In the Zone", true)
 			zone.purges_bad = 1
 			return zone
+		# --- Signature shots: the card a maker's clubs bring to your Form
+		# deck when you draft one (Brands.SIGNATURE, Section 4). ---
+		"Knockdown":
+			# Titanist. Held down and held on line: the wind barely finds it
+			# and it doesn't run away.
+			return FormCard.new("Knockdown", true, 0, 0.0, 0.95).with_roll(0.5).with_flight(0.5)
+		"Bomb":
+			# Slazinger. All of it and more, and it keeps going.
+			return FormCard.new("Bomb", true, 0, 0.0, 1.15).with_roll(1.5)
+		"Safe Swing":
+			# Callowell. Gives up a little length to take the lie out of it.
+			return FormCard.new("Safe Swing", true, 0, 0.0, 0.9, true)
+		"Scotch Runner":
+			# MacGregorian. The old low ball: under the wind, out of anything,
+			# and running a long way once it's down.
+			return FormCard.new("Scotch Runner", true, 0, 0.0, 1.0, true).with_roll(2.0).with_flight(0.4)
+		"Stock Shot":
+			# Ping-Well. The fitted swing: pure from the comfortable middle
+			# of a club, a push from anywhere else — see played_at().
+			var stock := FormCard.new("Stock Shot", true)
+			stock.mid_only = true
+			return stock
+		"Utility Swing":
+			# Nimbus. Nothing special with any club, and good with all of
+			# them: it belongs to no family, so every swing can be dealt it.
+			return FormCard.new("Utility Swing", true, 0, 0.0, 0.95)
 		"Big Strike":
 			# Created only (The Bulger). Dead straight, the club's full
 			# carry, and the lie takes no cut.
@@ -257,7 +311,11 @@ const BAD_NAMES := ["Hook", "Slice", "Pull", "Push", "Duck Hook", "Overswing",
 	"Top", "Thin", "Chunk", "Skied", "Shank", "Yips"]
 const GOOD_NAMES := ["Pure Strike", "Stinger", "Controlled Draw", "Controlled Fade",
 	"Power Draw", "Soft Fade", "Flushed", "Spinner", "Punch Out",
-	"Flop Shot", "Bump and Run", "Steady Hands", "In the Zone", "Big Strike"]
+	"Flop Shot", "Bump and Run", "Steady Hands", "In the Zone", "Big Strike",
+	"Knockdown", "Bomb", "Safe Swing", "Scotch Runner", "Stock Shot", "Utility Swing"]
+# The signature shots: never in the deck a round starts with, only ever
+# brought to it by a club (Brands.SIGNATURE).
+const SIGNATURE_NAMES := ["Knockdown", "Bomb", "Safe Swing", "Scotch Runner", "Stock Shot", "Utility Swing"]
 
 # --- Form by club family (Section 4) -------------------------------------
 # Your form is not one thing: it is how you are striking each kind of

@@ -15,7 +15,9 @@ extends Control
 #   the tile     — the bag. A narrow portrait: fourteen have to sit in one
 #                  row, so it keeps to maker, name, engraving, carry, type.
 #   the specimen — the draft. The club in full, and beside it what taking
-#                  it would change in your bag.
+#                  it would change in your bag. With four or five on offer
+#                  (a called hole, a trade-in) it is cut narrow: no
+#                  engraving, and the one thing that matters most beneath.
 #   the detail   — what a tile shows under the cursor: the specimen's own
 #                  column, so the club reads the same as the day it was
 #                  drafted.
@@ -64,6 +66,12 @@ var show_art: bool = true
 # each offer and its consequences are one object.
 var notes: Array = []
 const NOTES_WIDTH := 144.0
+# A specimen narrower than this drops its engraving and its notes column.
+const NARROW_SPECIMEN := 400.0
+# The bag the club is read against, set before setup(): a Staff club plays
+# differently once four of its maker's clubs are in it (ClubAbilities
+# .is_awake), and the card shows it as it plays there. Empty: on its own.
+var bag: Array = []
 
 var _panel: PanelContainer
 var _size: Vector2 = CARD_SIZE
@@ -175,10 +183,17 @@ func _build_tile(limited: bool) -> void:
 	# "LIMITED · WEDGE" where a tile has room for the longest of them; on a
 	# narrower one the gilt frame says Limited and the label keeps to the type.
 	var type_text: String = card.get("type", "")
+	var kind_ink: Color = BogeyTheme.GOLD_800 if limited else BogeyTheme.NEUTRAL_600
 	if limited and CardFace.caps_width("Limited · putter") <= avail:
 		type_text = "Limited · " + type_text
-	var kind := BogeyUI.kicker(type_text, BogeyTheme.GOLD_800 if limited else BogeyTheme.NEUTRAL_600,
-		CardFace.KICKER_SIZE)
+	elif ClubAbilities.is_staff(card):
+		# A Staff club says so where there is room, and goes green once the
+		# bag has woken it.
+		if CardFace.caps_width("Staff · wedge") <= avail:
+			type_text = "Staff · " + type_text
+		if ClubAbilities.is_awake(bag, card):
+			kind_ink = BogeyTheme.FAIRWAY_DEEP
+	var kind := BogeyUI.kicker(type_text, kind_ink, CardFace.KICKER_SIZE)
 	kind.clip_text = true
 	kind.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(kind)
@@ -187,6 +202,9 @@ func _build_tile(limited: bool) -> void:
 # The draft specimen: the engraving, the club in full, and what taking it
 # would change.
 func _build_specimen(limited: bool) -> void:
+	if _size.x < NARROW_SPECIMEN:
+		_build_narrow_specimen()
+		return
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -241,6 +259,39 @@ func _build_specimen(limited: bool) -> void:
 		note_col.add_child(l)
 
 
+# The specimen cut narrow, for a draft showing four or five: the club's
+# column the full width of the card, and under a rule the first of its
+# notes — DraftAdvisor puts the one that matters most first. The rest are
+# on the hover.
+func _build_narrow_specimen() -> void:
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 5)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_panel.add_child(col)
+
+	var avail := _size.x - 28.0
+	var note: Label = null
+	var note_room := 0.0
+	if not notes.is_empty():
+		var n: Dictionary = notes[0]
+		var strong: bool = n.get("strong", false)
+		var font := BogeyUI.sans(500 if strong else 450)
+		note = BogeyUI.body(str(n.text), 12, BogeyTheme.INK if strong else BogeyTheme.NEUTRAL_600)
+		note.add_theme_font_override("font", font)
+		note.max_lines_visible = 2
+		note.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		note.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		CardFace.hold_lines(note, font, 12, avail, 2)
+		note_room = note.custom_minimum_size.y + 11.0
+
+	var club := _club_column(avail, _size.y - 24.0 - note_room, false)
+	club.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(club)
+	if note != null:
+		col.add_child(BogeyUI.hairline(0.1))
+		col.add_child(note)
+
+
 # The club in full: header, name, the figure line, and its ability. The
 # same column is the body of a specimen and the whole of the hover detail.
 # `room` is the height it has to fit, or 0 for as much as it needs; the
@@ -258,8 +309,14 @@ func _club_column(avail: float, room: float, spell_out: bool) -> VBoxContainer:
 	# and the type closes the line. A club with no maker opens on its type.
 	var brand_id: String = card.get("brand", "")
 	var brand_name := Brands.display_name(brand_id)
-	var type_text := ("Limited · " if limited and spell_out else "") + ctype
+	var staff := ClubAbilities.is_staff(card)
+	var awake := ClubAbilities.is_awake(bag, card)
+	# A narrow specimen has no plate to caption, so its header says Limited.
+	var says_limited: bool = limited and (spell_out or (not compact and _size.x < NARROW_SPECIMEN))
+	var type_text := ("Limited · " if says_limited else "") + ("Staff · " if staff else "") + ctype
 	var type_ink: Color = BogeyTheme.GOLD_800 if limited else BogeyTheme.NEUTRAL_600
+	if awake:
+		type_ink = BogeyTheme.FAIRWAY_DEEP
 	var head: Control
 	if brand_name != "":
 		head = CardFace.header(Brands.color(brand_id), brand_name, BogeyTheme.NEUTRAL_700,
@@ -311,6 +368,28 @@ func _club_column(avail: float, room: float, spell_out: bool) -> VBoxContainer:
 		l.custom_minimum_size = Vector2(avail if room <= 0.0 else 0.0,
 			line_h * lines + spacing * (lines - 1))
 		col.add_child(l)
+
+	# What only the detail has room for: whether a Staff club is awake in
+	# this bag, and the shot the club brought to the Form deck.
+	if spell_out and staff and not bag.is_empty():
+		var held := int(Brands.counts(bag).get(brand_id, 0))
+		var state_text := "Awake: %d %s clubs in the bag." % [held, brand_name] if awake \
+			else "Asleep: %d of %d %s clubs in the bag." % [held, Brands.STAFF_TIER, brand_name]
+		var state_line := CardFace.words(state_text,
+			BogeyTheme.FAIRWAY_DEEP if awake else BogeyTheme.FLAG, 500)
+		state_line.custom_minimum_size = Vector2(avail, 0)
+		col.add_child(state_line)
+	if spell_out:
+		var shot := Brands.signature(card)
+		if shot != "":
+			var fam := Brands.signature_family(card)
+			var where := "any club's Form hand" if fam == "" \
+				else "your %s form" % str(FormCard.FAMILY_LABEL.get(fam, "")).to_lower()
+			var bad := Brands.baggage(card)
+			var brings := CardFace.words("Brought a %s to %s%s." % [shot, where,
+				"" if bad == "" else ", and a %s with it" % bad])
+			brings.custom_minimum_size = Vector2(avail, 0)
+			col.add_child(brings)
 	return col
 
 
@@ -357,7 +436,7 @@ func _carry_figure() -> Array:
 # through — its type's (ShotResolver.BUFFER_BY_TYPE) as its own ability
 # changes it. The other half of a Form card's "15° left".
 func _deviation_figure() -> Array:
-	var pct: int = int(round(ClubAbilities.buffer(card) * 100.0))
+	var pct: int = int(round(ClubAbilities.buffer(card, bag) * 100.0))
 	if pct <= 0:
 		return ["No", "deviation"]
 	if pct == 100:

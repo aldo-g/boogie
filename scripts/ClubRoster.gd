@@ -37,7 +37,7 @@ static func data() -> Dictionary:
 
 static func make_club(cname: String, min_y: float, max_y: float, ctype: String,
 		brand: String = Brands.NONE, limited: bool = false, ability: String = "",
-		effects: Dictionary = {}) -> Dictionary:
+		effects: Dictionary = {}, staff: Dictionary = {}) -> Dictionary:
 	return {
 		"name": cname,
 		"min_yard": min_y,
@@ -47,6 +47,10 @@ static func make_club(cname: String, min_y: float, max_y: float, ctype: String,
 		"limited": limited,
 		"ability": ability,
 		"effects": effects,
+		# A Staff club: the effects that take over from its own once the bag
+		# holds a 4-set of its brand (ClubAbilities.is_awake). Empty for
+		# every other club.
+		"staff": staff,
 	}
 
 
@@ -57,7 +61,8 @@ static func _from_entry(entry: Dictionary, brand: String = Brands.NONE) -> Dicti
 		float(entry.get("min_yard", 0)), float(entry.get("max_yard", 0)),
 		str(entry.get("type", "iron")), str(entry.get("brand", brand)),
 		bool(entry.get("limited", false)), str(entry.get("ability", "")),
-		(entry.get("effects", {}) as Dictionary).duplicate(true))
+		(entry.get("effects", {}) as Dictionary).duplicate(true),
+		(entry.get("staff", {}) as Dictionary).duplicate(true))
 
 
 static func _clubs(entries: Array, brand: String = Brands.NONE) -> Array:
@@ -83,15 +88,16 @@ static func standard_clubs() -> Array:
 	return _clubs(data().get("standards", []))
 
 
-# Every club belonging to one brand. Each brand spans enough categories
-# and enough cards to actually reach a 7-set, and each carries riders that
-# express its axis locally — the set bonus expresses the same idea as a
-# rule (Brands.gd).
+# Every club belonging to one brand: ten of them, two of which are Staff
+# clubs — poor in a mixed bag, excellent once four of the maker's clubs are
+# in it (Section 3C). Each brand spans enough categories and enough cards
+# to actually reach a 7-set, and each carries riders that express its axis
+# locally — the set bonus expresses the same idea as a rule (Brands.gd).
 static func branded_clubs(brand: String) -> Array:
 	return _clubs(data().get("brands", {}).get(brand, []), brand)
 
 
-# Limited editions: one copy each, a Created-card ability, and a pair
+# Limited editions: one copy each, two a brand, an ability, and a pair
 # rider that keys off a specific partner in the Bag rather than a count.
 # These are the draft's "I need one more thing" hooks.
 static func limited_clubs() -> Array:

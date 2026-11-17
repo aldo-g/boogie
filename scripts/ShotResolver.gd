@@ -176,7 +176,7 @@ static func buffer_for_club(club: Dictionary) -> float:
 # Brand set bonuses (Section 3A) reach the math through the last three
 # arguments, all defaulted so callers that don't care are unaffected:
 #   ignore_terrain — Callowell 4 / MacGregorian 4: terrain takes no cut
-#   deviation_mult — Callowell 2/7: a bad card's deviation is blunted
+#   deviation_mult — Callowell 2/8: a bad card's deviation is blunted
 #   severity_mult  — Slazinger 2/4: bad cards hit HARDER, the price paid
 #                    for those brands' extra Form draws
 # severity applies to deviation and to distance loss alike, so Slazinger's

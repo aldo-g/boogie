@@ -60,6 +60,7 @@ func start_hole() -> void:
 		"deck_n": form_deck.deck.size() + form_deck.discard.size(),
 		"bag": bag.map(func(c): return c.name),
 		"tiers": _tiers(bag),
+		"counts": Brands.counts(bag),
 		"pin": hole.pin_name,
 		"pin_off": snappedf(hole.pin_pos.distance_to(hole.green_pos), 0.1),
 		"hazards": 0,

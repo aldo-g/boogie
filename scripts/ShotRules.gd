@@ -45,24 +45,33 @@ const RANGE_SESSION_PURGE := 2
 # bonus, or the club's own rider) and any tier upgrades. `armed` holds the
 # abilities the player has switched on for this shot (ClubAbilities).
 static func swing_tier(bag: Array, club: Dictionary, distance: float, armed: Dictionary = {}) -> int:
-	# Nimbus 7: the ideal club for the shot is, by definition, a Mid swing.
+	# Nimbus 8: the ideal club for the shot is, by definition, a Mid swing.
 	if armed.has("ideal_club"):
 		return Tier.MID
 	var lo: float = club.get("min_yard", 0.0)
 	var hi: float = club.get("max_yard", 0.0)
 	if lo <= 0.0 and hi <= 0.0:
 		return Tier.MID
+	# A club every swing of which is Mid, even below its range (a Ping-Well
+	# Staff club in its set, The Metronome).
+	if ClubAbilities.all_mid(bag, club):
+		return Tier.MID
 	var tier: int = Tier.MID
 	var span := hi - lo
 	if distance < lo:
 		tier = Tier.EXTREME_FINESSE
 	elif span > 0.0:
-		var mid_span: float = ClubAbilities.mid_span(bag, club)
 		var frac: float = (distance - lo) / span
-		if frac >= 0.5 + mid_span / 2.0:
-			tier = Tier.FULL
-		elif frac < 0.5 - mid_span / 2.0:
-			tier = Tier.FINESSE
+		if ClubAbilities.no_mid(bag, club):
+			# No comfortable middle to this club at all: the band is split
+			# between a full swing and an eased-off one.
+			tier = Tier.FULL if frac >= 0.5 else Tier.FINESSE
+		else:
+			var mid_span: float = ClubAbilities.mid_span(bag, club)
+			if frac >= 0.5 + mid_span / 2.0:
+				tier = Tier.FULL
+			elif frac < 0.5 - mid_span / 2.0:
+				tier = Tier.FINESSE
 	tier = upgrade_tier(bag, tier)
 	# Nimbus 2: one shot per hole a tier better, on top of Ping-Well.
 	if armed.has("boost_tier"):
@@ -71,7 +80,7 @@ static func swing_tier(bag: Array, club: Dictionary, distance: float, armed: Dic
 
 
 # Ping-Well 4 plays every club one tier better than its distance implies;
-# Ping-Well 7 abolishes Extreme Finesse outright. Both are applied here so
+# Ping-Well 8 abolishes Extreme Finesse outright. Both are applied here so
 # every caller (draw count, UI text, outlook panel) sees the same tier.
 static func upgrade_tier(bag: Array, tier: int) -> int:
 	if tier == Tier.EXTREME_FINESSE and Brands.abolishes_extreme_finesse(bag):
@@ -110,7 +119,7 @@ static func club_playable(bag: Array, club: Dictionary, lie: String) -> bool:
 static func lie_distance_cap(bag: Array, lie: String, club: Dictionary = {}) -> float:
 	if Brands.ignores_terrain_penalty(bag) or Brands.plays_as_fairway(bag):
 		return 1.0
-	var own := ClubAbilities.lie_cap(club, lie)
+	var own := ClubAbilities.lie_cap(club, lie, bag)
 	if own >= 0.0:
 		return own
 	return ShotResolver.TERRAIN_DISTANCE_CAP.get(lie, 1.0)
@@ -131,12 +140,21 @@ static func is_forced(bag: Array, tier: int, lie: String) -> bool:
 
 # How many Form cards the player will choose from — 1 for a forced card.
 # Titanist 2 draws one extra and bins the worst, so it leaves this
-# unchanged. `created` is how many created cards join the draw. Used to
-# preview the draw before it happens.
-static func form_choice_count(bag: Array, tier: int, lie: String, created: int = 0) -> int:
+# unchanged. `created` is how many created cards join the draw; `club` adds
+# its own figure (a Titanist Staff club draws one fewer, or one more). Used
+# to preview the draw before it happens.
+static func form_choice_count(bag: Array, tier: int, lie: String, created: int = 0,
+		club: Dictionary = {}) -> int:
 	if is_forced(bag, tier, lie):
 		return 1 + created
-	return FormDeck.TIER_DRAW_COUNT.get(tier, 3) + maxi(Brands.bonus_draw_cards(bag), 0) + created
+	return maxi(1, FormDeck.TIER_DRAW_COUNT.get(tier, 3) + draw_bonus(bag, club, lie)) + created
+
+
+# Cards added to (or taken from) the tier's draw: the bag's set bonuses,
+# and the club's own. Never enough taken to leave no card at all — see
+# FormDeck.draw_for_shot().
+static func draw_bonus(bag: Array, club: Dictionary, lie: String) -> int:
+	return Brands.bonus_draw_cards(bag) + ClubAbilities.draw_bonus(bag, club, lie)
 
 
 # Draws this shot's Form hand from `deck` with the bag's brand bonuses,
@@ -154,7 +172,7 @@ static func draw_form(deck: FormDeck, bag: Array, club: Dictionary,
 	# Dealt from the family of the club in hand, and from no other
 	# (Section 4 "Form by club family").
 	var result := deck.draw_for_shot(tier, lie_forced,
-		Brands.bonus_draw_cards(bag), Brands.drops_worst_draw(bag), FormCard.family_of(club))
+		draw_bonus(bag, club, lie), Brands.drops_worst_draw(bag), FormCard.family_of(club))
 	result["tier"] = tier
 	result["from_lie"] = lie_forced and tier != Tier.EXTREME_FINESSE
 	result["had_forced_card"] = result.forced
@@ -170,21 +188,33 @@ static func draw_form(deck: FormDeck, bag: Array, club: Dictionary,
 enum Yips { NONE, BLOCKED, TAINTS_PUTT }
 
 # Section 4 "Putting cross-trigger": playing the Yips taints the next putt,
-# unless Callowell 7 shrugs it off.
+# unless Callowell 8 shrugs it off.
 static func yips_effect(bag: Array, card: FormCard) -> int:
 	if not card.is_yips:
 		return Yips.NONE
 	return Yips.BLOCKED if Brands.blocks_yips(bag) else Yips.TAINTS_PUTT
 
 
-# Nimbus 7's "ideal club" buffers like a wedge.
+# Nimbus 8's "ideal club" buffers like a wedge.
 const IDEAL_BUFFER := 0.5
+
+
+# The card as this swing plays it: itself, except a Stock Shot swung from
+# outside the Mid tier, which is pushed (FormCard.played_at). The Metronome
+# with a Ping-Well Wood beside it strikes them pure from anywhere.
+static func card_for_shot(bag: Array, club: Dictionary, aimed_distance: float,
+		card: FormCard, armed: Dictionary = {}) -> FormCard:
+	if card == null or not card.mid_only:
+		return card
+	return card.played_at(ClubAbilities.stock_always(bag)
+		or swing_tier(bag, club, aimed_distance, armed) == Tier.MID)
 
 
 # The flight of the shot with every brand and club modifier applied — see
 # ShotResolver.resolve_shot() for the fields of the result.
 static func resolve(bag: Array, club: Dictionary, aimed_distance: float,
 		lie: String, card: FormCard, armed: Dictionary = {}) -> Dictionary:
+	card = card_for_shot(bag, club, aimed_distance, card, armed)
 	var distance := aimed_distance
 	# Big Strike flies the club's whole carry, whatever was aimed.
 	if card.to_max_band:
@@ -196,15 +226,17 @@ static func resolve(bag: Array, club: Dictionary, aimed_distance: float,
 		distance *= lie_distance_cap(bag, lie, club)
 
 	# Buffering: the club type's share of the deviation, scaled by the
-	# club's own rider, and capped at a wedge's for Nimbus 7.
+	# club's own rider, and capped at a wedge's for Nimbus 8.
 	var type_buffer := ShotResolver.buffer_for_club(club)
-	var club_buffer := ClubAbilities.buffer(club)
+	var club_buffer := ClubAbilities.buffer(club, bag)
 	if armed.has("ideal_club"):
 		club_buffer = minf(club_buffer, IDEAL_BUFFER)
 	var buffer_scale := club_buffer / type_buffer if type_buffer > 0.0 else 1.0
 
-	var severity := Brands.severity_mult(bag)
-	# Callowell 7 and the Callowell Big Deal Driver: mishits (Top, Thin,
+	# How hard a bad card hits: the bag's (Slazinger), then the club's own
+	# (a Slazinger Staff club out of its set, or in it).
+	var severity := Brands.severity_mult(bag) * ClubAbilities.severity(bag, club)
+	# Callowell 8 and the Callowell Big Deal Driver: mishits (Top, Thin,
 	# Chunk, Skied) hit at half severity — they cost half as much distance.
 	if card.mishit:
 		if Brands.softens_mishits(bag):
@@ -299,7 +331,7 @@ static func settle(hole: HoleData, before_pos: Vector2, landing_pos: Vector2,
 		_:
 			out.lie = "fairway"
 
-	# Callowell 7 and the Callowell Gap Wedge: no downgraded lie.
+	# Callowell 8 and the Callowell Gap Wedge: no downgraded lie.
 	if downgrades_lie and out.lie != "green" and not Brands.blocks_lie_downgrade(bag) \
 			and not ClubAbilities.blocks_lie_downgrade(club):
 		out.lie = ShotResolver.lie_downgrade(out.lie)

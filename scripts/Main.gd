@@ -29,6 +29,7 @@ const Caddy := preload("res://scripts/Caddy.gd")
 const Rivals := preload("res://scripts/Rivals.gd")
 const HoleBanner := preload("res://scripts/HoleBanner.gd")
 const CardFace := preload("res://scripts/CardFace.gd")
+const DraftRules := preload("res://scripts/DraftRules.gd")
 
 # Parchment / fairway theme, shared with Title.gd via BogeyTheme.
 const COLOR_BG := Palette.PARCHMENT
@@ -93,6 +94,10 @@ var _pending_drops: Array = []
 # Players still owing an end-of-hole draft, in order. On one screen drafts
 # run one player at a time, because each is a choice made at that screen.
 var _draft_queue: Array = []
+
+# This screen is choosing which club to trade in (the draft's "Trade in").
+# Only ever what this machine is showing: the trade itself is one action.
+var _trading: bool = false
 
 # Online, everyone drafts at once instead: each machine shows its own
 # player's draft, and the next hole starts when the last pick is in. Each
@@ -248,6 +253,9 @@ const BAG_GAP := 8             # between cards in the bag
 const BAG_CARD_MAX := 136.0    # a bag card with room to spare...
 const BAG_CARD_MIN := 100.0    # ...and with all fourteen in the row
 const DRAFT_CARD_WIDTH := 456.0  # a draft offer: the club, and what taking it changes
+const DRAFT_CARD_MIN := 236.0    # ...cut narrow, with five on the rack
+const DRAFT_SIDE_WIDTH := 150.0  # the draft's other moves, beside the offers
+const TRADE_BACK_WIDTH := 84.0   # the way back out of a trade-in
 
 # --- UI node refs (built in code) ---
 var map_view: CourseMapView
@@ -670,7 +678,9 @@ func rebuild_form_deck_list() -> void:
 
 	# A family at a time: its good and bad counts, then a line a card.
 	var form := form_deck.family_form()
-	for fam in FormCard.FAMILIES:
+	# ...and last the cards that belong to none (a Nimbus club's Utility
+	# Swing), which every swing can be dealt.
+	for fam in FormCard.FAMILIES + [""]:
 		var counts := {}       # name -> count
 		var is_good := {}      # name -> bool
 		for c in all_cards:
@@ -682,10 +692,11 @@ func rebuild_form_deck_list() -> void:
 			continue
 
 		var head := HBoxContainer.new()
-		var fam_label := BogeyUI.kicker(FormCard.FAMILY_LABEL[fam], BogeyTheme.INK)
+		var fam_label := BogeyUI.kicker(FormCard.FAMILY_LABEL.get(fam, "Any club"), BogeyTheme.INK)
 		fam_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		head.add_child(fam_label)
-		head.add_child(BogeyUI.kicker("%d good · %d bad" % [form[fam].good, form[fam].bad], BogeyTheme.NEUTRAL_600))
+		head.add_child(BogeyUI.kicker("counted in every family above" if fam == "" \
+			else "%d good · %d bad" % [form[fam].good, form[fam].bad], BogeyTheme.NEUTRAL_600))
 		form_deck_list.add_child(BogeyUI.margin(head, 0, 12, 4, 6))
 		form_deck_list.add_child(BogeyUI.hairline(0.2))
 
@@ -1248,26 +1259,39 @@ func begin_draft_phase() -> void:
 	refresh_ui()
 
 
-# Deals the active player's three draft options. False if their club deck
-# has nothing left to offer.
+# Deals the active player's draft: three clubs to keep one of, or what a
+# called hole earned (DraftRules — five and keep two, or only two). False
+# if their club deck has nothing left to offer.
 func _draw_draft_options() -> bool:
 	var owned_names := {}
 	for c in hand:
 		owned_names[c.name] = true
 
-	current_draft_options = []
-	for i in range(3):
-		var card := draw_unowned_club(owned_names)
-		if card.is_empty():
-			# The shared club deck is genuinely exhausted (every card is
-			# either in a bag or already offered this hole). Offer a shorter
-			# draft rather than a phantom card.
-			break
-		current_draft_options.append(card)
-		# Also exclude this hole's other options from the remaining draws,
-		# so the 3 offers can't repeat a name amongst themselves either.
-		owned_names[card.name] = true
+	me.draft_keeps = DraftRules.keep_count(hand, me.call_result)
+	me.draft_taken = 0
+	me.draft_digs = 0
+	me.draft_traded = false
+	_trading = false
+	current_draft_options = _deal_offers(DraftRules.offer_count(hand, me.call_result), owned_names)
 	return not current_draft_options.is_empty()
+
+
+# Up to `count` clubs off the active player's club deck, none of them named
+# in `taken` (which each one dealt is added to).
+func _deal_offers(count: int, taken: Dictionary) -> Array:
+	var out: Array = []
+	for i in range(count):
+		var card := draw_unowned_club(taken)
+		if card.is_empty():
+			# The club deck is genuinely exhausted (every card is either in
+			# a bag or already offered this hole). Offer a shorter draft
+			# rather than a phantom card.
+			break
+		out.append(card)
+		# Also exclude this hole's other options from the remaining draws,
+		# so the offers can't repeat a name amongst themselves either.
+		taken[card.name] = true
+	return out
 
 
 # Draws a club whose name isn't in owned_names, setting aside (not
@@ -1450,19 +1474,230 @@ func on_draft_pick(index: int) -> void:
 		return
 	var card: Dictionary = current_draft_options[index]
 	Sound.play("card_place")
-	for i in range(current_draft_options.size()):
-		if i != index:
-			club_discard.append(current_draft_options[i])
+	current_draft_options.remove_at(index)
+	me.draft_taken += 1
+	me.draft_keeps -= 1
+	if me.draft_keeps <= 0:
+		_close_draft_offers()
 
 	if hand.size() >= HAND_CAP:
 		pending_new_card = card
 		log_msg("Hand is full (%d cards) — discard one to make room for [b]%s[/b]." % [HAND_CAP, card.name])
 		state = State.DISCARD_FOR_DRAFT
 	else:
-		hand.append(card)
-		sort_hand()
-		log_msg("Added [b]%s[/b] to your hand." % card.name)
-		begin_next_draft()
+		var was := _bag_marks()
+		add_club(card)
+		_celebrate_bag_change(was)
+		_after_draft_pick()
+	refresh_ui()
+
+
+# The offers nobody took go to the club discard pile.
+func _close_draft_offers() -> void:
+	club_discard.append_array(current_draft_options)
+	current_draft_options = []
+
+
+# A pick (or a range session) is done. A called hole made keeps two, so
+# the draft stays open while there is another to keep and something left
+# to keep; otherwise this player's draft is over.
+func _after_draft_pick() -> void:
+	if me.draft_keeps > 0 and not current_draft_options.is_empty():
+		state = State.DRAFT
+		return
+	_close_draft_offers()
+	begin_next_draft()
+
+
+# Stops a draft that still had a club to keep: "that'll do".
+func on_draft_done() -> void:
+	if state != State.DRAFT:
+		_reject("draft done", "not in the draft phase")
+		return
+	if me.draft_taken <= 0:
+		_reject("draft done", "nothing has been kept yet")
+		return
+	_close_draft_offers()
+	begin_next_draft()
+	refresh_ui()
+
+
+# --- The bag, and the Form cards its clubs bring -----------------------
+# Every way a club joins or leaves the bag goes through these two, because
+# a maker's club brings its signature shot into the Form deck with it and
+# takes it out again when it goes (Brands.SIGNATURE, Section 4).
+
+func add_club(card: Dictionary) -> void:
+	hand.append(card)
+	sort_hand()
+	log_msg("Added [b]%s[/b] to your hand." % card.name)
+	var shot := Brands.signature(card)
+	if shot != "":
+		var fam := Brands.signature_family(card)
+		form_deck.add_card(shot, fam)
+		log_msg("[color=#%s]It brings a %s to your %s.[/color]" % [COLOR_ACCENT.to_html(false), shot,
+			"Form deck, for any club" if fam == "" else "%s form" % FormCard.FAMILY_LABEL.get(fam, "").to_lower()])
+	var bad := Brands.baggage(card)
+	if bad != "":
+		form_deck.add_bad_card_to_deck(bad, FormCard.family_of(card))
+		log_msg("[color=#%s]...and a %s comes with it.[/color]" % [COLOR_FLAG.to_html(false), bad])
+
+
+func remove_club(index: int) -> Dictionary:
+	var removed: Dictionary = hand.pop_at(index)
+	log_msg("Discarded %s." % removed.name)
+	var shot := Brands.signature(removed)
+	if shot != "" and form_deck.remove_card(shot, Brands.signature_family(removed)):
+		log_msg("[i]Its %s leaves your Form deck with it.[/i]" % shot)
+	return removed
+
+
+# What the bag has earned: each brand's set tier, and the Staff clubs awake.
+func _bag_marks() -> Dictionary:
+	var tiers := {}
+	var counts := Brands.counts(hand)
+	for b in counts:
+		tiers[b] = Brands.tier_reached(int(counts[b]))
+	return {"tiers": tiers, "awake": ClubAbilities.awake_names(hand)}
+
+
+# Marks a set completed since `was` (a _bag_marks() taken before the bag
+# changed): the stamp, the sound and a word from the caddy. The club that
+# makes the set is the moment the draft is played for, so it gets one.
+func _celebrate_bag_change(was: Dictionary) -> void:
+	var now := _bag_marks()
+	var brand := ""
+	var tier := 0
+	for b in now.tiers:
+		var t: int = int(now.tiers[b])
+		if t > int((was.tiers as Dictionary).get(b, 0)) and t > tier:
+			tier = t
+			brand = b
+	if brand == "":
+		return
+	var woke: Array = (now.awake as Array).filter(func(n): return not (was.awake as Array).has(n))
+	var maker := Brands.display_name(brand)
+	log_msg("[color=#%s][b]%s %d-set complete.[/b] %s.[/color]" % [COLOR_ACCENT.to_html(false), maker, tier,
+		Brands.bonus_text(brand, tier)])
+	if not woke.is_empty():
+		log_msg("[color=#%s]Staff clubs awake: %s.[/color]" % [COLOR_ACCENT.to_html(false),
+			", ".join(PackedStringArray(woke))])
+	Sound.play("ui_confirm")
+	if _can_stamp():
+		var kicker := "The bag" if not is_multiplayer() else "%s bag" % possessive(me)
+		var sub := Brands.stamp_text(brand, tier)
+		if woke.size() == 1:
+			sub = "The %s wakes" % str(woke[0]).trim_prefix(maker + " ")
+		elif woke.size() > 1:
+			sub = "%d Staff clubs wake" % woke.size()
+		hole_banner.stamp("%s %d-SET" % [maker.to_upper(), tier], kicker, sub,
+			HoleBanner.Tone.GREAT if Brands.is_top(tier) else HoleBanner.Tone.GOOD)
+	if not is_cpu_seat(active_index) and (not online or active_index == my_seat):
+		caddy_says("set_complete", {"brand": maker, "tier": tier, "woke": woke.size()}, true)
+
+
+# --- Hunting for a club (DraftRules.gd) --------------------------------
+
+# The call is made on the tee, before the first stroke, and can be taken
+# back until that stroke's Form hand is drawn. Not on the last hole: no
+# draft follows it, so there would be nothing to call for.
+func can_call_hole() -> bool:
+	return (state == State.CLUB_SELECT or state == State.AIM) and me.strokes == 0 \
+		and not me.holed_out and current_lie == "tee" \
+		and current_hole_index < Course.hole_count()
+
+
+# Calls birdie on this hole, or takes the call back.
+func on_call_hole() -> void:
+	if not can_call_hole():
+		_reject("call", "the hole is already under way")
+		return
+	me.called = not me.called
+	Sound.play("card_slide")
+	if me.called:
+		log_msg("[color=#%s][b]%s called.[/b] Make it: the draft shows %d, keep %d. Miss: it shows %d.[/color]" % [
+			COLOR_ACCENT.to_html(false), DraftRules.CALL_NAME.capitalize(),
+			DraftRules.offer_count(hand, DraftRules.MADE), DraftRules.keep_count(hand, DraftRules.MADE),
+			DraftRules.offer_count(hand, DraftRules.MISSED)])
+		caddy_says("call")
+	else:
+		log_msg("[i]The call is taken back.[/i]")
+	refresh_ui()
+
+
+# Sends the whole offer back and deals as many fresh clubs — at the price
+# of a bad card in the Form deck.
+func on_dig() -> void:
+	if state != State.DRAFT:
+		_reject("dig", "not in the draft phase")
+		return
+	if not DraftRules.can_dig(hand, me.draft_taken, me.draft_digs, current_draft_options.size()):
+		_reject("dig", "no dig left in this draft")
+		return
+	var old: Array = current_draft_options.duplicate()
+	var taken := {}
+	for c in hand:
+		taken[c.name] = true
+	for c in old:
+		taken[c.name] = true
+	# Dealt while the old offer is still held aside, so it can't come back.
+	var fresh := _deal_offers(old.size(), taken)
+	if fresh.is_empty():
+		_reject("dig", "the club deck has nothing else to show")
+		return
+	current_draft_options = fresh
+	club_discard.append_array(old)
+	me.draft_digs += 1
+	Sound.play("card_shuffle", 0.0, -6.0)
+	if DraftRules.dig_costs_card(hand):
+		# Both rolls go through _roll(), so every machine adds the same card.
+		var fams: Array = DraftRules.DIG_FAMILIES
+		var fam: String = _roll("dig_family", func(): return fams[randi_range(0, fams.size() - 1)])
+		var pool: Array = FormCard.bad_names_for(fam)
+		var bad_name: String = _roll("dig_card", func(): return pool[randi_range(0, pool.size() - 1)])
+		var card := form_deck.add_bad_card_to_deck(bad_name, fam)
+		log_msg("[color=#%s]Dug for %d fresh club%s — and a %s joins your %s form.[/color]" % [
+			COLOR_FLAG.to_html(false), fresh.size(), "" if fresh.size() == 1 else "s", card.name,
+			FormCard.FAMILY_LABEL.get(card.family, "").to_lower()])
+	else:
+		log_msg("[color=#%s]Dug for %d fresh club%s — Old Faithful digs for nothing.[/color]" % [
+			COLOR_ACCENT.to_html(false), fresh.size(), "" if fresh.size() == 1 else "s"])
+	refresh_ui()
+
+
+# Gives up a club from the bag for one more offer. The club is gone for
+# good, and its signature shot with it.
+func on_trade_in(index: int) -> void:
+	if state != State.DRAFT:
+		_reject("trade in", "not in the draft phase")
+		return
+	if not DraftRules.can_trade(hand, me.draft_taken, me.draft_traded, current_draft_options.size()):
+		_reject("trade in", "no trade left in this draft")
+		return
+	if not _valid_index(index, hand):
+		_reject("trade in", "index %d outside 0..%d" % [index, hand.size() - 1])
+		return
+	var taken := {}
+	for c in hand:
+		taken[c.name] = true
+	for c in current_draft_options:
+		taken[c.name] = true
+	var extra := draw_unowned_club(taken)
+	if extra.is_empty() or taken.has(extra.name):
+		# Nothing new to show: leave the bag alone.
+		if not extra.is_empty():
+			club_deck.append(extra)
+		_reject("trade in", "the club deck has nothing else to offer")
+		return
+	var removed := remove_club(index)
+	current_draft_options.append(extra)
+	me.draft_traded = true
+	_trading = false
+	Sound.play("card_discard")
+	log_msg("[color=#%s]Traded in %s — one more club on offer.[/color]" % [
+		COLOR_ACCENT.to_html(false), removed.name])
+	if removed.get("brand", Brands.NONE) == Brands.STARTER:
+		mark_starter_retired()
 	refresh_ui()
 
 
@@ -1479,18 +1714,19 @@ func on_discard_pick(index: int) -> void:
 		# with no replacement.
 		_reject("discard pick", "no incoming card to make room for")
 		return
-	var removed = hand.pop_at(index)
+	var was := _bag_marks()
+	var removed := remove_club(index)
 	Sound.play("card_discard")
-	log_msg("Discarded %s." % removed.name)
-	hand.append(pending_new_card)
-	sort_hand()
-	log_msg("Added [b]%s[/b] to your hand." % pending_new_card.name)
+	add_club(pending_new_card)
 	pending_new_card = null
 	if removed.get("brand", Brands.NONE) == Brands.STARTER:
 		mark_starter_retired()
+	# After the retirement stamp, so a set completed by the same swap is
+	# the one left on the map.
+	_celebrate_bag_change(was)
 
 	if state == State.DISCARD_FOR_DRAFT:
-		begin_next_draft()
+		_after_draft_pick()
 	else:
 		# was DISCARD_FOR_HAZARD -> shot already resolved, move on
 		advance_after_shot()
@@ -1533,7 +1769,7 @@ func on_ability(id: String) -> void:
 			current_form_forced = false
 			log_msg("[color=#%s]%s — creates a %s in your hand. It exhausts whether you play it or not.[/color]" % [
 				COLOR_ACCENT.to_html(false), entry.source, card.name])
-		"redraw":
+		"redraw", "surgeon":
 			var kept: Array = []
 			var drawn: Array = []
 			for c in current_form_options:
@@ -1564,13 +1800,15 @@ func on_range_session() -> void:
 	if form_deck.bad_count() == 0:
 		_reject("range session", "no bad cards to work out")
 		return
-	club_discard.append_array(current_draft_options)
-	current_draft_options = []
+	# It takes the place of one club kept. With only the one to keep, that
+	# ends the draft; a called hole made still has a club to come.
 	var purged := form_deck.purge_bad(ShotRules.RANGE_SESSION_PURGE)
+	me.draft_taken += 1
+	me.draft_keeps -= 1
 	Sound.play("card_discard")
-	log_msg("[color=#%s]Range session — no club this hole, but %s leave%s your Form deck.[/color]" % [
+	log_msg("[color=#%s]Range session — in place of a club, %s leave%s your Form deck.[/color]" % [
 		COLOR_ACCENT.to_html(false), " and ".join(PackedStringArray(purged)), "s" if purged.size() == 1 else ""])
-	begin_next_draft()
+	_after_draft_pick()
 	refresh_ui()
 
 
@@ -1613,12 +1851,29 @@ func on_form_pick(index: int) -> void:
 		return
 	var card: FormCard = current_form_options[index]
 	form_deck.return_unpicked(current_form_options, index)
-	# The played card cycles too; only a created one exhausts.
-	form_deck.discard_played(card)
+	_file_played_card(pending_club, card)
 	current_form_options = []
 	current_form_forced = false
 	Sound.play("card_place")
 	play_shot(pending_club, card)
+
+
+# Where a played Form card goes. The discard pile, to come round again —
+# unless a club created it (it exhausts), or it is a bad card played with
+# a Callowell Staff club: out of its set that card goes straight back on
+# top of the deck, in its set it leaves the deck for good.
+func _file_played_card(club: Dictionary, card: FormCard) -> void:
+	var fate := "" if card.good or card.created else ClubAbilities.bad_fate(hand, club)
+	match fate:
+		"gone":
+			log_msg("[color=#%s]%s — the %s leaves your Form deck for good.[/color]" % [
+				COLOR_ACCENT.to_html(false), club.name, card.name])
+		"top":
+			form_deck.return_to_top(card)
+			log_msg("[color=#%s]%s — the %s goes back on top of your Form deck.[/color]" % [
+				COLOR_FLAG.to_html(false), club.name, card.name])
+		_:
+			form_deck.discard_played(card)
 
 
 func play_shot(club: Dictionary, card: FormCard) -> void:
@@ -1632,6 +1887,8 @@ func play_shot(club: Dictionary, card: FormCard) -> void:
 			caddy_says("yips")
 
 	var aimed_distance: float = ball_pos.distance_to(aim_target)
+	# The card as this swing plays it (a Stock Shot off the Mid tier is pushed).
+	var played := ShotRules.card_for_shot(hand, club, aimed_distance, card, me.armed)
 	var result := ShotRules.resolve(hand, club, aimed_distance, play_lie(), card, me.armed)
 	# The shot's toggles are spent (charged when the draw was made).
 	for id in ["boost_tier", "ideal_club", "clean_lie"]:
@@ -1642,7 +1899,7 @@ func play_shot(club: Dictionary, card: FormCard) -> void:
 	_caddy_card = card.name
 
 	log_msg("[b]Stroke %d[/b] — played %s with %s (lie: %s)" % [strokes, card.name, club.name, current_lie])
-	log_msg("%s: %s" % [card.name, card.effect_text()])
+	log_msg("%s: %s" % [card.name, played.effect_text()])
 	if card.created:
 		log_msg("[i]%s was created by a club — it exhausts now it's played.[/i]" % card.name)
 	if card.purges_bad > 0:
@@ -2284,6 +2541,10 @@ func show_hole_banner(diff: int, holed_from: int, streak: int) -> void:
 		detail = "Holed from %d yards · %s" % [holed_from, detail]
 	if streak >= STREAK_CALL:
 		detail += " · %d under-par holes running" % streak
+	if me.call_result == DraftRules.MADE:
+		detail += " · called it"
+	elif me.call_result == DraftRules.MISSED:
+		detail += " · the call missed"
 	# Worked out now, stamped when the ball has dropped: by then the turn
 	# may have passed to someone else.
 	var title := HoleBanner.result_title(diff, strokes)
@@ -2434,6 +2695,8 @@ func finish_hole(holed_from: int = -1) -> void:
 	me.holed_out = true
 	_after_putt_drops(func(): Sound.jingle(diff))
 	round_scores.append({"hole": current_hole_index, "par": hole_par, "strokes": strokes})
+	# A called hole is settled here; the draft that follows pays it out.
+	me.call_result = DraftRules.call_result(me.called, strokes, hole_par)
 	if records_this_seat(active_index):
 		var prev_best := Records.record_hole(current_hole_index, strokes)
 		if prev_best > 0 and strokes < prev_best:
@@ -2442,6 +2705,9 @@ func finish_hole(holed_from: int = -1) -> void:
 	show_hole_banner(diff, holed_from, streak)
 	if is_cpu_seat(active_index):
 		caddy_says("rival_holed", {"diff": diff, "rival": me.name}, true)
+	elif me.call_result != "" and holed_from < 0:
+		# The call outranks a remark about the score it was made with.
+		caddy_says("call_made" if me.call_result == DraftRules.MADE else "call_missed", {"diff": diff})
 	elif streak >= STREAK_CALL and holed_from < 0:
 		# A run of under-par holes outranks a remark about this one. (A
 		# hole-out has just had its own line.)
@@ -2517,7 +2783,7 @@ const DRAFT_DONE := "done"
 func begin_simultaneous_draft() -> void:
 	_simul_draft = true
 	_draft_queue = []
-	log_msg("\n[b]Everyone drafts at once.[/b] Draw 3, pick 1 — the next hole starts when the last pick is in.")
+	log_msg("\n[b]Everyone drafts at once.[/b] The next hole starts when the last pick is in.")
 	for i in range(players.size()):
 		active_index = i
 		if me.abandoned or not _draw_draft_options():
@@ -2559,6 +2825,10 @@ func apply_as_seat(seat: int, kind: String, payload: Dictionary) -> void:
 		return  # that was the last pick, and the next hole has begun
 	if state == State.DISCARD_FOR_DRAFT:
 		me.draft_stage = DRAFT_DISCARD
+	elif state == State.DRAFT:
+		# Still picking: a dig or a trade-in, or one kept with another to
+		# come (a called hole made).
+		me.draft_stage = DRAFT_PICK
 	view_seat(my_seat)
 
 
@@ -2818,14 +3088,25 @@ func brand_chip_tooltip(brand: String) -> String:
 	lines.append("")
 	if tier > 0:
 		lines.append("ACTIVE — set of %d:" % tier)
-		lines.append("  %s" % String(Brands.BONUS_TEXT.get(brand, {}).get(tier, "")))
+		lines.append("  %s" % Brands.bonus_text(brand, tier))
 	var next: int = Brands.next_tier(n)
 	if next > 0:
 		# The gap is what turns the chip into a decision at draft time.
 		lines.append("%d more for the set of %d:" % [next - n, next])
-		lines.append("  %s" % String(Brands.BONUS_TEXT.get(brand, {}).get(next, "")))
+		lines.append("  %s" % Brands.bonus_text(brand, next))
 	elif tier > 0:
 		lines.append("Top tier reached.")
+	# The maker's shot, which each of its clubs brings to the Form deck.
+	var shot := String(Brands.SIGNATURE.get(brand, ""))
+	if shot != "":
+		lines.append("")
+		lines.append("Each club (not the putter) brings a %s:" % shot)
+		lines.append("  %s" % FormCard.make(shot).effect_text())
+		if Brands.SIGNATURE_ANY_FAMILY.has(brand):
+			lines.append("  Any club can be dealt it.")
+		if Brands.BAGGAGE.has(brand):
+			lines.append("  ...and a bad card comes with each.")
+		lines.append("In the Form deck now: %d." % form_deck.count_of(shot))
 	return "\n".join(lines)
 
 
@@ -2881,6 +3162,8 @@ func refresh_ui() -> void:
 	var cpu := is_cpu_turn()
 	if map_view:
 		map_view.input_locked = cpu
+	if state != State.DRAFT:
+		_trading = false
 
 	if scorecard:
 		if is_multiplayer():
@@ -2948,27 +3231,37 @@ func refresh_ui() -> void:
 			options_label.text = "Playing %s." % pending_club.name
 			rebuild_bag_row()
 			for i in range(current_form_options.size()):
-				var fv := make_form_card_view(current_form_options[i], not cpu)
+				# As this swing plays it: a Stock Shot off the Mid tier is
+				# shown as the push it will be.
+				var fv := make_form_card_view(ShotRules.card_for_shot(hand, pending_club,
+					ball_pos.distance_to(aim_target), current_form_options[i], me.armed), not cpu)
 				fv.picked.connect(_make_form_pick_callback(i))
 				form_container.add_child(fv)
 
 		State.DRAFT:
 			step_num = "·"
-			step_hint = "End of the hole — add one club to your bag"
-			# Normally 3, but a nearly-exhausted club deck can offer fewer.
-			hand_label.text = "Draw %d, keep 1" % current_draft_options.size()
-			options_label.text = "It joins your bag for the rest of the round."
-			for i in range(current_draft_options.size()):
-				var cv := make_draft_card(current_draft_options[i], not cpu,
-					DraftAdvisor.gains(hand, current_draft_options[i], HAND_CAP))
-				cv.picked.connect(_make_draft_pick_callback(i))
-				options_container.add_child(cv)
-			var bad := form_deck.bad_count()
-			if bad > 0:
-				var range_btn := make_range_card(mini(ShotRules.RANGE_SESSION_PURGE, bad), bad)
-				range_btn.pressed.connect(func(): submit("range", {}))
-				range_btn.disabled = cpu
-				options_container.add_child(range_btn)
+			var shown := current_draft_options.size()
+			var keeps: int = clampi(me.draft_keeps, 1, maxi(shown, 1))
+			if _trading and not cpu:
+				step_hint = "Trade in — give up a club for one more offer"
+				hand_label.text = "Trade in a club"
+				options_label.text = "Tap the club to give up. It is gone for good, and the shot it brought goes with it."
+				build_trade_row()
+			else:
+				step_hint = "End of the hole — add %s to your bag" % (
+					"one club" if keeps == 1 else "%d clubs" % keeps)
+				# Three and keep one, unless the hole was called (DraftRules);
+				# a nearly-exhausted club deck can offer fewer.
+				hand_label.text = "Draw %d, keep %d" % [shown, keeps]
+				options_label.text = draft_caption()
+				var offer_width := draft_card_width(shown)
+				for i in range(shown):
+					var offer: Dictionary = current_draft_options[i]
+					var cv := make_draft_card(offer, not cpu,
+						DraftAdvisor.gains(hand, offer, HAND_CAP), offer_width)
+					cv.picked.connect(_make_draft_pick_callback(i))
+					options_container.add_child(cv)
+				options_container.add_child(make_draft_side(cpu))
 			build_form_placeholders("No Form draw between holes.")
 
 		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
@@ -3067,7 +3360,8 @@ func build_form_placeholders(note: String) -> void:
 	if state == State.AIM and not pending_club.is_empty():
 		swinging = FormCard.family_of(pending_club)
 		var created: int = me.created_next.size() + ClubAbilities.draw_extras(pending_club, current_lie).size()
-		var count: int = ShotRules.form_choice_count(hand, swing_tier_for_shot(), play_lie(), created)
+		var count: int = ShotRules.form_choice_count(hand, swing_tier_for_shot(), play_lie(), created,
+			pending_club)
 		form_hint.text = "This swing draws %d from your %s form — %s." % [count,
 			FormCard.FAMILY_LABEL[swinging], "you keep one" if count > 1 else "no choice"]
 		form_hint.visible = true
@@ -3148,6 +3442,8 @@ func make_card_view(card: Dictionary, interactive: bool = true, compact: bool = 
 	cv.width = width
 	cv.height = height
 	cv.show_art = show_art
+	# Read against the bag it is in: a Staff club shows as it plays there.
+	cv.bag = hand
 	cv.setup(card, interactive, compact)
 	return cv
 
@@ -3155,55 +3451,155 @@ func make_card_view(card: Dictionary, interactive: bool = true, compact: bool = 
 # A draft offer: the club in full, and on the same card what taking it
 # would change in your bag — see DraftAdvisor. The lines that matter most
 # are in full ink.
-func make_draft_card(card: Dictionary, interactive: bool, notes: Array) -> CardView:
+func make_draft_card(card: Dictionary, interactive: bool, notes: Array,
+		width: float = DRAFT_CARD_WIDTH) -> CardView:
 	var cv := CardView.new()
-	cv.width = DRAFT_CARD_WIDTH
+	cv.width = width
 	cv.notes = notes if not notes.is_empty() \
 		else [{"text": "Nothing else in your bag changes.", "strong": false}]
+	# Read as it would play in the bag once taken.
+	cv.bag = hand + [card]
 	cv.setup(card, interactive, false)
-	if notes.size() > 3:
+	# A narrow card shows only the first of its notes; a wide one, three.
+	if notes.size() > (1 if width < CardView.NARROW_SPECIMEN else 3):
 		cv.set_tip("\n".join(PackedStringArray(notes.map(func(n): return str(n.text)))))
 	return cv
 
 
-# The draft's fourth offer, set as the cards beside it are (see
-# CardFace.gd): pass on the club and work bad cards out of the Form deck.
-# A button, so it takes the keyboard and disables like one.
-func make_range_card(purge: int, bad: int) -> Button:
-	var b := Button.new()
-	b.custom_minimum_size = Vector2(150, CardView.CARD_SIZE.y)
-	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	BogeyUI.style_button(b, false, 13)
-
+# The draft's other moves, in a column beside the offers (DraftRules.gd):
+# a range session in place of a club, a dig for fresh offers, a club traded
+# in for one more — and, once something has been kept from a draft that
+# keeps two, a way to stop there.
+func make_draft_side(cpu: bool) -> Control:
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 3)
-	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var avail := 150.0 - 28.0
-	col.add_child(CardFace.header(Color(0, 0, 0, 0), "Instead", BogeyTheme.NEUTRAL_600))
-	col.add_child(CardFace.name_label("Range session", CardFace.NAME_SIZE, avail))
-	col.add_child(CardFace.figure([["%d" % purge, "bad card%s out" % ("" if purge == 1 else "s")]], avail))
-	var words := CardFace.words("Take no club. %d bad Form card%s in your deck." % [
-		bad, "" if bad == 1 else "s"])
-	words.custom_minimum_size = Vector2(avail, 0)
-	col.add_child(words)
+	col.add_theme_constant_override("separation", 6)
+	col.custom_minimum_size = Vector2(DRAFT_SIDE_WIDTH, 0)
+	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var shown := current_draft_options.size()
+	var head := BogeyUI.kicker("Instead" if me.draft_taken == 0 else "Or", BogeyTheme.NEUTRAL_600, 9)
+	col.add_child(head)
 
-	var pad := BogeyUI.margin(col, 14, 12, 14, 12)
+	var bad := form_deck.bad_count()
+	if bad > 0:
+		var purge := mini(ShotRules.RANGE_SESSION_PURGE, bad)
+		col.add_child(_draft_side_button("Range session",
+			"%d bad card%s out" % [purge, "" if purge == 1 else "s"],
+			"In place of a club, work the %d worst bad card%s out of your Form deck.\n%d bad card%s in it now." % [
+				purge, "" if purge == 1 else "s", bad, "" if bad == 1 else "s"],
+			func(): submit("range", {}), cpu))
+	if DraftRules.can_dig(hand, me.draft_taken, me.draft_digs, shown):
+		var costs := DraftRules.dig_costs_card(hand)
+		col.add_child(_draft_side_button("Dig",
+			"%d fresh, %s" % [shown, "a bad card in" if costs else "no charge"],
+			"Send these back and see %d fresh club%s.\n%s" % [shown, "" if shown == 1 else "s",
+				"A bad card joins your Form deck, in a family you don't choose." if costs \
+				else "Old Faithful digs for nothing."],
+			func(): submit("dig", {}), cpu))
+	if DraftRules.can_trade(hand, me.draft_taken, me.draft_traded, shown):
+		col.add_child(_draft_side_button("Trade in", "A club out, one more in",
+			"Give up a club from your bag for one more offer.\nThe club is gone for good, and the shot it brought leaves your Form deck.",
+			_on_trade_pressed, cpu))
+	if me.draft_taken > 0:
+		col.add_child(_draft_side_button("That'll do", "Keep what you have",
+			"Stop here and leave the rest on the rack.", func(): submit("done", {}), cpu))
+	head.visible = col.get_child_count() > 1
+	return col
+
+
+# One of the side column's buttons: what it is, and under it what it costs.
+func _draft_side_button(title: String, sub: String, tip: String, on_press: Callable,
+		disabled: bool) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(DRAFT_SIDE_WIDTH, 46)
+	b.tooltip_text = tip
+	BogeyUI.style_button(b, false, 13)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", -2)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var name_label := BogeyUI.label(title, 14, BogeyTheme.INK, 500)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(name_label)
+	var sub_label := BogeyUI.label(sub, 11, BogeyTheme.NEUTRAL_600)
+	sub_label.clip_text = true
+	sub_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(sub_label)
+	var pad := BogeyUI.margin(col, 12, 5, 8, 5)
 	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	b.add_child(pad)
+	b.pressed.connect(on_press)
+	b.disabled = disabled
 	return b
+
+
+func _on_trade_pressed() -> void:
+	Sound.play("ui_click")
+	_trading = true
+	refresh_ui()
+
+
+func _on_trade_cancelled() -> void:
+	Sound.play("ui_back")
+	_trading = false
+	refresh_ui()
+
+
+# The bag, laid out to choose the club to trade in: each tile with what
+# giving it up would cost, as when the bag is full and something has to go.
+func build_trade_row() -> void:
+	var back := Button.new()
+	back.text = "Keep\nthem all"
+	back.tooltip_text = "Back to the draft, with the bag as it is."
+	back.custom_minimum_size = Vector2(TRADE_BACK_WIDTH, 60)
+	back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	BogeyUI.style_button(back, false, 12)
+	back.pressed.connect(_on_trade_cancelled)
+	options_container.add_child(back)
+	var n: int = maxi(hand.size(), 1)
+	var width := clampf(floorf((strip_width() - TRADE_BACK_WIDTH - BAG_GAP * n) / n),
+		BAG_CARD_MIN - 6.0, BAG_CARD_MAX)
+	for i in range(hand.size()):
+		var cv := make_card_view(hand[i], true, true, width, 116.0, false)
+		cv.picked.connect(_make_trade_callback(i))
+		options_container.add_child(card_with_cost(cv, DraftAdvisor.losses(hand, hand[i])))
+
+
+# What the draft's caption says about how it was earned.
+func draft_caption() -> String:
+	if me.draft_taken > 0:
+		return "One kept. Keep another, or call it done."
+	match me.call_result:
+		DraftRules.MADE:
+			return "You called %s and made it: more to choose from, and %d to keep." % [
+				DraftRules.CALL_NAME, me.draft_keeps]
+		DraftRules.MISSED:
+			return "You called %s and missed: a short rack this hole." % DraftRules.CALL_NAME
+	return "It joins your bag for the rest of the round."
 
 
 # How wide a bag card may be with `count` of them in the row: as wide as
 # the stock tile while there is room, narrowing so a full bag still fits
 # the strip without scrolling.
 func bag_card_width(count: int) -> float:
+	var n: int = maxi(count, 1)
+	return clampf(floorf((strip_width() - BAG_GAP * (n - 1)) / n), BAG_CARD_MIN, BAG_CARD_MAX)
+
+
+# The width the strip's one row has to set cards in.
+func strip_width() -> float:
 	var avail: float = options_scroll.size.x if options_scroll and options_scroll.size.x > 0.0 \
 		else size.x - SIDE_PAD * 2.0
 	if avail <= 0.0:
 		avail = 1600.0 - SIDE_PAD * 2.0
+	return avail
+
+
+# How wide a draft offer may be with `count` on the rack and the side
+# column beside them: the full specimen for three, cut narrow for five.
+func draft_card_width(count: int) -> float:
 	var n: int = maxi(count, 1)
-	return clampf(floorf((avail - BAG_GAP * (n - 1)) / n), BAG_CARD_MIN, BAG_CARD_MAX)
+	return clampf(floorf((strip_width() - DRAFT_SIDE_WIDTH - BAG_GAP * n) / n),
+		DRAFT_CARD_MIN, DRAFT_CARD_WIDTH)
 
 
 func make_form_card_view(card: FormCard, interactive: bool = true) -> FormCardView:
@@ -3452,8 +3848,36 @@ func rebuild_ability_box() -> void:
 	var list := available_abilities()
 	var waiting: Array = me.created_next
 	var show_waiting := not waiting.is_empty() and (state == State.CLUB_SELECT or state == State.AIM)
-	ability_box.visible = not list.is_empty() or show_waiting
+	# The call (DraftRules): offered on the tee, and kept in view for as
+	# long as the hole it was made on is being played.
+	var calling := can_call_hole()
+	var on_the_hole := state == State.CLUB_SELECT or state == State.AIM \
+		or state == State.FORM_DRAW or state == State.PUTTING
+	var show_call := calling or (me.called and on_the_hole)
+	ability_box.visible = not list.is_empty() or show_waiting or show_call
 	if not ability_box.visible:
+		return
+	if show_call:
+		ability_box.add_child(BogeyUI.hairline(0.14))
+		ability_box.add_child(BogeyUI.kicker("The call", BogeyTheme.INK))
+		var terms := "Make %s or better and the draft shows %d, keep %d. Miss and it shows %d." % [
+			DraftRules.CALL_NAME, DraftRules.offer_count(hand, DraftRules.MADE),
+			DraftRules.keep_count(hand, DraftRules.MADE), DraftRules.offer_count(hand, DraftRules.MISSED)]
+		if calling:
+			var call_btn := Button.new()
+			call_btn.text = "%s called" % DraftRules.CALL_NAME.capitalize() if me.called \
+				else "Call %s" % DraftRules.CALL_NAME
+			call_btn.tooltip_text = terms + ("\nTap to take it back." if me.called else "")
+			call_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			BogeyUI.style_button(call_btn, me.called, 13)
+			call_btn.pressed.connect(func(): submit("call", {}))
+			call_btn.disabled = is_cpu_turn()
+			ability_box.add_child(call_btn)
+			ability_box.add_child(BogeyUI.body(terms, 12, BogeyTheme.NEUTRAL_600))
+		else:
+			ability_box.add_child(BogeyUI.body("%s called on this hole. %s" % [
+				DraftRules.CALL_NAME.capitalize(), terms], 13, BogeyTheme.NEUTRAL_700))
+	if list.is_empty() and not show_waiting:
 		return
 	ability_box.add_child(BogeyUI.hairline(0.14))
 	ability_box.add_child(BogeyUI.kicker("Abilities", BogeyTheme.INK))
@@ -3617,6 +4041,10 @@ func _make_discard_callback(i: int) -> Callable:
 	return func(_cv): submit("discard", {"index": i})
 
 
+func _make_trade_callback(i: int) -> Callable:
+	return func(_cv): submit("trade", {"index": i})
+
+
 # --- Club hover: preview that club's reach on the hole map -------------
 func _on_club_hover_start(_cv: CardView, card: Dictionary) -> void:
 	if map_view:
@@ -3702,7 +4130,7 @@ func _host_apply(seat: int, kind: String, payload: Dictionary) -> void:
 	if simul:
 		# Everyone drafts at once: any seat still owing a draft may act, but
 		# only with a draft action.
-		if not owes_draft(seat) or not ["draft", "discard", "range"].has(kind):
+		if not owes_draft(seat) or not ["draft", "discard", "range", "dig", "trade", "done"].has(kind):
 			_reject(kind, "seat %d has no draft to make" % seat)
 			return
 	elif seat != active_index:
@@ -3764,6 +4192,14 @@ func _apply_action(kind: String, payload: Dictionary) -> void:
 			on_ability(str(payload.get("id", "")))
 		"range":
 			on_range_session()
+		"call":
+			on_call_hole()
+		"dig":
+			on_dig()
+		"trade":
+			on_trade_in(int(payload.get("index", -1)))
+		"done":
+			on_draft_done()
 		_:
 			_reject("action", "unknown kind '%s'" % kind)
 
@@ -3792,6 +4228,12 @@ func snapshot_decks() -> Dictionary:
 			"armed": p.armed.duplicate(),
 			"created_next": p.created_next.duplicate(),
 			"draft_stage": p.draft_stage,
+			"called": p.called,
+			"call_result": p.call_result,
+			"draft_keeps": p.draft_keeps,
+			"draft_taken": p.draft_taken,
+			"draft_digs": p.draft_digs,
+			"draft_traded": p.draft_traded,
 		})
 	return {"players": out, "active_index": active_index, "state": state,
 		"hole": current_hole_index, "draft_queue": _draft_queue.duplicate(),
@@ -3817,6 +4259,12 @@ func apply_deck_snapshot(decks: Dictionary) -> void:
 		p.armed = (e.get("armed", {}) as Dictionary).duplicate()
 		p.created_next = (e.get("created_next", []) as Array).duplicate()
 		p.draft_stage = str(e.get("draft_stage", ""))
+		p.called = bool(e.get("called", false))
+		p.call_result = str(e.get("call_result", ""))
+		p.draft_keeps = int(e.get("draft_keeps", 0))
+		p.draft_taken = int(e.get("draft_taken", 0))
+		p.draft_digs = int(e.get("draft_digs", 0))
+		p.draft_traded = bool(e.get("draft_traded", false))
 
 	# The host's turn and phase are authoritative. next_to_play() compares
 	# float distances, so recomputing them locally could tie differently —

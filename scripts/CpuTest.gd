@@ -150,6 +150,7 @@ func _check_input_is_ignored() -> void:
 	var before := _snapshot()
 	match _main.state:
 		_main.State.CLUB_SELECT:
+			_main.submit("call", {})
 			_main.submit("club", {"index": 0})
 		_main.State.AIM:
 			_main.submit("aim", {"target": _main.hole.pin_pos})
@@ -159,6 +160,9 @@ func _check_input_is_ignored() -> void:
 		_main.State.DRAFT:
 			_main.submit("draft", {"index": 0})
 			_main.submit("range", {})
+			_main.submit("dig", {})
+			_main.submit("trade", {"index": 0})
+			_main.submit("done", {})
 		_main.State.DISCARD_FOR_DRAFT, _main.State.DISCARD_FOR_HAZARD:
 			_main.submit("discard", {"index": 0})
 		_main.State.PUTTING:
@@ -173,9 +177,10 @@ func _check_input_is_ignored() -> void:
 
 
 func _snapshot() -> String:
-	return "%d|%d|%d|%d|%s|%s|%d|%d" % [_main.state, _main.active_index, _main.strokes,
+	return "%d|%d|%d|%d|%s|%s|%d|%d|%s|%d|%d" % [_main.state, _main.active_index, _main.strokes,
 		_main.hand.size(), str(_main.ball_pos), str(_main.aim_target),
-		_main.current_form_options.size(), _main.me.round_scores.size()]
+		_main.current_form_options.size(), _main.me.round_scores.size(),
+		str(_main.me.called), _main.current_draft_options.size(), _main.form_deck.bad_count()]
 
 
 func _finish_case() -> void:
@@ -276,6 +281,122 @@ func _starter_retired_checks() -> Array:
 	return bad
 
 
+func _named_club(club_name: String) -> Dictionary:
+	var all: Array = ClubRoster.standard_clubs() + ClubRoster.limited_clubs()
+	for b in Brands.DRAFTABLE:
+		all.append_array(ClubRoster.branded_clubs(b))
+	for c in all:
+		if c.name == club_name:
+			return c.duplicate(true)
+	return {}
+
+
+func _offer_names(m) -> Array:
+	return m.current_draft_options.map(func(c): return str(c.name))
+
+
+# The draft's other moves (DraftRules.gd), driven straight through Main:
+# the call, a draft that keeps two, a dig, a trade-in, the shot a club
+# brings to the Form deck, and the stamp for the club that makes a set.
+func _draft_checks() -> Array:
+	var bad: Array = []
+	var m = load("res://scenes/Main.tscn").instantiate()
+	get_root().add_child(m)
+	m.player_count = 1
+	m.build_ui()
+	m.init_game()
+	m.start_hole()
+	var p: Player = m.me
+
+	# The call is made on the tee and can be taken back.
+	if not m.can_call_hole():
+		bad.append("the hole can't be called on the first tee")
+	m.on_call_hole()
+	if not p.called:
+		bad.append("calling the hole didn't take")
+	m.on_call_hole()
+	if p.called:
+		bad.append("the call couldn't be taken back")
+
+	# A call made: five on the rack, two to keep, and the draft stays open
+	# after the first.
+	p.call_result = "made"
+	m.begin_draft_phase()
+	if m.current_draft_options.size() != 5 or p.draft_keeps != 2:
+		bad.append("a call made dealt %d and keeps %d (expected 5 and 2)" % [m.current_draft_options.size(), p.draft_keeps])
+	var clubs_before: int = m.hand.size()
+	m.on_draft_pick(0)
+	if m.state != m.State.DRAFT or m.current_draft_options.size() != 4 or m.hand.size() != clubs_before + 1:
+		bad.append("the first of two picks should leave the draft open on four (state %d, %d left, %d clubs)" % [
+			m.state, m.current_draft_options.size(), m.hand.size()])
+	m.on_draft_done()
+	if m.state != m.State.CLUB_SELECT or m.current_hole_index != 2:
+		bad.append("\"that'll do\" should end the draft and start the next hole (state %d, hole %d)" % [m.state, m.current_hole_index])
+	if p.called or p.call_result != "":
+		bad.append("a new hole should start with no call standing")
+
+	# A call missed: two. Then a dig replaces both, at the cost of a card.
+	p.call_result = "missed"
+	m.begin_draft_phase()
+	if m.current_draft_options.size() != 2:
+		bad.append("a call missed dealt %d (expected 2)" % m.current_draft_options.size())
+	var before_names := _offer_names(m)
+	var bad_before: int = m.form_deck.bad_count()
+	m.on_dig()
+	var after_names := _offer_names(m)
+	if after_names.size() != 2 or after_names.any(func(n): return before_names.has(n)):
+		bad.append("a dig should deal as many fresh clubs (%s -> %s)" % [before_names, after_names])
+	if m.form_deck.bad_count() != bad_before + 1:
+		bad.append("a dig should leave one bad card in the Form deck")
+	m.on_dig()
+	if _offer_names(m) != after_names or m.form_deck.bad_count() != bad_before + 1:
+		bad.append("a second dig in one draft should be refused")
+
+	# A trade-in: a club out of the bag, one more on the rack, once.
+	var clubs_now: int = m.hand.size()
+	m.on_trade_in(0)
+	if m.hand.size() != clubs_now - 1 or m.current_draft_options.size() != 3 or not p.draft_traded:
+		bad.append("a trade-in should cost a club and add an offer (%d clubs, %d offers)" % [m.hand.size(), m.current_draft_options.size()])
+	m.on_trade_in(0)
+	if m.hand.size() != clubs_now - 1:
+		bad.append("a second trade-in in one draft should be refused")
+
+	# A maker's club brings its shot to the Form deck, and the club that
+	# makes the set is stamped. Three Titanist in the bag, a fourth offered.
+	# A fresh Form deck: the picks above were whatever the pool dealt, and
+	# one of them may have brought a Knockdown of its own.
+	p.form_deck = FormDeck.new()
+	p.hand = [_named_club("Titanist 4-Iron"), _named_club("Titanist 8-Iron"),
+		_named_club("Titanist Staff 7-Iron"), _named_club("Putter")]
+	p.current_draft_options = [_named_club("Titanist Tour Wedge")]
+	p.draft_keeps = 1
+	p.draft_taken = 0
+	m.state = m.State.DRAFT
+	var hole_before: int = m.current_hole_index
+	m.on_draft_pick(0)
+	if m.form_deck.count_of("Knockdown") != 1:
+		bad.append("a Titanist club should bring a Knockdown (deck holds %d)" % m.form_deck.count_of("Knockdown"))
+	if not (m.hole_banner.is_showing() and m.hole_banner._title.text == "TITANIST 4-SET"):
+		bad.append("the club that made the 4-set wasn't stamped (stamp says '%s')" % m.hole_banner._title.text)
+	if not m.hole_banner._sub.text.contains("Staff 7-Iron"):
+		bad.append("the stamp should say the Staff club woke (says '%s')" % m.hole_banner._sub.text)
+	if m.current_hole_index != hole_before + 1:
+		bad.append("a draft that keeps one should end with the pick")
+
+	# ...and takes it away again when it is traded in.
+	p.call_result = ""
+	m.begin_draft_phase()
+	var wedge := -1
+	for i in range(m.hand.size()):
+		if m.hand[i].name == "Titanist Tour Wedge":
+			wedge = i
+	m.on_trade_in(wedge)
+	if m.form_deck.count_of("Knockdown") != 0:
+		bad.append("trading in the club should take its Knockdown out of the Form deck")
+	m.free()
+	return bad
+
+
 # --- The parts that need no round ---------------------------------------
 
 func _unit_checks() -> void:
@@ -307,6 +428,7 @@ func _unit_checks() -> void:
 	main.free()
 
 	bad.append_array(_starter_retired_checks())
+	bad.append_array(_draft_checks())
 
 	for skill in Rivals.ORDER:
 		if not Rivals.has(skill) or Rivals.name_of(skill) == "" or Rivals.blurb_of(skill) == "":
@@ -317,7 +439,7 @@ func _unit_checks() -> void:
 			or int(easy.typical) <= int(hard.typical):
 		bad.append("the easy rival should be worse than the hard one on every count")
 
-	print("stamp, streak and rival checks -> %s" % ("OK" if bad.is_empty() else "FAIL"))
+	print("stamp, streak, draft and rival checks -> %s" % ("OK" if bad.is_empty() else "FAIL"))
 	for b in bad:
 		print("  !! " + b)
 	if not bad.is_empty():

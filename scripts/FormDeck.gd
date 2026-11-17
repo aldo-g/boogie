@@ -134,7 +134,9 @@ func draw_for_shot(tier: int, force_extreme: bool = false,
 	if force_extreme or tier == Tier.EXTREME_FINESSE:
 		return {"forced": true, "cards": [create_forced_bad_card("", family)]}
 
-	var count: int = TIER_DRAW_COUNT.get(tier, 3) + max(bonus_cards, 0)
+	# A bonus can be negative (a Titanist Staff club out of its set draws
+	# one fewer), but a swing is always dealt at least one card.
+	var count: int = maxi(1, TIER_DRAW_COUNT.get(tier, 3) + bonus_cards)
 	# Titanist 2 draws one extra and bins the worst, so the player still
 	# picks from the tier's normal count.
 	if drop_worst:
@@ -187,7 +189,7 @@ func discard_played(card: FormCard) -> void:
 		discard.append(card)
 
 
-# `n` plain draws from `family`, for a re-draw (Titanist 7).
+# `n` plain draws from `family`, for a re-draw (Titanist 8).
 func draw_cards(n: int, family: String = "") -> Array:
 	var drawn: Array = []
 	for i in range(n):
@@ -214,7 +216,53 @@ func family_form() -> Dictionary:
 	for c in deck + discard:
 		if out.has(c.family):
 			out[c.family]["good" if c.good else "bad"] += 1
+		elif c.family == "":
+			# A card of no family (a Nimbus Utility Swing) can be dealt to
+			# any swing, so it is part of every family's form.
+			for fam in FormCard.FAMILIES:
+				out[fam]["good" if c.good else "bad"] += 1
 	return out
+
+
+# --- Cards a club brings (Section 4 "Clubs bring their shots") -----------
+
+# Puts a card into the deck in `family` ("" for a card any swing can be
+# dealt). Straight into the live deck, shuffled, so it can turn up on the
+# next draw.
+func add_card(card_name: String, family: String = "") -> FormCard:
+	var card := FormCard.make(card_name).of_family(family)
+	deck.append(card)
+	deck.shuffle()
+	return card
+
+
+# Takes one copy of a card of `family` out of the deck for good — from the
+# discard pile first, so the cards about to be drawn are the last touched.
+# False if there was none to take.
+func remove_card(card_name: String, family: String = "") -> bool:
+	for pile in [discard, deck]:
+		for i in range(pile.size()):
+			var c: FormCard = pile[i]
+			if c.name == card_name and c.family == family and not c.created:
+				pile.remove_at(i)
+				return true
+	return false
+
+
+# How many copies of a card the deck and discard hold, in any family.
+func count_of(card_name: String) -> int:
+	var n := 0
+	for c in deck + discard:
+		if c.name == card_name:
+			n += 1
+	return n
+
+
+# A played bad card that goes straight back on top of the deck, to be the
+# next card its family is dealt (a Callowell Staff club out of its set).
+func return_to_top(card: FormCard) -> void:
+	if card != null and not card.created:
+		deck.append(card)
 
 
 # Removes up to `n` bad cards from the deck and discard — the worst first

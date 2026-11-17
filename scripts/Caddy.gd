@@ -38,6 +38,8 @@ const CHANCE := {
 	"putt_result": 0.3,
 	"holed": 0.5,
 	"rival_holed": 0.5,
+	"call": 0.6,
+	"call_missed": 0.7,
 }
 
 # Everything he says lives here, grouped by situation — see the file's
@@ -57,6 +59,9 @@ const CARD_KEYS := {
 	"Overswing": "card_overswing", "Thin": "card_thin", "Skied": "card_skied",
 	"Power Draw": "card_power_draw", "Soft Fade": "card_soft_fade",
 	"Flushed": "card_flushed", "Spinner": "card_spinner", "Punch Out": "card_punch_out",
+	"Knockdown": "card_knockdown", "Bomb": "card_bomb", "Safe Swing": "card_safe_swing",
+	"Scotch Runner": "card_scotch_runner", "Stock Shot": "card_stock_shot",
+	"Utility Swing": "card_utility_swing",
 }
 
 static var _lines: Dictionary = {}
@@ -295,6 +300,10 @@ func _kill_tween() -> void:
 #   round        diff, holes
 #   streak       count (under-par holes in a row)
 #   starter_retired  —
+#   set_complete brand (the maker's name), tier (2 / 4 / 8), woke (Staff
+#                clubs the set woke)
+#   call         — (birdie called on the tee)
+#   call_made, call_missed  diff
 #   rival_holed  diff, rival (the other golfer's name)
 #   turn, match  margin (strokes you are ahead; negative = behind), rival;
 #                match also takes diff and holes
@@ -343,6 +352,16 @@ static func situation(kind: String, ctx: Dictionary, rng: RandomNumberGenerator)
 			return "streak"
 		"starter_retired":
 			return "starter_retired"
+		"set_complete":
+			if Brands.is_top(int(ctx.get("tier", 0))):
+				return "set_top"
+			return "set_staff" if int(ctx.get("woke", 0)) > 0 else "set_complete"
+		"call":
+			return "call"
+		"call_made":
+			return "call_made"
+		"call_missed":
+			return "call_missed"
 		"rival_holed":
 			# A par from the other golfer isn't worth a word.
 			var diff := int(ctx.get("diff", 0))
@@ -433,6 +452,8 @@ static func fill(text: String, ctx: Dictionary) -> String:
 		"rival": str(ctx.get("rival", "")),
 		"margin": absi(int(ctx.get("margin", 0))),
 		"count": int(ctx.get("count", 0)),
+		"brand": str(ctx.get("brand", "")),
+		"tier": int(ctx.get("tier", 0)),
 	})
 
 

@@ -17,12 +17,45 @@ extends RefCounted
 # not, and would need rebalancing with every course that ships. Yardage
 # stays on individual club cards (assets/data/clubs.json); sets bend rules.
 #
-# Tiers are 2 / 4 / 7. Seven is half the 14-card Bag, so a 7-set is an
-# identity rather than a bonus: it leaves only 7 slots to cover a whole
-# course, which is not quite enough. That squeeze is the point.
+# Tiers are 2 / 4 / 8. Eight is more than half the 14-card Bag, so the top
+# set is an identity rather than a bonus: it leaves six slots to cover a
+# whole course, which is not enough. That squeeze is the point.
+#
+# The top tier was 7 until 2026-11-17. With ten clubs a maker (there were
+# seven) a bag reached seven in more than a quarter of rounds without
+# trying; at eight it is rare unless you go all out for it, and reachable
+# if you do (GAME_DESIGN.md Section 3A, "The top set").
 # ---------------------------------------------------------
 
-const TIERS := [2, 4, 7]
+const TIER_PAIR := 2
+const TIER_SET := 4
+const DEFAULT_TOP := 8
+# The top tier. A variable, not a constant, only so the balance harness can
+# measure another size from the same tree (BotSim's `top=<n>`); the game
+# never changes it.
+static var top_tier: int = DEFAULT_TOP
+
+# The key the top tier's bonus is filed under in the tables below, whatever
+# size the tier is.
+const TOP := 0
+
+
+static func tiers() -> Array:
+	return [TIER_PAIR, TIER_SET, top_tier]
+
+
+static func is_top(tier: int) -> bool:
+	return tier >= top_tier
+
+
+# What a brand's set gives at `tier` (2, 4, or the top tier), in the card's
+# words, and cut to a line for the stamp.
+static func bonus_text(brand: String, tier: int) -> String:
+	return String((BONUS_TEXT.get(brand, {}) as Dictionary).get(TOP if is_top(tier) else tier, ""))
+
+
+static func stamp_text(brand: String, tier: int) -> String:
+	return String((BONUS_STAMP.get(brand, {}) as Dictionary).get(TOP if is_top(tier) else tier, ""))
 
 # Bogey-Mart is the starting set (Section 3A) and deliberately the worst
 # gear in the game. It is NEVER in the draft pool — you start with it and
@@ -70,38 +103,126 @@ const AXIS := {
 
 const DRAFTABLE := ["titanist", "callowell", "pingwell", "macgregorian", "slazinger", "nimbus"]
 
+# --- Signature shots (Section 4 "Clubs bring their shots") ---------------
+# Every maker has a shot. Drafting one of its clubs puts that Form card
+# into your Form deck, in the family of the club that brought it; cutting
+# the club takes the card out again. So the draft builds the deck you draw
+# from as well as the bag — a Titanist bag swings Knockdowns.
+#
+# Putters bring nothing: they are played on the meter, and their little
+# pile of chips is too small to take a card without changing its nature.
+const SIGNATURE := {
+	"titanist": "Knockdown",
+	"slazinger": "Bomb",
+	"callowell": "Safe Swing",
+	"macgregorian": "Scotch Runner",
+	"pingwell": "Stock Shot",
+	"nimbus": "Utility Swing",
+}
+
+# The makers whose shot belongs to no family: any club can be dealt it.
+const SIGNATURE_ANY_FAMILY := ["nimbus"]
+
+# What else comes with the club, by the club's family: a bad Form card that
+# joins the deck when the club does and stays when the club goes. Slazinger
+# only — the Bomb is the longest shot in the game and this is its price.
+const BAGGAGE := {
+	"slazinger": {"wood": "Duck Hook", "iron": "Hook", "wedge": "Chunk"},
+}
+
+# Staff clubs (Section 3C) play as their maker meant once the bag holds
+# this many of the maker's clubs.
+const STAFF_TIER := 4
+
+
+# The Form card `club` brings to the deck, or "" for none.
+static func signature(club: Dictionary) -> String:
+	if club.get("type", "") == "putter":
+		return ""
+	return String(SIGNATURE.get(club.get("brand", NONE), ""))
+
+
+# The family that card joins: the club's own, or "" (any) for Nimbus.
+static func signature_family(club: Dictionary) -> String:
+	if SIGNATURE_ANY_FAMILY.has(club.get("brand", NONE)):
+		return ""
+	return FormCard.family_of(club)
+
+
+# The bad card that comes with `club`, or "" for none. It joins the club's
+# own family.
+static func baggage(club: Dictionary) -> String:
+	if club.get("type", "") == "putter":
+		return ""
+	return String((BAGGAGE.get(club.get("brand", NONE), {}) as Dictionary).get(FormCard.family_of(club), ""))
+
 # Player-facing bonus text, indexed by brand then tier. Kept beside the
 # mechanical flags below so the two can't drift apart silently.
 const BONUS_TEXT := {
 	"titanist": {
 		2: "Your Form draw discards its worst card before you pick",
 		4: "Draw +1 Form card at every tier",
-		7: "Once per hole, re-draw your entire Form hand",
+		TOP: "Once per hole, re-draw your entire Form hand",
 	},
 	"callowell": {
 		2: "Bad Form cards played from rough lose half their deviation",
 		4: "Ignore all terrain penalties",
-		7: "Bad cards can't downgrade your lie or taint a putt; mishits (Top, Thin, Chunk, Skied) hit at half severity",
+		TOP: "Bad cards can't downgrade your lie or taint a putt; mishits (Top, Thin, Chunk, Skied) hit at half severity",
 	},
 	"pingwell": {
 		2: "The Mid tier is widened — the middle third counts as the middle half",
 		4: "Every club plays one tier better than its distance implies",
-		7: "Extreme Finesse is abolished — you always draw normally",
+		TOP: "Extreme Finesse is abolished — you always draw normally",
 	},
 	"macgregorian": {
 		2: "Landing in rough or a bunker no longer adds a bad card to your Form deck",
 		4: "Play out of rough/bunker as though on the fairway",
-		7: "Once per hole, improve your lie one step before playing",
+		TOP: "Once per hole, improve your lie one step before playing",
 	},
 	"slazinger": {
 		2: "Draw +1 Form card, but bad cards you play hit at +25% severity",
 		4: "Draw +2 Form cards, same penalty",
-		7: "Your once-per-round club abilities recharge every hole",
+		TOP: "Your once-per-round club abilities recharge every hole",
 	},
 	"nimbus": {
 		2: "Once per hole, play a shot one swing tier better",
 		4: "Every club counts as every type (wood, iron, wedge) for club riders",
-		7: "Once per hole, play a shot as though with the ideal club: Mid tier, a wedge's buffering",
+		TOP: "Once per hole, play a shot as though with the ideal club: Mid tier, a wedge's buffering",
+	},
+}
+
+# The same bonuses cut to a line, for the stamp that lands when a set is
+# completed (Main._celebrate_bag_change).
+const BONUS_STAMP := {
+	"titanist": {
+		2: "The worst card of every draw is binned",
+		4: "One more Form card on every swing",
+		TOP: "Re-draw a Form hand, once a hole",
+	},
+	"callowell": {
+		2: "Bad cards from the rough bend half as far",
+		4: "No lie costs you distance",
+		TOP: "Mishits at half strength, and no Yips",
+	},
+	"pingwell": {
+		2: "A wider Mid tier on every club",
+		4: "Every club plays a tier better",
+		TOP: "No more Extreme Finesse",
+	},
+	"macgregorian": {
+		2: "Rough and sand leave no bad cards",
+		4: "Rough and sand play as fairway",
+		TOP: "Improve your lie, once a hole",
+	},
+	"slazinger": {
+		2: "One more Form card, and the bad ones bite",
+		4: "Two more Form cards, and the bad ones bite",
+		TOP: "Round abilities recharge every hole",
+	},
+	"nimbus": {
+		2: "One swing a hole, a tier better",
+		4: "Every club counts as every type",
+		TOP: "The ideal club, once a hole",
 	},
 }
 
@@ -128,16 +249,37 @@ static func color(brand: String) -> Color:
 #
 # The Equaliser (limited edition): while the Bag holds 3+ distinct brands,
 # it counts as every brand — a scattered draft's rescue.
+#
+# The Chameleon (limited edition) counts as whichever brand the rest of the
+# bag holds most of, not as Nimbus — the wild card that makes the set. With
+# another Nimbus Wood beside it, it counts as both.
 static func counts(bag: Array) -> Dictionary:
 	var out := {}
 	var equaliser := false
+	var chameleon: Dictionary = {}
 	for club in bag:
 		var b: String = club.get("brand", NONE)
 		if b == NONE or b == STARTER:
 			continue
+		var power: String = (club.get("effects", {}) as Dictionary).get("power", "")
+		if power == "chameleon" and chameleon.is_empty():
+			chameleon = club
+			continue
 		out[b] = int(out.get(b, 0)) + 1
-		if (club.get("effects", {}) as Dictionary).get("power", "") == "equaliser":
+		if power == "equaliser":
 			equaliser = true
+	if not chameleon.is_empty():
+		# The most-carried brand; a tie goes to the first in DRAFTABLE, so
+		# every machine agrees.
+		var top := "nimbus"
+		var top_n := 0
+		for b in DRAFTABLE:
+			if int(out.get(b, 0)) > top_n:
+				top_n = int(out[b])
+				top = b
+		out[top] = int(out.get(top, 0)) + 1
+		if top != "nimbus" and _has_nimbus_wood(bag, chameleon):
+			out["nimbus"] = int(out.get("nimbus", 0)) + 1
 	if equaliser and out.size() >= 3:
 		for b in DRAFTABLE:
 			if b != "nimbus":  # the Equaliser is already counted as Nimbus
@@ -145,12 +287,26 @@ static func counts(bag: Array) -> Dictionary:
 	return out
 
 
+# The Chameleon's rider: a Nimbus club that is, or counts as, a Wood — other
+# than the Chameleon itself. Read straight off the clubs rather than through
+# ClubAbilities.bag_has(), which asks this class for its counts.
+static func _has_nimbus_wood(bag: Array, except: Dictionary) -> bool:
+	for club in bag:
+		if is_same(club, except) or club.get("brand", NONE) != "nimbus":
+			continue
+		if club.get("type", "") == "wood":
+			return true
+		if ((club.get("effects", {}) as Dictionary).get("categories", []) as Array).has("wood"):
+			return true
+	return false
+
+
 # The highest tier reached for one brand, or 0 for none. Tiers do NOT
 # stack: reaching 4 replaces the 2-bonus rather than adding to it, which
-# keeps a 7-set readable as a single identity instead of a pile of riders.
+# keeps the top set readable as a single identity instead of a pile of riders.
 static func tier_reached(count: int) -> int:
 	var best := 0
-	for t in TIERS:
+	for t in tiers():
 		if count >= t:
 			best = t
 	return best
@@ -170,10 +326,15 @@ static func active_bonuses(bag: Array) -> Array:
 			"name": display_name(brand),
 			"count": int(c[brand]),
 			"tier": tier,
-			"text": String(BONUS_TEXT.get(brand, {}).get(tier, "")),
+			"text": bonus_text(brand, tier),
 		})
 	out.sort_custom(func(a, b): return a.tier > b.tier)
 	return out
+
+
+# True when the Bag holds a brand's top set.
+static func has_top(bag: Array, brand: String) -> bool:
+	return has(bag, brand, top_tier)
 
 
 # True when the Bag has reached at least `tier` of `brand`. The single
@@ -186,7 +347,7 @@ static func has(bag: Array, brand: String, tier: int) -> bool:
 # How far off the next tier this brand is, for the UI's "2/4" counter.
 # Returns 0 once the top tier is reached.
 static func next_tier(count: int) -> int:
-	for t in TIERS:
+	for t in tiers():
 		if count < t:
 			return t
 	return 0
@@ -233,11 +394,11 @@ static func deviation_mult(bag: Array, lie: String, card: FormCard) -> float:
 	return 1.0
 
 
-# Callowell 7: mishits hit at half severity anywhere. They have no
+# Callowell 8: mishits hit at half severity anywhere. They have no
 # deviation, so their severity is their distance loss — see
 # ShotRules.resolve().
 static func softens_mishits(bag: Array) -> bool:
-	return has(bag, "callowell", 7)
+	return has_top(bag, "callowell")
 
 
 # Callowell 4 / MacGregorian 4 / Nimbus: terrain stops taking its cut.
@@ -260,13 +421,13 @@ static func blocks_form_decay(bag: Array) -> bool:
 	return has(bag, "macgregorian", 2)
 
 
-# Callowell 7: bad cards can no longer downgrade your lie or taint a putt.
+# Callowell 8: bad cards can no longer downgrade your lie or taint a putt.
 static func blocks_lie_downgrade(bag: Array) -> bool:
-	return has(bag, "callowell", 7)
+	return has_top(bag, "callowell")
 
 
 static func blocks_yips(bag: Array) -> bool:
-	return has(bag, "callowell", 7)
+	return has_top(bag, "callowell")
 
 
 # Ping-Well 2: the Mid tier is widened from the middle third to the middle
@@ -277,13 +438,13 @@ static func mid_tier_span(bag: Array) -> float:
 
 
 # Ping-Well 4: every club plays one tier better than its distance implies.
-# Ping-Well 7: Extreme Finesse is abolished for you entirely.
+# Ping-Well 8: Extreme Finesse is abolished for you entirely.
 static func tier_upgrade_steps(bag: Array) -> int:
 	return 1 if has(bag, "pingwell", 4) else 0
 
 
 static func abolishes_extreme_finesse(bag: Array) -> bool:
-	return has(bag, "pingwell", 7)
+	return has_top(bag, "pingwell")
 
 
 # Nimbus 4: every club counts as every type for club riders ("while a
@@ -292,22 +453,22 @@ static func counts_as_all_categories(bag: Array) -> bool:
 	return has(bag, "nimbus", 4)
 
 
-# Slazinger 7: once-per-round club abilities recharge every hole.
+# Slazinger 8: once-per-round club abilities recharge every hole.
 static func round_abilities_per_hole(bag: Array) -> bool:
-	return has(bag, "slazinger", 7)
+	return has_top(bag, "slazinger")
 
 
 # --- Once-per-hole set abilities ----------------------------------------
 # Activated by the player; ClubAbilities.gd lists and charges them.
 
-# Titanist 7: re-draw the whole Form hand.
+# Titanist 8: re-draw the whole Form hand.
 static func can_redraw(bag: Array) -> bool:
-	return has(bag, "titanist", 7)
+	return has_top(bag, "titanist")
 
 
-# MacGregorian 7: improve the lie one step before playing.
+# MacGregorian 8: improve the lie one step before playing.
 static func can_improve_lie(bag: Array) -> bool:
-	return has(bag, "macgregorian", 7)
+	return has_top(bag, "macgregorian")
 
 
 # Nimbus 2: play one shot a swing tier better.
@@ -315,6 +476,6 @@ static func can_boost_tier(bag: Array) -> bool:
 	return has(bag, "nimbus", 2)
 
 
-# Nimbus 7: play one shot as though with the ideal club.
+# Nimbus 8: play one shot as though with the ideal club.
 static func can_play_ideal(bag: Array) -> bool:
-	return has(bag, "nimbus", 7)
+	return has_top(bag, "nimbus")

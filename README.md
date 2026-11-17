@@ -35,19 +35,31 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
 - Any club in the bag can be played for any shot.
 - No currency, no shop — the draw-3-pick-1 step is the entire acquisition
   system.
+- The draft can be **hunted in**, at a price. **Call the hole** on the tee:
+  make birdie and the draft shows five and you keep two; miss and it shows
+  two. **Dig**: send the offer back for fresh clubs, and a bad card joins
+  your Form deck. **Trade in**: give up a club for one more offer.
 
 **Brands — the synergy layer**
 - Every club carries a **type** (wood / iron / wedge / putter), which is
   mechanical, and a **brand** (Titanist, Callowell, Ping-Well, MacGregorian,
   Slazinger, Nimbus), which is social and does nothing on its own.
-- Brands pay out at **2 / 4 / 7** clubs sharing your bag. Seven is half the bag,
-  so a 7-set is an identity rather than a bonus — that squeeze is the point.
+- Brands pay out at **2 / 4 / 8** clubs sharing your bag. Eight is more than
+  half the bag, so the top set is an identity rather than a bonus: rare unless
+  you go all out for it, and that squeeze is the point.
 - Set bonuses are always **rules** effects ("draw an extra Form card", "ignore
   terrain penalties"), never yardage, so they don't need rebalancing per course.
 - Each run draws a limited pool guaranteeing at least two genuinely different
   directions to build in.
 - **Limited-edition clubs** are mixed into the same pool at lower odds — the
   same club types with better stats or a bonus ability.
+- **Clubs bring their shots.** Every maker has a signature Form card
+  (Titanist's Knockdown, Slazinger's Bomb, ...). Drafting one of its clubs
+  puts that card in your Form deck; cutting the club takes it out. A
+  Slazinger club brings a bad card as well.
+- **Staff clubs**: two of each maker's ten clubs are poor in a mixed bag and
+  excellent once four of the maker's clubs are in it. Taking one early is a
+  bet on the set, and the club that completes the set wakes them.
 
 **Club abilities — every card's text does what it says**
 - Many clubs carry a **rider** that changes how that club plays: better or
@@ -64,9 +76,9 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
 - A created card always makes a forced draw a real choice: in a bunker the
   club still forces a bad card on you, but a created card beside it is the
   bail-out.
-- Activated set bonuses sit in the same box: Titanist 7 re-draws the hand,
-  MacGregorian 7 improves your lie, Nimbus 2 plays a shot one tier better,
-  Nimbus 7 plays it as the ideal club.
+- Activated set bonuses sit in the same box: Titanist 8 re-draws the hand,
+  MacGregorian 8 improves your lie, Nimbus 2 plays a shot one tier better,
+  Nimbus 8 plays it as the ideal club.
 - **Range session**: at the end of any hole you can skip the draft to
   remove 2 bad cards from your Form deck. It's the way back from a run of
   bad holes, paid for in bag progress.
@@ -266,8 +278,9 @@ screen.
 
 Every draft card says **what it would change**: a set tier it completes,
 a club rider it switches on, a yardage gap it fills, or how far it moves
-a brand toward its next set. When the bag is full, each club you might
-cut says what cutting it would break.
+a brand toward its next set, the shot it brings to your Form deck, and
+whether a Staff club would be asleep or awake in your bag. When the bag is
+full, each club you might cut says what cutting it would break.
 
 After every shot the log and the shot panel take it apart — **how far it
 carried and rolled, and what the wind and the slope added or cost** — so
@@ -304,6 +317,7 @@ Bogey/
     ├── ClubAbilities.gd   What club text does: riders, created cards, charges, passives
     ├── Records.gd         Per-course bests and history, saved between sessions
     ├── DraftAdvisor.gd    What a draft pick would change, and what a cut would cost
+    ├── DraftRules.gd      The rules of the draft: the call, the dig, the trade-in
     ├── Settings.gd        Volume, shot speed and putt key, saved between sessions
     ├── SettingsPanel.gd   The settings controls (title page and in-game popup)
     ├── ClubRoster.gd      Loads the club roster; starter bag, draft pool, live brands
@@ -511,9 +525,12 @@ takes a few seconds.
   turn order, per-player bags/Form decks/draft pools, standings and a
   winner; host-authoritative online with disconnect recovery
 - Starting Bogey-Mart bag; draw-3-pick-1 club draft after each hole but the
-  last (14-club cap, forced discard when full)
-- **Brands, set bonuses at 2/4/7, per-run draft pools, and limited-edition
-  clubs**
+  last (14-club cap, forced discard when full), with three ways to hunt for
+  a club: **call the hole, dig, trade in**
+- **Brands, set bonuses at 2/4/8, per-run draft pools, and limited-edition
+  clubs** — ten clubs a maker, twelve limited editions, **Staff clubs** that
+  wake with their maker's 4-set, and a **signature Form card** each maker's
+  clubs bring to your deck
 - **Club abilities** — per-club riders, created cards (Pure Strike, Big
   Strike, Flop Shot, Bump and Run, Steady Hands) with per-hole and
   per-round charges, passives, activated set bonuses, and range sessions
@@ -556,11 +573,16 @@ takes a few seconds.
 - **Terrain distance caps** — `TERRAIN_DISTANCE_CAP` in `ShotResolver.gd`
   (rough 80%, bunker 50%).
 - **Club buffering** — `BUFFER_BY_TYPE` in `ShotResolver.gd`.
-- **Form deck good/bad ratio** — `build_starting_deck()` in `FormDeck.gd`
-  (currently 24 good / 12 bad = 67%).
+- **Form deck good/bad ratio** — `FAMILY_MIX` in `scripts/FormCard.gd`
+  (35 good / 18 bad to start, family by family). The cards clubs bring are
+  `SIGNATURE` and `BAGGAGE` in `scripts/Brands.gd`.
 - **Hazard → bad card odds** — `FORM_DECAY_CHANCE` in `scripts/ShotRules.gd`
   (currently 1 in 3), and `ROUGH_DECAY_CHANCE` beside it for the rough (1 in 5).
   A range session removes `RANGE_SESSION_PURGE` (2).
+- **The draft's numbers** — the constants at the top of
+  `scripts/DraftRules.gd`: how many clubs a draft shows and keeps, what a
+  called hole pays made and missed, and the most the rack ever shows.
+  How many clubs wake a Staff club is `STAFF_TIER` in `scripts/Brands.gd`.
 - **What builds through a round** — the ramp is `Course.late()`; how much
   the wind gets up is `LATE_LIFT` in `scripts/Wind.gd`; how far out the pins
   go, and how often to the guarded side, are the constants at the top of

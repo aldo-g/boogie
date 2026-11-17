@@ -23,6 +23,15 @@ var BotSimMain: GDScript
 #                        pins of the last hole are drawn like the first's
 #   wind=off | wind=<n>  no wind, or cap it at n mph
 #   norange              the bot never takes a range session
+#   nohunt               the bot never calls a hole, digs or trades in
+#   call=<p>             ...or calls when it rates a birdie at p or better
+#                        (default: GreedyBot.call_at; call=2 never calls)
+#   dig=<gain>           ...digs when the best offer is worth less than this
+#   trade=<loss>         ...trades in a club the bag would miss less than this
+#   allout               the bot goes all out for one maker's top set: takes
+#                        every club of that maker, digs and trades in to find
+#                        more (GreedyBot.all_out)
+#   top=<n>              the top set tier is n clubs (game: Brands.DEFAULT_TOP)
 #   gift=<A>+<B>         start with these clubs added to the bag
 #   blank=power|brand    ...stripped of their ability, or of their brand
 #   starter=std          standard Driver / 7-Iron / Putter instead of Bogey-Mart
@@ -109,6 +118,15 @@ func _play(round_seed: int, v: Dictionary) -> Dictionary:
 
 	var bot := GreedyBot.new(round_seed)
 	bot.allow_range = not v.has("norange")
+	bot.allow_hunt = not v.has("nohunt")
+	bot.all_out = v.has("allout")
+	Brands.top_tier = int(v.get("top", Brands.DEFAULT_TOP))
+	if v.has("call"):
+		bot.call_at = float(v.call)
+	if v.has("dig"):
+		bot.dig_below = float(v.dig)
+	if v.has("trade"):
+		bot.trade_below = float(v.trade)
 	if v.has("putt"):
 		bot.putt_timing_sd = float(v.putt) / 1000.0
 	if v.has("aim"):

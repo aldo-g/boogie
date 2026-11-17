@@ -67,6 +67,18 @@ var created_next: Array = []
 # drafts at once: "pick", "discard" (bag full), "done", or "" outside one.
 var draft_stage: String = ""
 
+# --- The call, and the draft it pays for (DraftRules.gd) ---
+# Birdie called on this hole's tee, and how it came out once holed:
+# "made", "missed", or "" with no call. The draft that follows reads it.
+var called: bool = false
+var call_result: String = ""
+# This player's draft so far: clubs still to keep, picks (and range
+# sessions) made, digs used, and whether a club has been traded in.
+var draft_keeps: int = 0
+var draft_taken: int = 0
+var draft_digs: int = 0
+var draft_traded: bool = false
+
 # The last shot taken apart (ShotRules.breakdown_text), for the shot panel:
 # {club, text}. Empty at the start of each hole.
 var last_shot: Dictionary = {}
@@ -131,3 +143,9 @@ func start_hole(tee_pos: Vector2) -> void:
 	armed = {}
 	created_next = []
 	last_shot = {}
+	called = false
+	call_result = ""
+	draft_keeps = 0
+	draft_taken = 0
+	draft_digs = 0
+	draft_traded = false

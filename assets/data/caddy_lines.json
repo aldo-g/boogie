@@ -1,10 +1,11 @@
 {
-	"_comment": "Everything Charlie the caddy can say, loaded by scripts/Caddy.gd. Each key is a situation and holds a list of lines; one is picked at random. Placeholders filled in from the game: {name} caddy's name, {mph} wind speed, {yards} hole length, {par} hole par, {pct} distance the rough takes off, {dist} putt length ('12 yds' / '9 ft'), {carry} yards carried, {score} round score ('3 over'), {holes} holes played, {rival} the other golfer's name, {margin} strokes between you and them, {count} under-par holes in a row. Keys listed in _forced are always spoken; every other line is only spoken sometimes, and never straight after another one. Add lines freely; a key with no lines just keeps him quiet.",
+	"_comment": "Everything Charlie the caddy can say, loaded by scripts/Caddy.gd. Each key is a situation and holds a list of lines; one is picked at random. Placeholders filled in from the game: {name} caddy's name, {mph} wind speed, {yards} hole length, {par} hole par, {pct} distance the rough takes off, {dist} putt length ('12 yds' / '9 ft'), {carry} yards carried, {score} round score ('3 over'), {holes} holes played, {rival} the other golfer's name, {margin} strokes between you and them, {count} under-par holes in a row, {brand} and {tier} the maker and size of a set just completed. Keys listed in _forced are always spoken; every other line is only spoken sometimes, and never straight after another one. Add lines freely; a key with no lines just keeps him quiet.",
 
 	"_forced": [
 		"intro", "land_water", "land_out", "land_bunker", "rim_out", "hole_out", "hole_in_one",
 		"holed_eagle", "holed_birdie", "round_under", "round_level", "round_over",
-		"streak", "starter_retired", "turn_ahead", "turn_behind", "turn_level",
+		"streak", "starter_retired", "set_complete", "set_staff", "set_top", "call_made",
+		"turn_ahead", "turn_behind", "turn_level",
 		"match_won", "match_lost", "match_tied"
 	],
 
@@ -83,7 +84,7 @@
 
 	"tips": [
 		"Tip: don't use a club well short of its range. Babying it forces a bad Form card on you.",
-		"Tip: clubs of the same brand work together. Get two, four or seven of a set for bonuses.",
+		"Tip: clubs of the same brand work together. Get two, four or eight of a set for bonuses.",
 		"Tip: your bag holds 14 clubs. After each hole you draft one more, so choose with a plan.",
 		"Tip: landing in rough, sand or water can slip a bad card into your Form deck. Keep it clean.",
 		"Tip: In the Zone throws bad cards out of your Form deck. Worth its weight in roe.",
@@ -95,7 +96,12 @@
 		"Tip: hover over a brand chip in your bag to see what the next club of that set unlocks.",
 		"Tip: Yips is sneaky. It can follow you onto the green and ruin a putt.",
 		"Tip: woods won't get you out of a bunker. Don't even think about it.",
-		"Tip: in a group, whoever's furthest from the pin plays next. Even if that's you again."
+		"Tip: in a group, whoever's furthest from the pin plays next. Even if that's you again.",
+		"Tip: call birdie on the tee and make it, and the draft shows five clubs and lets you keep two. Miss, and it shows two.",
+		"Tip: don't fancy the clubs on offer? Dig for fresh ones. It'll cost you a bad card in your Form deck.",
+		"Tip: you can trade in a club at the draft for one more offer. A fine way to see the back of the Bogey-Mart set.",
+		"Tip: every maker's clubs bring a shot to your Form deck. Titanist brings Knockdowns. Slazinger brings Bombs, and baggage.",
+		"Tip: a Staff club sulks until four of its maker's clubs are in the bag. Then it wakes up and earns its keep."
 	],
 
 	"forced_card": [
@@ -444,5 +450,66 @@
 		"A tie with {rival}. Nobody wins, nobody loses, everybody's slightly annoyed.",
 		"Level with {rival} at the finish. Honours even. Rematch?",
 		"All square after {holes} holes. You can't split them, and neither can I."
+	],
+	"card_knockdown": [
+		"Knockdown. Kept it down and kept it straight. The wind never got a look.",
+		"That's the Titanist shot. Low, tidy, no fuss.",
+		"Knocked down and sat down. Very grown up."
+	],
+	"card_bomb": [
+		"BOMB! I felt that through the water.",
+		"That's a Bomb. Still going. Might need a passport.",
+		"Slazinger special. Enormous. Let's hope there's golf course where it lands."
+	],
+	"card_safe_swing": [
+		"Safe Swing. Not pretty, not long, not in trouble.",
+		"The sensible one. Out of the rubbish and back in the game.",
+		"Safe as a pike in a pond. Gave up a few yards, kept your dignity."
+	],
+	"card_scotch_runner": [
+		"The Scotch Runner! Low as a flounder and still running.",
+		"That's the old way of playing it. Along the ground, like nature intended.",
+		"Running, running, running. They knew a thing or two in the old days."
+	],
+	"card_stock_shot": [
+		"Stock Shot. Same swing you make on the range. Usually.",
+		"The stock one. From the middle of the club it's pure; from the edges, less so.",
+		"Bread and butter. When it's fitted, it's fitted."
+	],
+	"card_utility_swing": [
+		"Utility Swing. Does a job with anything.",
+		"Nothing fancy, that. Works with every club in the bag.",
+		"The all-rounder. Never thrilling, never wrong."
+	],
+	"set_complete": [
+		"That's the {brand} {tier}-set! The bag's starting to mean something.",
+		"{tier} {brand} clubs. Now they're working together. Feel that?",
+		"The {brand} {tier}-set is live. That was the one you were waiting for.",
+		"Set complete: {brand}, {tier} of them. I can hear the bag humming."
+	],
+	"set_staff": [
+		"{brand} {tier}-set, and your Staff clubs just woke up. They play like the brochure now.",
+		"There it is! Four {brand} in the bag and the Staff clubs are awake. Worth the wait.",
+		"The {brand} set's in and the Staff clubs have stopped sulking. That gamble paid."
+	],
+	"set_top": [
+		"{tier} {brand} clubs! More than half the bag from one maker. They should be paying you.",
+		"The {brand} {tier}-set. You've built the whole thing. I'm a little emotional.",
+		"{tier} of them. That's not a bag any more, that's a statement."
+	],
+	"call": [
+		"Birdie called. Bold. I like it. Don't make me regret liking it.",
+		"You've called it. No pressure. Well, some pressure.",
+		"Called it on the tee! That's either confidence or lunch talking."
+	],
+	"call_made": [
+		"Called it and made it! Five clubs on the rack and two of them are yours.",
+		"You said birdie and you made birdie. Go and help yourself at the draft.",
+		"That's how you call a hole. The pro shop's wide open for you."
+	],
+	"call_missed": [
+		"The call didn't come off. Short rack this hole. It happens.",
+		"Called it, missed it. Two clubs to look at. We don't talk about this one.",
+		"No birdie, slim pickings at the draft. Still glad you had a go."
 	]
 }
