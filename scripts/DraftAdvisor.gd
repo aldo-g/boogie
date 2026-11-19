@@ -24,9 +24,9 @@ static func gains(bag: Array, club: Dictionary, bag_cap: int = 14) -> Array:
 	out.append_array(_set_changes(bag, after, true))
 	out.append_array(_rider_changes(bag, after, true))
 	out.append_array(_staff_changes(bag, after, club, true))
-	var gaps := _uncovered(club, bag)
+	var gaps := uncovered(club, bag)
 	if not gaps.is_empty():
-		out.append({"text": "Fills a gap in your bag: %s yds" % _ranges_text(gaps), "strong": true})
+		out.append({"text": _gain_text(gaps, bag), "strong": true})
 	# Brand progress short of a tier — worth a quieter line.
 	var brand: String = club.get("brand", Brands.NONE)
 	if Brands.DRAFTABLE.has(brand) and not _reaches_tier(bag, after, brand):
@@ -35,10 +35,15 @@ static func gains(bag: Array, club: Dictionary, bag_cap: int = 14) -> Array:
 		if next > 0:
 			out.append({"text": "%s %d/%d toward the next set" % [Brands.display_name(brand), n, next], "strong": false})
 	# The shot it brings to the Form deck — and anything bad that comes too.
-	var shot := Brands.signature(club)
-	if shot != "":
+	# A second-hand club: what is already in it, and what is wrong with it.
+	var cursed := ClubAbilities.curse(club)
+	if cursed != "":
+		# Short enough for two lines of a draft card.
+		out.append({"text": "Second-hand: worn in, with a %s" % str(ClubAbilities.CURSES[cursed].name).to_lower(),
+			"strong": true})
+	if ClubAbilities.grows(club):
 		var bad := Brands.baggage(club)
-		out.append({"text": "Brings a %s to %s%s" % [shot, _form_place(club),
+		out.append({"text": "Brings %s to %s%s" % [Brands.shots_text(club), _form_place(club),
 			"" if bad == "" else " — and a %s with it" % bad], "strong": false})
 	if bag.size() >= bag_cap:
 		out.append({"text": "Bag is full — taking it means cutting a club", "strong": false})
@@ -59,22 +64,23 @@ static func losses(bag: Array, club: Dictionary) -> Array:
 	out.append_array(_set_changes(bag, after, false))
 	out.append_array(_rider_changes(bag, after, false))
 	out.append_array(_staff_changes(bag, after, club, false))
-	var gaps := _uncovered(club, after)
+	var gaps := uncovered(club, after)
 	if not gaps.is_empty() and club.get("type", "") != "putter":
 		out.append({"text": "Leaves a gap: %s yds" % _ranges_text(gaps), "strong": true})
 	if club.get("type", "") == "putter" and not after.any(func(c): return c.get("type", "") == "putter"):
 		out.append({"text": "Your only putter", "strong": true})
-	var shot := Brands.signature(club)
-	if shot != "":
-		out.append({"text": "Its %s leaves %s" % [shot, _form_place(club)], "strong": false})
+	# What has been put into it goes too.
+	var grown := ClubAbilities.growth_text(club)
+	if grown != "":
+		out.append({"text": "Gives up: %s" % grown, "strong": true})
+	if ClubAbilities.grows(club):
+		out.append({"text": "Its shots leave %s: %s" % [_form_place(club), Brands.shots_text(club)], "strong": false})
 	return out
 
 
 # Where a club's signature shot lives in the Form deck, in words.
 static func _form_place(club: Dictionary) -> String:
-	var fam := Brands.signature_family(club)
-	if fam == "":
-		return "every club's form"
+	var fam := FormCard.family_of(club)
 	return "your %s form" % str(FormCard.FAMILY_LABEL.get(fam, "")).to_lower()
 
 
@@ -203,7 +209,7 @@ static func _rider_changes(before: Array, after: Array, gaining: bool) -> Array:
 # The parts of `club`'s carry band that no club in `bag` covers, as
 # [Vector2(from, to)] — only stretches of GAP_YARDS or more. Putters
 # aren't about carry and never count.
-static func _uncovered(club: Dictionary, bag: Array) -> Array:
+static func uncovered(club: Dictionary, bag: Array) -> Array:
 	if club.get("type", "") == "putter":
 		return []
 	var lo := float(club.get("min_yard", 0.0))
@@ -228,6 +234,29 @@ static func _uncovered(club: Dictionary, bag: Array) -> Array:
 	if hi - cursor >= GAP_YARDS:
 		out.append(Vector2(cursor, hi))
 	return out
+
+
+# What the new yards are, in words: more reach off the top of the bag, a
+# hole in the middle filled, or a shorter shot than anything carried.
+static func _gain_text(gaps: Array, bag: Array) -> String:
+	var lo := INF
+	var hi := -INF
+	for c in bag:
+		if c.get("type", "") != "putter" and float(c.get("max_yard", 0.0)) > 0.0:
+			lo = minf(lo, float(c.min_yard))
+			hi = maxf(hi, float(c.max_yard))
+	if lo == INF:
+		return "Your first full-swing club: %s yds" % _ranges_text(gaps)
+	var bits: Array = []
+	for g in gaps:
+		if g.x >= hi - 0.5:
+			bits.append("adds reach past %d, out to %d yds" % [int(hi), int(g.y)])
+		elif g.y <= lo + 0.5:
+			bits.append("adds a shorter shot, %d–%d yds" % [int(g.x), int(g.y)])
+		else:
+			bits.append("fills your %d–%d yd gap" % [int(g.x), int(g.y)])
+	var text := "; ".join(PackedStringArray(bits))
+	return text.substr(0, 1).to_upper() + text.substr(1)
 
 
 static func _ranges_text(ranges: Array) -> String:

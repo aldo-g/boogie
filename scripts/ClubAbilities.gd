@@ -127,6 +127,9 @@ static func buffer(club: Dictionary, bag: Array = []) -> float:
 static func lie_cap(club: Dictionary, lie: String, bag: Array = []) -> float:
 	match lie:
 		"rough":
+			# A MacGregorian club worn in on hickory takes no cut from rough.
+			if has_boost(club, "hickory"):
+				return 1.0
 			return float(effect(club, "rough_cap", -1.0, bag))
 		"bunker":
 			return float(effect(club, "bunker_cap", -1.0, bag))
@@ -134,7 +137,8 @@ static func lie_cap(club: Dictionary, lie: String, bag: Array = []) -> float:
 
 
 static func mid_span(bag: Array, club: Dictionary) -> float:
-	return maxf(Brands.mid_tier_span(bag), float(effect(club, "mid_span", 0.0, bag)))
+	return maxf(Brands.mid_tier_span(bag), float(effect(club, "mid_span", 0.0, bag))) \
+		+ (FIT_SPAN if has_boost(club, "custom_fit") else 0.0)
 
 
 # A club with no Mid tier at all: every swing in its band is Full or
@@ -155,13 +159,158 @@ static func draw_bonus(bag: Array, club: Dictionary, lie: String = "") -> int:
 	var n := int(effect(club, "draw_bonus", 0, bag))
 	if HAZARD_LIES.has(lie):
 		n += int(effect(club, "trouble_draw", 0, bag))
+	if curse(club) == "bent_shaft":
+		n -= 1
+	if has_boost(club, "tour_grind"):
+		n += 1
 	return n
 
 
 # How much harder (or softer) a bad card hits when played with this club,
 # on top of the bag's own (Brands.severity_mult).
 static func severity(bag: Array, club: Dictionary) -> float:
-	return float(effect(club, "severity", 1.0, bag))
+	return float(effect(club, "severity", 1.0, bag)) \
+		* (REGRIP_SEVERITY if has_boost(club, "regrip") else 1.0) \
+		* (LOOSE_GRIP_SEVERITY if curse(club) == "loose_grip" else 1.0)
+
+
+# --- Growth: wear, boosts and curses (Section 3E) -----------------------
+# A club is built as well as drafted. All of it is kept on the club's own
+# Dictionary (`marks`, `level`, `boosts`, `curse`, and the `shots` it
+# brings), so it travels with the bag online and leaves with the club.
+# Putters take no part: they bring no shots and are played on the meter.
+
+static func grows(club: Dictionary) -> bool:
+	return not (club.get("shots", []) as Array).is_empty()
+
+
+# Wear. A shot that finds the fairway or the green leaves a mark on the
+# club that hit it; every WEAR_MARKS marks is a level, MAX_LEVEL at most,
+# and each level is a choice taken at the next draft (wear_choices).
+const WEAR_MARKS := 3
+const MAX_LEVEL := 2
+
+
+# Levels earned and not yet chosen.
+static func wear_pending(club: Dictionary) -> int:
+	if not grows(club):
+		return 0
+	return mini(MAX_LEVEL, int(club.get("marks", 0)) / WEAR_MARKS) - int(club.get("level", 0))
+
+
+# What a maker's club can also wear into, once: its maker's own gain. Some
+# are the fitting bay's boosts given for nothing; three are the maker's
+# alone (MAKER_GAINS).
+const MAKER_WEAR := {
+	"titanist": "tour_grind", "slazinger": "new_shaft", "callowell": "regrip",
+	"pingwell": "custom_fit", "macgregorian": "hickory", "nimbus": "utility",
+}
+const MAKER_GAINS := {
+	"tour_grind": {"name": "Tour grind", "does": "Dealt one more Form card"},
+	"hickory": {"name": "Hickory shaft", "does": "Takes no cut from the rough"},
+	"utility": {"name": "Utility weighting", "does": "Adds a Utility Swing any club can be dealt"},
+}
+
+
+# A boost's or a maker's gain's {name, does}.
+static func gain_info(id: String) -> Dictionary:
+	return BOOSTS.get(id, MAKER_GAINS.get(id, {"name": id, "does": ""}))
+
+
+# What a level can be spent on: groove one of the club's good shots, lose
+# one of its misses, or take its maker's gain.
+# [{kind: "groove" | "drop" | "maker", shot, text}, ...] — for "maker",
+# `shot` is the gain's id.
+static func wear_choices(club: Dictionary) -> Array:
+	var out: Array = []
+	for s in club.get("shots", []):
+		var shot := str(s)
+		if shot.ends_with(FormCard.GROOVE_MARK):
+			continue
+		if FormCard.make(shot).good:
+			out.append({"kind": "groove", "shot": shot, "text": "Groove its %s" % shot})
+		else:
+			out.append({"kind": "drop", "shot": shot, "text": "Lose its %s" % shot})
+	var gain := str(MAKER_WEAR.get(club.get("brand", Brands.NONE), ""))
+	if gain != "" and not has_boost(club, gain) and (gain != "custom_fit" or _has_middle(club)):
+		out.append({"kind": "maker", "shot": gain, "text": str(gain_info(gain).name)})
+	return out
+
+
+# Boosts. Each draft offers one, in place of a club, for a club already in
+# the bag; a club takes each kind once.
+const BOOSTS := {
+	"regrip": {"name": "Regrip", "does": "Its misses hit softer"},
+	"custom_fit": {"name": "Custom fit", "does": "A wider comfortable middle: more three-card draws"},
+	"new_shaft": {"name": "New shaft", "does": "Ten yards longer at the top of its range"},
+	"grooves": {"name": "Fresh grooves", "does": "Its shots stop quicker"},
+	"lead_tape": {"name": "Lead tape", "does": "Adds a shot to the club"},
+}
+const REGRIP_SEVERITY := 0.7
+const FIT_SPAN := 1.0 / 6.0     # of the club's band, added to its Mid tier
+const SHAFT_YARDS := 10.0
+const GROOVES_ROLL := 0.6
+# The shots lead tape can add; a draft that offers it shows three of them.
+const TAPE_SHOTS := ["Stinger", "Controlled Draw", "Controlled Fade", "Spinner", "Soft Fade",
+	"Punch Out", "Flushed", "In the Zone"]
+const TAPE_CHOICES := 3
+
+
+static func has_boost(club: Dictionary, id: String) -> bool:
+	return (club.get("boosts", []) as Array).has(id)
+
+
+# Whether `boost` can go on `club`. On a cursed club only the boost that
+# mends its curse can (MENDS), and it is spent on the mending.
+static func can_boost(club: Dictionary, boost: String) -> bool:
+	if not grows(club) or not BOOSTS.has(boost):
+		return false
+	if curse(club) != "":
+		return MENDS[curse(club)] == boost
+	if has_boost(club, boost):
+		return false
+	return boost != "custom_fit" or _has_middle(club)
+
+
+# A club with no Mid tier, or nothing but one, has no middle to widen.
+static func _has_middle(club: Dictionary) -> bool:
+	for fx in [club.get("effects", {}), club.get("staff", {})]:
+		if (fx as Dictionary).has("no_mid") or (fx as Dictionary).has("all_mid"):
+			return false
+	return true
+
+
+# Curses. A ball in the water or out of bounds can leave one on the club
+# that put it there, and a second-hand club arrives with one; a club
+# carries one at most. The matching boost at a fitting bay lifts it
+# (MENDS), and it goes with the club when the club leaves the bag.
+const CURSES := {
+	"bent_shaft": {"name": "Bent shaft", "does": "Dealt one fewer Form card"},
+	"loose_grip": {"name": "Loose grip", "does": "Its misses hit harder"},
+	"hosel_rocket": {"name": "Hosel rocket", "does": "A Shank joins its shots"},
+}
+const CURSE_CHANCE := 0.5
+const LOOSE_GRIP_SEVERITY := 1.5
+# The one boost that mends each curse.
+const MENDS := {"bent_shaft": "new_shaft", "loose_grip": "regrip", "hosel_rocket": "custom_fit"}
+# A club on the rack is second-hand this often: already worn in (a level
+# waits), and carrying a curse.
+const SECOND_HAND_CHANCE := 0.125
+
+
+static func curse(club: Dictionary) -> String:
+	return str(club.get("curse", ""))
+
+
+# What has been done to a club, in a line: "Worn in 1 · Regrip". "" for a
+# club as it came off the rack. The curse is not in it — see curse().
+static func growth_text(club: Dictionary) -> String:
+	var bits := PackedStringArray()
+	if int(club.get("level", 0)) > 0:
+		bits.append("Worn in %d" % int(club.level))
+	for id in club.get("boosts", []):
+		bits.append(str(gain_info(str(id)).name))
+	return " · ".join(bits)
 
 
 # What becomes of a bad card played with this club: "" (the discard pile,

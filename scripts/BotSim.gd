@@ -160,7 +160,14 @@ func _play(round_seed: int, v: Dictionary) -> Dictionary:
 		holes.append(h)
 	var rec := {"seed": round_seed, "total": p.total_strokes(), "par": p.total_par(),
 		"live": p.live_brands, "holes": holes,
-		"final_bag": p.hand.map(func(c): return c.name)}
+		"final_bag": p.hand.map(func(c): return c.name),
+		# Growth (ClubAbilities): what the bag ended the round having gained.
+		"curses": main.curses,
+		"cursed_end": p.hand.filter(func(c): return ClubAbilities.curse(c) != "").size(),
+		"levels": p.hand.reduce(func(n, c): return n + int(c.get("level", 0)), 0),
+		"boosted": p.hand.reduce(func(n, c): return n + (c.get("boosts", []) as Array).size(), 0),
+		"deck_end": p.form_deck.deck.size() + p.form_deck.discard.size(),
+		"bad_end": p.form_deck.bad_count()}
 	main.free()
 	return rec
 

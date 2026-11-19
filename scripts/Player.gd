@@ -78,6 +78,16 @@ var draft_keeps: int = 0
 var draft_taken: int = 0
 var draft_digs: int = 0
 var draft_traded: bool = false
+# The stop taken after this hole (a Route.gd id; "" while it is still to
+# choose), the boosts on the fitting bay's bench (ClubAbilities.BOOSTS
+# ids), and the shots lead tape offers.
+var draft_stop: String = ""
+var draft_boosts: Array = []
+var draft_tape: Array = []
+
+# Strokes in hand won and lost at the hut, on top of the round's allowance
+# (Main.strokes_in_hand).
+var hand_bonus: int = 0
 
 # The last shot taken apart (ShotRules.breakdown_text), for the shot panel:
 # {club, text}. Empty at the start of each hole.
@@ -149,3 +159,6 @@ func start_hole(tee_pos: Vector2) -> void:
 	draft_taken = 0
 	draft_digs = 0
 	draft_traded = false
+	draft_stop = ""
+	draft_boosts = []
+	draft_tape = []

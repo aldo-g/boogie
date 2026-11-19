@@ -22,7 +22,7 @@ Each course is a **fixed, designed layout** — all 18 holes have known yardage,
 6. **Repeat** steps 2-5 until on the green.
 7. **Putt** — switch to the putting meter, a timing check that gets harder the further you are from the hole.
 8. **Score the hole.**
-9. **End-of-hole draft**: draw 3 cards from the shared club deck, look at all 3, pick 1 to add permanently to your Bag. If your Bag is at the 14-card cap, discard a card first to make room. There is no draft after the last hole: the round ends on the final putt, since there is no shot left to play a new club with. A hole you **called** on the tee changes those numbers, and a draft can be **dug** or widened by **trading in** a club (Section 3D).
+9. **End of the hole: choose a stop** (Section 3F, since 2026-11-19): the pro shop, or the round's other stop here (a fitting bay, the range or the hut). The pro shop is the **draft**: draw 3 cards from the shared club deck, look at all 3, pick 1 to add permanently to your Bag. If your Bag is at the 14-card cap, discard a card first to make room. There is no draft after the last hole: the round ends on the final putt, since there is no shot left to play a new club with. A hole you **called** on the tee changes those numbers, and a draft can be **dug** or widened by **trading in** a club (Section 3D).
 10. Move to the next hole.
 
 ---
@@ -36,7 +36,8 @@ Each course is a **fixed, designed layout** — all 18 holes have known yardage,
 - Over an 18-hole round, this means up to 17 potential additions (until 2026-11-17 the game also dealt a draft after the 18th, for a club that could never be hit) — you'll likely hit the 14-card cap somewhere on the back nine, adding escalating "what do I cut" tension as the round progresses. **14 is fixed** — it's golf's actual club limit, and keeping it means the cap needs no explanation. The real squeeze comes from having to cover the course's yardage gaps with those 14 slots (Section 3A), not from the number itself.
 - **Limited edition cards** are shuffled into the same shared club deck at lower odds. They follow the same club categories (Wood/Iron/Wedge/Putter) but have stronger yardage bands and a bonus ability tied to the Form Card System (see Section 4).
 - No currency involved — this is the entire acquisition system. Drafting happens once per hole, at the end of it.
-- **A maker's club brings a Form card with it** (Section 4, "Clubs bring their shots"), so the draft builds the Form deck as well as the Bag. And the draft can be **hunted in** rather than waited on: call the hole, dig, or trade in a club (Section 3D).
+- **Every club brings its shots** (Section 4, "Clubs bring their shots"): two or three Form cards that join the deck with the club and leave with it, so the bag is the deck. And the draft can be **hunted in** rather than waited on: call the hole, dig, or trade in a club (Section 3D).
+- **A club is grown as well as drafted** (Section 3E): it wears in with use, each draft offers a boost for a club already held in place of a new one, and a ball in the water can leave a curse on the club that hit it.
 
 ### Starting Bag (baseline, tune in playtesting)
 | Club | Brand | Category | Yardage Band | Handicap |
@@ -357,6 +358,137 @@ Until this date the draft could only be waited on. Every club came past about on
 
 ---
 
+## 3E. Growing a Club (2026-11-19)
+
+Alastair's brief, after the deeper draft: the deck-building was still weak, and *"we are already offering a club, and those clubs should be able to be grown and boosted as that feels more natural"*. So the club stays the one thing a hole pays out, and the club becomes the thing that is built. Four parts: every club brings its shots (Section 4, "Clubs bring their shots"), and the three here. Putters take no part in any of it: they bring no shots and are played on the meter.
+
+**Everything a club gains is kept on the club** (`marks`, `level`, `boosts`, `curse` and its `shots`, on the club's own Dictionary), so it shows on the card, travels with the bag online, and is given up when the club is traded in or cut.
+
+### Wear
+
+- **A shot that finishes on the fairway or the green leaves a mark on the club that hit it** (a hole-out and a rim-out count; a penalty drop does not).
+- **Three marks is a level, and a club has two.** The club is stamped WORN IN when it earns one.
+- **Each level is a choice, taken at the next draft and costing nothing there**: *groove* one of the club's good shots, *lose* its miss, or (a maker's club, once) take *the maker's gain*, below.
+  - A **grooved** shot ("Flushed+") plays exactly as it did and comes with a spare: whenever it is dealt, one more card is dealt beside it. So a grooved shot never costs the hand a choice, which is the same currency as the swing tiers.
+  - A **lost** miss leaves the Form deck for good. If a range session already had that card, another miss of the family goes instead.
+- The draft opens on the choice when one is owed, and the rack follows. A level earned on the last hole is never offered: no draft follows it.
+
+### Boosts
+
+A boost goes on a club already in the bag, and a club takes each kind once. **Since later the same day they are found at the fitting bay** (Section 3F): the stop has three of the five on its bench, the fork says which before the stop is taken, and one is chosen. (The first cut offered one random boost in every draft, in place of a club.)
+
+| Boost | What it does to that club | As built |
+|---|---|---|
+| **Regrip** | Its misses hit softer | Bad cards played with it at 0.7x severity |
+| **Custom fit** | A wider comfortable middle: more three-card draws | Its Mid tier is a sixth of the band wider. Not for a club with no Mid tier or nothing but one |
+| **New shaft** | Ten yards longer | The top of its band moves up 10 yds, so the band is wider too |
+| **Fresh grooves** | Its shots stop quicker | Every shot hit with it runs out 0.6x as far |
+| **Lead tape** | Adds a shot to the club | The bench shows three shots, drawn from Stinger, Controlled Draw, Controlled Fade, Spinner, Soft Fade, Punch Out, Flushed and In the Zone; the player picks one and it joins the club's shots |
+
+They are the numbers the rules already read (severity, the Mid span, the band, the roll), read through `ClubAbilities`, which is why a boost needed no new rule.
+
+### A maker's gain
+
+**A maker's club can wear into something only that maker gives**, as a third thing a level can be spent on, once a club. It is how sets and wear feed each other: the clubs a set is built from are the ones that grow this way.
+
+| Maker | The gain | What it does |
+|---|---|---|
+| **Titanist** | Tour grind | The club is dealt one more Form card |
+| **Slazinger** | New shaft | Ten yards longer (the fitting bay's boost, for nothing) |
+| **Callowell** | Regrip | Its misses hit softer (likewise) |
+| **Ping-Well** | Custom fit | A wider comfortable middle (likewise; not its Staff clubs or The Metronome) |
+| **MacGregorian** | Hickory shaft | The club takes no cut from the rough |
+| **Nimbus** | Utility weighting | Adds a Utility Swing, which any club can be dealt |
+
+### Curses
+
+- **A ball in the water or out of bounds can leave a curse on the club that put it there**: one time in two, one of the three at random, and a club carries one at most.
+- **One club in eight on the rack is second-hand**: already worn in (a level waits to be chosen) and carrying a curse. The draft card says so. The hut's club in the gorse is one too, and a limited edition.
+
+| Curse | What it does | Mended by |
+|---|---|---|
+| **Bent shaft** | The club is dealt one fewer Form card | New shaft |
+| **Loose grip** | Its misses hit 1.5x as hard | Regrip |
+| **Hosel rocket** | A Shank joins the club's own shots | Custom fit |
+
+- **A curse lasts until the one boost that mends it is spent on the club, or the club leaves the bag.** Spent that way the boost lifts the curse and does nothing else. (The first cut let any boost mend any curse, and the bot mended nine in ten at the next draft: 0.86 landed a round and 0.09 were left at the end. A curse did not bite.)
+- The card says the curse in claret where it says the club's type, and the hover detail says what it does and what mends it.
+
+### As built
+
+- The rules are in `ClubAbilities.gd` ("Growth"): `wear_pending`, `wear_choices`, `can_boost`, `curse`, `MENDS`, `MAKER_WEAR`, and the sizes above as constants. `Main.gd` owns the marks and the rolls (`_mark_club`, `maybe_curse_club`) and the actions: `on_wear_in` ("wear") and `on_boost` ("boost"), legal online for any seat still drafting. What a fitting bay would have on its bench is `Player.draft_boosts` (and `draft_tape`), rolled through `_roll()` when the hole ends and sent in `snapshot_decks()`.
+- **The computer golfers grow their clubs too.** GreedyBot takes every wear-in (it loses the miss first, then the maker's gain or a groove), and rates a worn or boosted club higher and a cursed one lower when it drafts and cuts.
+- **Defaults that were mine, not Alastair's** (he approved the lists of boosts and curses and "do it all" for the five follow-ups, not their sizes): three marks a level; grooved meaning "comes with a spare card"; lead tape as a choice of three; curses from water and out of bounds at one in two; which boost mends which curse; one club in eight second-hand; and each maker's gain.
+
+### Measured (2026-11-19)
+
+BotSim at Coley Niblick's settings (`aim=13,putt=185`), 24 rounds on each of the four courses per arm on seeds 101-124, so 96 rounds an arm. "The game before" is the committed tree of 2026-11-17 run the same night; the two arms are independent samples.
+
+| Arm | Against par | Front nine | Back nine | Deck on the 18th tee | Curses landed / still there at the end |
+|---|---|---|---|---|---|
+| The game before (2026-11-17) | +3.19 ± 0.49 | +3.96 | -0.77 | 56 cards, 20% bad | none |
+| Clubs bring shots, wear, a boost in every draft, any boost mends | +2.53 ± 0.49 | +3.08 | -0.55 | 55 cards, 22% bad | 0.86 / 0.09 |
+| As built: shots dealt to their own club, the route (Section 3F), matching mends, second-hand clubs, makers' gains, the late bite | +1.94 ± 0.47 | +2.49 | -0.55 | 54 cards, 25% bad | 0.81 from trouble / 0.52 |
+
+- **The game is about a stroke easier than it was**: 1.25 ± 0.68 between the first row and the last. It is the front nine that moved (+3.96 to +2.49); the starter bag's first holes are less bleak now that its clubs bring cards and a club is dealt its own.
+- **The back nine did not get harder.** The late bite (Section 3F) doubles the chance of a bad card by the last hole and added a third of a card a round (3.3 to 3.6); the back nine plays at -0.55 with it and without. The gap between the nines is narrower than it was (4.7 strokes to 3.0) because the front got easier, not because the back pushes back. Making it push back needs the levers that set the course (wind and pins, Section 5), which change every mode and every rival's score; not pulled.
+- **Curses bite now.** With any boost mending them the bot cleared nine in ten at the next draft; with one boost to each and that boost only at a fitting bay, two in three are still on the club when the round ends.
+- **What the bot does, per round, as built**: 10.0 pro shops, 3.1 fitting bays, 2.6 ranges and 1.3 huts; 5.3 wear-ins (5.2 levels still in the bag at the end) and 1.9 boosts kept. It digs 0.5 times and trades in 1.5 clubs, half what it traded before: a worn club is worth keeping.
+- **The deck is the same size at the end as it ever was** (54 cards), but a swing is no longer dealt from all of a family's share of it: a club's pile is the family's six, its own two or three, and what trouble left.
+- **Not measured: people.** The bot reads the fork exactly and never plays the hustler. Whether three marks is the right pace, whether a grooved card is felt, and whether ten strokes in hand is the right allowance are for play to say.
+
+---
+
+## 3F. The Way Round (2026-11-19)
+
+Until this date a hole ended the same way every time: three clubs, keep one. The brief (Alastair, 2026-11-17): *"maybe it should have a path where you pick the path, some have better rewards some worse... there could be random events and stuff to upgrade your clubs or get cursed."* Three things answer it: a fork after every hole, a hut where something happens, and something to lose.
+
+### The fork
+
+**After every hole but the last there are two stops, and one is taken.** One of them is always the pro shop. The other is fixed for the round and known from the first tee, and the fork says what is ahead beside the pro shop for the next three holes, so a round can be planned ("the fitting bay is after the 7th: mend the driver there").
+
+| Stop | What happens | How often it is the other stop |
+|---|---|---|
+| **Pro shop** | The rack: three clubs, keep one, with the call, the dig and the trade-in (Section 3D) | Always there |
+| **Fitting bay** | Three boosts on the bench, one for a club you hold (Section 3E). The only place a curse is mended | 4 holes in 10 |
+| **Range** | The two worst bad cards leave the Form deck | 3 in 10 |
+| **The hut** | Something happens: take it or walk on | 3 in 10 |
+
+- **The fork says what is at each stop before it is taken**: the three boosts on the bench, how many bad cards the range would find, what is at the hut. The choice is a read, in keeping with everything else in the long game.
+- **A called hole pays at the pro shop** (five and keep two, or two), and nowhere else.
+- **The route is a pure function of the round's seed and the hole number** (`Route.gd`), like the wind and the pins: the same for every player at the table and for every machine online, with nothing to send. A club that is worn in still gets its choice first, whatever the stop.
+- The range used to be a button in the draft ("in place of a club"), and so was the boost. Both are places now.
+
+### The hut
+
+One of these, fixed with the route. Each can be walked on from.
+
+| At the hut | Take it and |
+|---|---|
+| **A club in the gorse** | A limited edition joins the bag, already worn in and carrying a curse (the bag full, something is cut for it) |
+| **A stranger's tip** | The club with the most marks has a shot grooved on the spot; a bad card joins that club's family |
+| **The drinks cart** *(a round for keeps only)* | Two strokes in hand; a Top joins the wood pile |
+| **The hustler** *(a round for keeps only)* | A coin toss: three strokes in hand, or two gone |
+
+### Strokes in hand
+
+**A solo round is played for keeps.** It starts with **10 strokes in hand**; every stroke over par spends one and every stroke under gives one back; **with none left after a hole, the round is over.** (In other words: the round ends the moment it stands ten over par, plus or minus what the hut paid.) The count is on the hole panel, in claret from three down. A round stopped this way is not a course record and is not saved as one.
+
+- Why ten: the mid-skill bot stands ten over before the last hole in 9% of its rounds as built (96 rounds; 16% in the game before). Ten is a round a club golfer usually finishes and a careless one does not. The weekend-hacker bot averages fifteen over, so it would rarely finish.
+- **Not in hot-seat, online or against the computer**, where the others at the table are the stakes and putting a friend out of the round is no fun; and not in a test round from the course editor.
+
+### The course bites later
+
+**Trouble leaves a bad card more often as the round goes on**: the one-in-three for a hazard and the one-in-five for the rough are multiplied by 1 + how late the hole is (`Course.late`, the same curve the wind and the pins build on), so both have doubled by the last hole. The bag and the deck are at their best there, and this is the course's answer.
+
+### As built
+
+`Route.gd` (the stops, the hut, the look-ahead; pure functions, loaded by preload), `Main.gd` (`on_stop`, `on_leave_stop`, `on_boost`, `on_event`; `strokes_in_hand`, `plays_for_keeps`), `Player.draft_stop` / `draft_boosts` / `hand_bonus`. Online the four are actions like any other ("stop", "leave", "boost", "event"), legal for any seat still drafting. GreedyBot takes the pro shop unless the other stop is worth more than a club: the fitting bay to mend a curse or once the bag holds eleven, the range once a quarter of the Form deck is bad, the hut once the bag holds eleven (and never the hustler).
+
+**What this is not.** It is a fork a hole with the road ahead in view, not a map of lanes that join and part; an event is a fixed trade and a coin toss, not a played challenge; and there is no money. Those are the next steps if this one earns them.
+
+---
+
 ## 4. Shot Resolution — The Form Card System
 
 Every shot from tee to green is resolved by reading a fully known Form card and aiming around it — no hidden probability and no timing check (putting is the exception; see Section 6). The only die in the game is the hole-out d20: a shot that finishes on the cup from off the green earns the roll, and only a natural 20 drops. That way a player who reads the cards perfectly can earn a hole-out but can't make one happen at will. Luck lives in what you draw; skill lives in reading it correctly and adjusting your aim.
@@ -475,7 +607,34 @@ The Form deck could be cleaned (range sessions, In the Zone) and dirtied (hazard
 - **Stock Shot is the one card whose effect depends on the swing**, and nothing is remembered on the card to do it: `ShotRules.card_for_shot()` works out the shot from the tier each time it is shown or played, so there is nothing to send online.
 - **A correction to the proposal**: it said "about 18 new Form cards". It is six shots, each of which can sit in the wood, iron or wedge family — 18 places, six cards to learn.
 
+**Every club brings its shots (2026-11-19).** One signature card a maker's club was not enough to make the bag the deck: the 53 cards a round started with supplied nearly every draw. Now the deck starts small (25 cards, below) and **every club but a putter brings two or three cards** to its family, which leave with it:
+
+| The club is | It brings |
+|---|---|
+| A standard club | Both of its kind's shots, and its miss |
+| A Bogey-Mart club | One shot and the miss: one good card to one bad, the worst ratio in the bag |
+| A maker's club (Staff clubs too) | The maker's signature shot, one of its kind's two shots (fixed by the club, so the same club always brings the same), and the miss |
+| A limited edition | The signature shot and both shots, and no miss |
+
+| Kind of club | Its two shots | Its miss |
+|---|---|---|
+| Driver (a wood reaching past 205 yds) | Flushed, Power Draw | Hook |
+| Fairway wood | Stinger, Controlled Fade | Slice |
+| Long iron (reaching 165 or more) | Stinger, Controlled Draw | Push |
+| Mid iron (130 to 164) | Controlled Fade, Punch Out | Pull |
+| Short iron | Spinner, Soft Fade | Thin |
+| Pitching or gap wedge (reaching 70 or more) | Spinner, Bump and Run | Thin |
+| Sand or lob wedge | Flop Shot, Bump and Run | Chunk |
+
+- **A club's shots are dealt to that club and to no other (later on 2026-11-19).** A swing draws from its family's own pile (the six cards above, and whatever trouble has left there) plus the shots of the club in hand. So the Driver's Power Draw is never dealt to the 3-Wood, a pile stays about nine or ten cards however full the bag is, and a club that is grooved, taped or cursed is changed alone. **This narrows "Form by club family" (decided 2026-11-16)**: the family is still where a hazard's card lands and what a club falls back on, but a club's own shots are no longer the family's. Alastair agreed to it as one of five follow-ups ("do it all"), after being told it bends that rule. Each card in the deck carries the club that brought it (`FormCard.owner`, sent online after a "#"); a Nimbus club's Utility Swing carries none, and is still anyone's.
+- The shots a club brings are a list on the club (`shots`, from `ClubRoster.shots_for`), because wear changes them (Section 3E). `FormDeck.bring()` and `take()` move them. A range session can still take a club's miss, and the club then leaves without it.
+- The Form column's table counts each family's own pile; aiming with a club, and passing over one in the bag, say what that club is dealt from.
+- A Nimbus club's Utility Swing still belongs to no family. Slazinger's extra bad card still comes with the club and stays when it goes.
+- The bag card's hover detail lists the club's shots; a draft offer says what it would bring and a cut says what would leave.
+
 ### Form deck composition & hazards
+
+- **Since 2026-11-19 the deck starts at 25 cards, 17 good / 8 bad, and the bag supplies the rest.** Wood: Controlled Draw, Controlled Fade, Stinger, Flushed; Hook, Slice. Iron: Controlled Draw, Controlled Fade, Punch Out, Stinger; Pull, Push. Wedge: Flop Shot, Bump and Run, Spinner, Soft Fade; Chunk, Thin. Putter: unchanged (Bump and Run ×3, Stinger, Punch Out; Thin, Top), since putters bring nothing. With the starter clubs' four cards a round begins on 29. **In the Zone is in no starting pile**: in piles this small it would clear the deck, so it only ever arrives on lead tape (Section 3E). The bullet below is the deck as it was until then.
 
 - Starts weighted toward good cards in every family — **35 good / 18 bad (66%), 53 cards, 23 kinds**, about two good to one bad in each family (2026-11-16; it was one pile of 42, 28 good / 14 bad) — so early holes feel encouraging. The counts are `FormCard.FAMILY_MIX`:
   - **Wood, 10 good / 6 bad**: Power Draw, Flushed, Stinger, Controlled Fade ×2; Controlled Draw, In the Zone ×1. Bad: Hook, Slice, Duck Hook, Overswing, Skied, Top ×1. The one family that starts worse than two to one: the driver is the risky club.
@@ -786,6 +945,8 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 12. ~~**Add online multiplayer**~~ **Done** — ENet, host-authoritative, 2-4 players, with disconnect recovery. See Section 7. Simultaneous/secret declaration remains unbuilt by choice, not by limitation.
 13. ~~**Add a computer opponent**~~ **Done** (2026-11-16) — three rivals by skill, played by GreedyBot as a hot-seat seat. See Section 7.
 14. ~~**Deepen the draft**~~ **Done** (2026-11-17) — ten clubs a maker with two Staff clubs each, twelve limited editions, signature shots that clubs bring to the Form deck, and three ways to hunt for a club: call the hole, dig, trade in. See Sections 3C, 3D and 4.
+15. ~~**Grow the clubs**~~ **Done** (2026-11-19) — every club brings its shots to a deck that starts at 25 cards and is dealt them alone, clubs wear in with use (a maker's club into its maker's gain), boosts at the fitting bay, and curses from water, out of bounds and second-hand clubs, each mended by one boost. See Sections 3E and 4.
+16. ~~**The way round**~~ **Done** (2026-11-19) — a fork after every hole (pro shop, or a fitting bay, the range or the hut), four things that can happen at the hut, a solo round played for ten strokes in hand, and trouble that bites harder late. See Section 3F.
 
 ---
 

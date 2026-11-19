@@ -149,6 +149,22 @@ static func signature_family(club: Dictionary) -> String:
 	return FormCard.family_of(club)
 
 
+# The family one of `club`'s shots (its `shots`, ClubRoster.shots_for)
+# joins: the club's own, except a Nimbus club's Utility Swing.
+static func shot_family(club: Dictionary, shot: String) -> String:
+	if shot.trim_suffix(FormCard.GROOVE_MARK) == signature(club):
+		return signature_family(club)
+	return FormCard.family_of(club)
+
+
+# A club's shots in words: "Knockdown, Flushed, Hook".
+static func shots_text(club: Dictionary) -> String:
+	var out := PackedStringArray()
+	for s in club.get("shots", []):
+		out.append(str(s) + (" (any club)" if shot_family(club, str(s)) == "" else ""))
+	return ", ".join(out)
+
+
 # The bad card that comes with `club`, or "" for none. It joins the club's
 # own family.
 static func baggage(club: Dictionary) -> String:

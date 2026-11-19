@@ -51,7 +51,54 @@ static func make_club(cname: String, min_y: float, max_y: float, ctype: String,
 		# holds a 4-set of its brand (ClubAbilities.is_awake). Empty for
 		# every other club.
 		"staff": staff,
+		# The Form cards it brings to the deck while it is in the bag. Kept
+		# on the club because they change as it wears in (ClubAbilities).
+		"shots": shots_for(cname, max_y, ctype, brand, limited),
 	}
+
+
+# --- The shots a club brings (Section 4 "Every club brings its shots") ---
+# Two good shots and a miss, by the kind of club it is.
+const CLASS_SHOTS := {
+	"driver": ["Flushed", "Power Draw", "Hook"],
+	"fairway": ["Stinger", "Controlled Fade", "Slice"],
+	"long_iron": ["Stinger", "Controlled Draw", "Push"],
+	"mid_iron": ["Controlled Fade", "Punch Out", "Pull"],
+	"short_iron": ["Spinner", "Soft Fade", "Thin"],
+	"pitch": ["Spinner", "Bump and Run", "Thin"],
+	"sand": ["Flop Shot", "Bump and Run", "Chunk"],
+}
+
+
+# The kind of club, read off its type and how far it reaches.
+static func club_class(ctype: String, max_y: float) -> String:
+	match ctype:
+		"wood":
+			return "driver" if max_y > 205.0 else "fairway"
+		"wedge":
+			return "pitch" if max_y >= 70.0 else "sand"
+	if max_y >= 165.0:
+		return "long_iron"
+	return "mid_iron" if max_y >= 130.0 else "short_iron"
+
+
+# What a club brings. A standard club: both shots and the miss. Bogey-Mart:
+# one shot and the miss. A maker's club: the maker's signature shot, one of
+# the two (fixed by the club's name, so the same club always brings the
+# same) and the miss. A limited edition: the signature and both, no miss.
+# Putters bring nothing: they are played on the meter.
+static func shots_for(cname: String, max_y: float, ctype: String, brand: String, limited: bool) -> Array:
+	if ctype == "putter":
+		return []
+	var kind: Array = CLASS_SHOTS[club_class(ctype, max_y)]
+	var sig := String(Brands.SIGNATURE.get(brand, ""))
+	if limited:
+		return ([sig] if sig != "" else []) + [kind[0], kind[1]]
+	if brand == Brands.STARTER:
+		return [kind[0], kind[2]]
+	if sig != "":
+		return [sig, kind[cname.hash() % 2], kind[2]]
+	return kind.duplicate()
 
 
 # One JSON entry -> a club. `brand` fills in when the entry doesn't name

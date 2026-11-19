@@ -2,8 +2,10 @@ class_name FormDeck
 extends RefCounted
 
 # ---------------------------------------------------------
-# Section 4 — the Form deck: the pool every shot draws from. Starts about
-# two good cards to every bad one (Section 4). Hazard hits add bad cards
+# Section 4 — the Form deck: the pool every shot draws from. Starts as a
+# small pile for each family, about two good cards to every bad one, and
+# is built by the bag: every club brings its shots (bring() / take()).
+# Hazard hits add bad cards
 # into this deck (not the Bag), so a rough patch degrades future draws
 # for the rest of the round.
 #
@@ -60,15 +62,24 @@ static func build_starting_deck() -> Array:
 	return cards
 
 
-# Whether `card` can be dealt to a swing of `family`.
-static func _in_family(card: FormCard, family: String) -> bool:
-	return family == "" or card.family == family or card.family == ""
+# DEALT TO THE CLUB (2026-11-19). A card a club brought (FormCard.owner)
+# is dealt only to that club. So a swing draws from its family's own pile
+# — the cards the round started with and the ones trouble left there —
+# plus the shots of the club in hand. `owner` everywhere is that club's
+# name, or "" for "any club's" (purges, counts, the tests).
+
+# Whether `card` can be dealt to a swing of `family` with the club `owner`.
+static func _in_family(card: FormCard, family: String, owner: String = "") -> bool:
+	if not (family == "" or card.family == family or card.family == ""):
+		return false
+	return owner == "" or card.owner == "" or card.owner == owner
 
 
-# Index of the next card of `family` from the top of the deck, or -1.
-func _top_of(family: String) -> int:
+# Index of the next card for `family` and `owner` from the top of the
+# deck, or -1.
+func _top_of(family: String, owner: String = "") -> int:
 	for i in range(deck.size() - 1, -1, -1):
-		if _in_family(deck[i], family):
+		if _in_family(deck[i], family, owner):
 			return i
 	return -1
 
@@ -86,11 +97,11 @@ func _reshuffle(family: String) -> void:
 	deck.shuffle()
 
 
-func _draw_one(family: String = "") -> FormCard:
-	var i := _top_of(family)
+func _draw_one(family: String = "", owner: String = "") -> FormCard:
+	var i := _top_of(family, owner)
 	if i < 0:
 		_reshuffle(family)
-		i = _top_of(family)
+		i = _top_of(family, owner)
 	if i < 0 and family != "":
 		# Every card of the family is already in the hand being dealt (a big
 		# draw from a small family). Borrow the next card of any family
@@ -130,7 +141,8 @@ func create_forced_bad_card(card_name: String = "", family: String = "") -> Form
 # card of the draw before the player picks — they still choose from the
 # same number of cards, but never from the very worst option available.
 func draw_for_shot(tier: int, force_extreme: bool = false,
-		bonus_cards: int = 0, drop_worst: bool = false, family: String = "") -> Dictionary:
+		bonus_cards: int = 0, drop_worst: bool = false, family: String = "",
+		owner: String = "") -> Dictionary:
 	if force_extreme or tier == Tier.EXTREME_FINESSE:
 		return {"forced": true, "cards": [create_forced_bad_card("", family)]}
 
@@ -144,7 +156,11 @@ func draw_for_shot(tier: int, force_extreme: bool = false,
 
 	var drawn: Array = []
 	for i in range(count):
-		drawn.append(_draw_one(family))
+		drawn.append(_draw_one(family, owner))
+	# A grooved shot comes with a spare (FormCard.grooved).
+	for i in range(count):
+		if drawn[i].grooved:
+			drawn.append(_draw_one(family, owner))
 
 	if drop_worst and drawn.size() > 1:
 		var worst_index := 0
@@ -190,10 +206,10 @@ func discard_played(card: FormCard) -> void:
 
 
 # `n` plain draws from `family`, for a re-draw (Titanist 8).
-func draw_cards(n: int, family: String = "") -> Array:
+func draw_cards(n: int, family: String = "", owner: String = "") -> Array:
 	var drawn: Array = []
 	for i in range(n):
-		drawn.append(_draw_one(family))
+		drawn.append(_draw_one(family, owner))
 	return drawn
 
 
@@ -214,6 +230,9 @@ func family_form() -> Dictionary:
 	for fam in FormCard.FAMILIES:
 		out[fam] = {"good": 0, "bad": 0}
 	for c in deck + discard:
+		# A club's own shots are that club's form, not the family's.
+		if c.owner != "":
+			continue
 		if out.has(c.family):
 			out[c.family]["good" if c.good else "bad"] += 1
 		elif c.family == "":
@@ -224,13 +243,23 @@ func family_form() -> Dictionary:
 	return out
 
 
+# What `club` is dealt from: {"good": n, "bad": n} over its family's pile
+# and its own shots.
+func club_form(club: Dictionary) -> Dictionary:
+	var out := {"good": 0, "bad": 0}
+	for c in deck + discard:
+		if _in_family(c, FormCard.family_of(club), str(club.get("name", ""))):
+			out["good" if c.good else "bad"] += 1
+	return out
+
+
 # --- Cards a club brings (Section 4 "Clubs bring their shots") -----------
 
 # Puts a card into the deck in `family` ("" for a card any swing can be
 # dealt). Straight into the live deck, shuffled, so it can turn up on the
 # next draw.
-func add_card(card_name: String, family: String = "") -> FormCard:
-	var card := FormCard.make(card_name).of_family(family)
+func add_card(card_name: String, family: String = "", owner: String = "") -> FormCard:
+	var card := FormCard.make(card_name).of_family(family).owned_by(owner)
 	deck.append(card)
 	deck.shuffle()
 	return card
@@ -239,14 +268,49 @@ func add_card(card_name: String, family: String = "") -> FormCard:
 # Takes one copy of a card of `family` out of the deck for good — from the
 # discard pile first, so the cards about to be drawn are the last touched.
 # False if there was none to take.
-func remove_card(card_name: String, family: String = "") -> bool:
+func remove_card(card_name: String, family: String = "", owner: String = "") -> bool:
 	for pile in [discard, deck]:
 		for i in range(pile.size()):
 			var c: FormCard = pile[i]
-			if c.name == card_name and c.family == family and not c.created:
+			if c.key() == card_name and c.family == family and c.owner == owner and not c.created:
 				pile.remove_at(i)
 				return true
 	return false
+
+
+# --- The shots a club brings (Section 4 "Every club brings its shots") ---
+
+# Puts every shot `club` brings into the deck, each in its family. Returns
+# their names.
+func bring(club: Dictionary) -> Array:
+	var shots: Array = club.get("shots", [])
+	for s in shots:
+		var fam := Brands.shot_family(club, str(s))
+		add_card(str(s), fam, shot_owner(club, fam))
+	# A club that arrives with a hosel rocket (a second-hand one) brings it.
+	if ClubAbilities.curse(club) == "hosel_rocket":
+		add_card("Shank", FormCard.family_of(club), str(club.name))
+	return shots
+
+
+# Who a club's shot of `family` is dealt to: the club alone — except a
+# card of no family (a Nimbus Utility Swing), which is anyone's.
+static func shot_owner(club: Dictionary, family: String) -> String:
+	return "" if family == "" else str(club.get("name", ""))
+
+
+# Takes a club's shots out again when it leaves the bag, and the Shank a
+# hosel rocket put there. Returns the names that were still in the deck (a
+# range session may have had its miss already).
+func take(club: Dictionary) -> Array:
+	var out: Array = []
+	for s in club.get("shots", []):
+		var fam := Brands.shot_family(club, str(s))
+		if remove_card(str(s), fam, shot_owner(club, fam)):
+			out.append(str(s))
+	if ClubAbilities.curse(club) == "hosel_rocket":
+		remove_card("Shank", FormCard.family_of(club), str(club.get("name", "")))
+	return out
 
 
 # How many copies of a card the deck and discard hold, in any family.

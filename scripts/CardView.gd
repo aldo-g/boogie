@@ -193,6 +193,15 @@ func _build_tile(limited: bool) -> void:
 			type_text = "Staff · " + type_text
 		if ClubAbilities.is_awake(bag, card):
 			kind_ink = BogeyTheme.FAIRWAY_DEEP
+	# What has been done to the club (ClubAbilities, "Growth"): a curse
+	# says its name in claret; wear and boosts are counted beside the type.
+	var cursed := ClubAbilities.curse(card)
+	var grown: int = int(card.get("level", 0)) + (card.get("boosts", []) as Array).size()
+	if cursed != "":
+		type_text = str(ClubAbilities.CURSES[cursed].name)
+		kind_ink = BogeyTheme.FLAG
+	elif grown > 0:
+		type_text += " +%d" % grown
 	var kind := BogeyUI.kicker(type_text, kind_ink, CardFace.KICKER_SIZE)
 	kind.clip_text = true
 	kind.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -379,17 +388,29 @@ func _club_column(avail: float, room: float, spell_out: bool) -> VBoxContainer:
 			BogeyTheme.FAIRWAY_DEEP if awake else BogeyTheme.FLAG, 500)
 		state_line.custom_minimum_size = Vector2(avail, 0)
 		col.add_child(state_line)
-	if spell_out:
-		var shot := Brands.signature(card)
-		if shot != "":
-			var fam := Brands.signature_family(card)
-			var where := "any club's Form hand" if fam == "" \
-				else "your %s form" % str(FormCard.FAMILY_LABEL.get(fam, "")).to_lower()
-			var bad := Brands.baggage(card)
-			var brings := CardFace.words("Brought a %s to %s%s." % [shot, where,
-				"" if bad == "" else ", and a %s with it" % bad])
-			brings.custom_minimum_size = Vector2(avail, 0)
-			col.add_child(brings)
+	if spell_out and ClubAbilities.grows(card):
+		var bad := Brands.baggage(card)
+		var brings := CardFace.words("Its shots: %s%s." % [Brands.shots_text(card),
+			"" if bad == "" else ". A %s came with it" % bad])
+		brings.custom_minimum_size = Vector2(avail, 0)
+		col.add_child(brings)
+		# How far it has come: what it has gained, and the marks to the next.
+		var wear := ClubAbilities.growth_text(card)
+		if ClubAbilities.wear_pending(card) > 0:
+			wear += ("" if wear == "" else ". ") + "Worn in: a choice waits at the draft"
+		elif int(card.get("level", 0)) < ClubAbilities.MAX_LEVEL:
+			wear += ("" if wear == "" else ". ") + "%d of %d marks to wear in" % [
+				int(card.get("marks", 0)) % ClubAbilities.WEAR_MARKS, ClubAbilities.WEAR_MARKS]
+		var wear_line := CardFace.words(wear + ".", BogeyTheme.FAIRWAY_DEEP)
+		wear_line.custom_minimum_size = Vector2(avail, 0)
+		col.add_child(wear_line)
+		var cursed := ClubAbilities.curse(card)
+		if cursed != "":
+			var what: Dictionary = ClubAbilities.CURSES[cursed]
+			var curse_line := CardFace.words("%s: %s. A boost spent on it mends it." % [
+				what.name, str(what.does).to_lower()], BogeyTheme.FLAG, 500)
+			curse_line.custom_minimum_size = Vector2(avail, 0)
+			col.add_child(curse_line)
 	return col
 
 

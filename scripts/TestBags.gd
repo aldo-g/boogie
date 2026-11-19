@@ -65,8 +65,25 @@ static func pick_ability(main, chance: float) -> String:
 	return str(list.pick_random().id)
 
 
-static func wants_range(main, chance: float) -> bool:
-	return main.state == main.State.DRAFT and main.form_deck.bad_count() > 0 and randf() < chance
+# The move a random player makes at the fork after a hole, and at the
+# stops that are not the pro shop (Route.gd): {kind, payload}, or {} at the
+# pro shop, where the caller drafts as it always did.
+static func stop_move(main) -> Dictionary:
+	if main.state != main.State.DRAFT:
+		return {}
+	var p = main.me
+	match str(p.draft_stop):
+		"":
+			return {"kind": "stop", "payload": {"index": randi() % 2}}
+		"fit":
+			for boost in p.draft_boosts:
+				for i in range(main.hand.size()):
+					if randf() < 0.5 and ClubAbilities.can_boost(main.hand[i], boost):
+						return {"kind": "boost", "payload": {"boost": boost, "index": i, "shot": 0}}
+			return {"kind": "leave", "payload": {}}
+		"hut":
+			return {"kind": "event" if randf() < 0.6 else "leave", "payload": {}}
+	return {}
 
 
 const _DraftRules := preload("res://scripts/DraftRules.gd")
@@ -83,6 +100,13 @@ static func pick_hunt(main, chance: float) -> Dictionary:
 	if main.state != main.State.DRAFT:
 		return {}
 	var p = main.me
+	# A worn-in club's choice can be made anywhere in the draft; the rest
+	# are the pro shop's.
+	var worn: int = main.wear_due()
+	if worn >= 0 and randf() < 0.5:
+		return {"kind": "wear", "payload": {"index": worn, "choice": randi() % ClubAbilities.wear_choices(main.hand[worn]).size()}}
+	if p.draft_stop != "shop":
+		return {}
 	var shown: int = main.current_draft_options.size()
 	var moves: Array = []
 	if _DraftRules.can_dig(main.hand, p.draft_taken, p.draft_digs, shown):

@@ -44,6 +44,14 @@ var created: bool = false
 # Iron pile. "" for a card that belongs to no family — the cards a club
 # creates for itself.
 var family: String = ""
+# A grooved shot ("Flushed+"): a club worn in with it (ClubAbilities, "Wear").
+# It plays as it always did, and comes with a spare: one more card is dealt
+# beside it, so it never costs the hand a choice.
+var grooved: bool = false
+# The club that brought this card (its name), or "" for a card of the
+# family's own pile. A swing is dealt its family's pile and the shots of
+# the club in hand, and no other club's (FormDeck, "Dealt to the club").
+var owner: String = ""
 
 
 func _init(p_name: String, p_good: bool, p_side: int = 0, p_degrees: float = 0.0,
@@ -58,6 +66,11 @@ func _init(p_name: String, p_good: bool, p_side: int = 0, p_degrees: float = 0.0
 	extra_roll = p_extra_roll
 	downgrades_lie = p_downgrades_lie
 	is_yips = p_is_yips
+
+
+# The card's name as a deck lists it and as it travels: "Flushed+" grooved.
+func key() -> String:
+	return name + (GROOVE_MARK if grooved else "")
 
 
 func side_label() -> String:
@@ -142,6 +155,8 @@ func _other_bits() -> Array:
 		bits.append("taints your next putt if played")
 	if purges_bad > 0:
 		bits.append("removes a bad card from your Form deck")
+	if grooved:
+		bits.append("grooved: one more card is dealt beside it")
 	if off_tier:
 		bits.append("off the Mid tier, so it is pushed")
 	elif mid_only:
@@ -183,6 +198,11 @@ func of_family(f: String) -> FormCard:
 	return self
 
 
+func owned_by(club_name: String) -> FormCard:
+	owner = club_name
+	return self
+
+
 # How far off line a Stock Shot is pushed from any tier but Mid — a Push.
 const STOCK_OFF_DEGREES := 8.0
 
@@ -202,8 +222,15 @@ func played_at(is_mid: bool) -> FormCard:
 	return off
 
 
+const GROOVE_MARK := "+"
+
+
 # --- Card definitions (Section 4) ---
 static func make(card_name: String) -> FormCard:
+	if card_name.ends_with(GROOVE_MARK):
+		var worn := make(card_name.trim_suffix(GROOVE_MARK))
+		worn.grooved = true
+		return worn
 	match card_name:
 		# --- Bad ---
 		"Hook":
@@ -326,33 +353,32 @@ const SIGNATURE_NAMES := ["Knockdown", "Bomb", "Safe Swing", "Scotch Runner", "S
 const FAMILIES := ["wood", "iron", "wedge", "putter"]
 const FAMILY_LABEL := {"wood": "Wood", "iron": "Iron", "wedge": "Wedge", "putter": "Putter"}
 
-# What the Form deck starts with, family by family: about two good cards
-# to every bad one in each. Each family has its own shots and its own way
-# of missing:
+# What the Form deck starts with before a club is in the bag, family by
+# family: a small pile, two good cards to every bad one. The rest of the
+# deck is brought by the clubs (ClubRoster.shots_for): the bag is the deck.
 #   wood   — length and shape; the misses are big and off line
 #   iron   — precision; the misses are small
 #   wedge  — height and spin; the misses are the strike itself
 #   putter — played from off the green: it rolls true or it doesn't
 # Pure Strike, Big Strike and Steady Hands are deliberately absent: they
 # only ever come from a club's ability (Section 4 "Created cards"), so
-# they're a resource you spend rather than a lucky draw.
+# they're a resource you spend rather than a lucky draw. In the Zone is
+# absent too: in piles this small it would clear the deck, so it is only
+# ever added with lead tape (ClubAbilities.TAPE_SHOTS).
 const FAMILY_MIX := {
 	"wood": {
-		"Power Draw": 2, "Flushed": 2, "Stinger": 2, "Controlled Fade": 2,
-		"Controlled Draw": 1, "In the Zone": 1,
-		"Hook": 1, "Slice": 1, "Duck Hook": 1, "Overswing": 1, "Skied": 1, "Top": 1,
+		"Controlled Draw": 1, "Controlled Fade": 1, "Stinger": 1, "Flushed": 1,
+		"Hook": 1, "Slice": 1,
 	},
 	"iron": {
-		"Controlled Draw": 2, "Controlled Fade": 2, "Punch Out": 2, "Stinger": 1,
-		"Spinner": 1, "Soft Fade": 1, "In the Zone": 1,
-		"Pull": 1, "Push": 1, "Hook": 1, "Slice": 1, "Thin": 1,
+		"Controlled Draw": 1, "Controlled Fade": 1, "Punch Out": 1, "Stinger": 1,
+		"Pull": 1, "Push": 1,
 	},
 	"wedge": {
-		"Flop Shot": 3, "Bump and Run": 3, "Spinner": 2, "Soft Fade": 1, "In the Zone": 1,
-		"Chunk": 1, "Thin": 1, "Shank": 1, "Yips": 1, "Pull": 1,
+		"Flop Shot": 1, "Bump and Run": 1, "Spinner": 1, "Soft Fade": 1,
+		"Chunk": 1, "Thin": 1,
 	},
-	# No In the Zone here: in a pile this small it would turn up on most
-	# chips, and clear the whole deck of bad cards.
+	# Putters bring no shots, so this pile is the whole of the putter's form.
 	"putter": {
 		"Bump and Run": 3, "Stinger": 1, "Punch Out": 1,
 		"Thin": 1, "Top": 1,

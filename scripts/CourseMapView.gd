@@ -35,6 +35,14 @@ var aiming: bool = false           # true while the player can move/set the aim 
 # drawn as usual, but the mouse can't move or commit them.
 var input_locked: bool = false
 var aim_target: Vector2 = Vector2.ZERO  # yard-space, current crosshair position
+# Whether the last-committed aim is drawn while not aiming. Main turns it on
+# only while the Form hand is read, so a stale aim never lingers into
+# putting, the draft or another player's turn.
+var show_last_aim: bool = false:
+	set(v):
+		if v != show_last_aim:
+			show_last_aim = v
+			queue_redraw()
 var aim_min_range: float = 0.0     # yards — the selected club's min_yard
 var aim_max_range: float = 999.0   # yards — the selected club's max_yard
 var aim_club: Dictionary = {}      # the selected club dict, for drawing per-tier bands
@@ -834,7 +842,7 @@ func _draw() -> void:
 		_draw_aim_mark(_to_px(ball_pos), target_px, col, false)
 		_yardage_slip(target_px + Vector2(0, 17), "%d yds" % roundi(dist_now),
 			BogeyTheme.FLAG if out_of_band else BogeyTheme.INK)
-	elif not aiming and not _aim_active and not _flight_active and aim_target.distance_to(ball_pos) > 0.5:
+	elif show_last_aim and not aiming and not _aim_active and not _flight_active and aim_target.distance_to(ball_pos) > 0.5:
 		# Last-committed aim, shown while the Form hand is read.
 		_draw_aim_mark(_to_px(ball_pos), _to_px(aim_target), ARC_INK, true)
 

@@ -240,8 +240,9 @@ func _pick_action(g) -> Dictionary:
 	var ability := TestBags.pick_ability(g, 0.3)
 	if ability != "":
 		return {"kind": "ability", "payload": {"id": ability}}
-	if TestBags.wants_range(g, 0.15):
-		return {"kind": "range", "payload": {}}
+	var stop := TestBags.stop_move(g)
+	if not stop.is_empty():
+		return stop
 	var hunt := TestBags.pick_hunt(g, 0.25)
 	if not hunt.is_empty():
 		return hunt

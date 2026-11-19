@@ -172,7 +172,8 @@ static func draw_form(deck: FormDeck, bag: Array, club: Dictionary,
 	# Dealt from the family of the club in hand, and from no other
 	# (Section 4 "Form by club family").
 	var result := deck.draw_for_shot(tier, lie_forced,
-		draw_bonus(bag, club, lie), Brands.drops_worst_draw(bag), FormCard.family_of(club))
+		draw_bonus(bag, club, lie), Brands.drops_worst_draw(bag), FormCard.family_of(club),
+		str(club.get("name", "")))
 	result["tier"] = tier
 	result["from_lie"] = lie_forced and tier != Tier.EXTREME_FINESSE
 	result["had_forced_card"] = result.forced
@@ -246,6 +247,8 @@ static func resolve(bag: Array, club: Dictionary, aimed_distance: float,
 
 	var result := ShotResolver.resolve_shot(club, distance, lie, card, true,
 		Brands.deviation_mult(bag, lie, card) * buffer_scale, severity)
+	if ClubAbilities.has_boost(club, "grooves"):
+		result.roll_mult = float(result.roll_mult) * ClubAbilities.GROOVES_ROLL
 	var run := ClubAbilities.bump_run_share(club)
 	if card.run_share > 0.0 and run > 0.0:
 		result.run_share = run

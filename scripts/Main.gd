@@ -30,6 +30,7 @@ const Rivals := preload("res://scripts/Rivals.gd")
 const HoleBanner := preload("res://scripts/HoleBanner.gd")
 const CardFace := preload("res://scripts/CardFace.gd")
 const DraftRules := preload("res://scripts/DraftRules.gd")
+const Route := preload("res://scripts/Route.gd")
 
 # Parchment / fairway theme, shared with Title.gd via BogeyTheme.
 const COLOR_BG := Palette.PARCHMENT
@@ -98,6 +99,19 @@ var _draft_queue: Array = []
 # This screen is choosing which club to trade in (the draft's "Trade in").
 # Only ever what this machine is showing: the trade itself is one action.
 var _trading: bool = false
+# ...or which club takes the draft's boost, and (lead tape) which shot.
+var _boosting: bool = false
+var _boost_pick: String = ""
+var _tape_pick: int = 0
+
+# --- Strokes in hand (Section 3F) --------------------------------------
+# A solo round is played for keeps: it starts with this many strokes in
+# hand, every stroke over par spends one and every stroke under gives one
+# back, and with none left after a hole the round is over.
+const STROKES_IN_HAND := 10
+# Off for the flow harnesses, which play at random and must reach the 18th.
+var for_keeps: bool = true
+var _run_over: bool = false
 
 # Online, everyone drafts at once instead: each machine shows its own
 # player's draft, and the next hole starts when the last pick is in. Each
@@ -256,6 +270,7 @@ const DRAFT_CARD_WIDTH := 456.0  # a draft offer: the club, and what taking it c
 const DRAFT_CARD_MIN := 236.0    # ...cut narrow, with five on the rack
 const DRAFT_SIDE_WIDTH := 150.0  # the draft's other moves, beside the offers
 const TRADE_BACK_WIDTH := 84.0   # the way back out of a trade-in
+const WEAR_CHOICE_WIDTH := 260.0 # what a worn-in club can gain
 
 # --- UI node refs (built in code) ---
 var map_view: CourseMapView
@@ -268,6 +283,9 @@ var step_holder: HBoxContainer         # the step line over the map
 var form_label: Label
 var form_hint: Label
 var form_container: VBoxContainer      # the Form hand, a column beside the map
+var coverage_view: BagCoverageView     # the bag's yardages on a ruler, in the right column
+var reach_title: Label                 # club choice: what the club passed over carries
+var reach_note: Label
 var _family_rows: Dictionary = {}      # the form table's rows, by club family
 var form_deck_holder: HBoxContainer    # the "Deck" link, right of the Form kicker
 
@@ -672,7 +690,7 @@ func rebuild_form_deck_list() -> void:
 		return
 
 	var all_cards: Array = form_deck.deck + form_deck.discard
-	var summary := BogeyUI.body("%d cards — %d still to draw, %d played. A swing is dealt only from the family of the club in hand." % [
+	var summary := BogeyUI.body("%d cards — %d still to draw, %d played. A swing is dealt its family's pile and the shots of the club in hand." % [
 		all_cards.size(), form_deck.deck.size(), form_deck.discard.size()], 13, COLOR_TEXT_SOFT)
 	form_deck_list.add_child(BogeyUI.margin(summary, 0, 0, 0, 10))
 
@@ -686,8 +704,10 @@ func rebuild_form_deck_list() -> void:
 		for c in all_cards:
 			if c.family != fam:
 				continue
-			counts[c.name] = counts.get(c.name, 0) + 1
-			is_good[c.name] = c.good
+			# A club's own shot says whose it is.
+			var line: String = c.key() + ("" if c.owner == "" else "  ·  %s" % c.owner)
+			counts[line] = counts.get(line, 0) + 1
+			is_good[line] = c.good
 		if counts.is_empty():
 			continue
 
@@ -696,7 +716,7 @@ func rebuild_form_deck_list() -> void:
 		fam_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		head.add_child(fam_label)
 		head.add_child(BogeyUI.kicker("counted in every family above" if fam == "" \
-			else "%d good · %d bad" % [form[fam].good, form[fam].bad], BogeyTheme.NEUTRAL_600))
+			else "the pile: %d good · %d bad" % [form[fam].good, form[fam].bad], BogeyTheme.NEUTRAL_600))
 		form_deck_list.add_child(BogeyUI.margin(head, 0, 12, 4, 6))
 		form_deck_list.add_child(BogeyUI.hairline(0.2))
 
@@ -816,6 +836,7 @@ func playable_club_indices() -> Array:
 func init_game() -> void:
 	# A shot being planned reads the players about to be replaced.
 	_cpu_reset()
+	_run_over = false
 	players = []
 	_bots = {}
 	for i in range(player_count):
@@ -894,13 +915,16 @@ func apply_round_payload(payload: Dictionary) -> void:
 # marked by a leading "+", the family after an "@" ("Hook@wood").
 const CREATED_MARK := "+"
 const FAMILY_MARK := "@"
+# ...and the club that brought it after a "#" ("Hook@wood#Driver").
+const OWNER_MARK := "#"
 
 
 func form_card_names(cards: Array) -> Array:
 	var names: Array = []
 	for c in cards:
-		names.append((CREATED_MARK if c.created else "") + c.name
-			+ ((FAMILY_MARK + c.family) if c.family != "" else ""))
+		names.append((CREATED_MARK if c.created else "") + c.key()
+			+ ((FAMILY_MARK + c.family) if c.family != "" else "")
+			+ ((OWNER_MARK + c.owner) if c.owner != "" else ""))
 	return names
 
 
@@ -911,12 +935,17 @@ func form_cards_from_names(names: Array) -> Array:
 		var made := s.begins_with(CREATED_MARK)
 		if made:
 			s = s.substr(CREATED_MARK.length())
+		var who := ""
+		var hash_at := s.rfind(OWNER_MARK)
+		if hash_at >= 0:
+			who = s.substr(hash_at + OWNER_MARK.length())
+			s = s.substr(0, hash_at)
 		var fam := ""
 		var at := s.rfind(FAMILY_MARK)
 		if at >= 0:
 			fam = s.substr(at + FAMILY_MARK.length())
 			s = s.substr(0, at)
-		var card := FormCard.make(s).of_family(fam)
+		var card := FormCard.make(s).of_family(fam).owned_by(who)
 		cards.append(card.as_created() if made else card)
 	return cards
 
@@ -985,6 +1014,9 @@ func make_player(player_name: String) -> Player:
 	p.club_deck = pool
 	p.club_discard = []
 	p.form_deck = FormDeck.new()
+	# The bag is the deck: the starter clubs bring their shots too.
+	for club in p.hand:
+		p.form_deck.bring(club)
 	return p
 
 
@@ -1272,6 +1304,19 @@ func _draw_draft_options() -> bool:
 	me.draft_digs = 0
 	me.draft_traded = false
 	_trading = false
+	_boosting = false
+	# The stop is still to choose (Route.gd). What a fitting bay would have
+	# on its bench is rolled now, through _roll(), so every machine agrees
+	# and the fork can say what is there before it is taken.
+	me.draft_stop = ""
+	me.draft_boosts = _roll("bench", func():
+		var ids: Array = ClubAbilities.BOOSTS.keys()
+		ids.shuffle()
+		return ids.slice(0, Route.BENCH))
+	me.draft_tape = _roll("tape", func():
+		var shots: Array = ClubAbilities.TAPE_SHOTS.duplicate()
+		shots.shuffle()
+		return shots.slice(0, ClubAbilities.TAPE_CHOICES))
 	current_draft_options = _deal_offers(DraftRules.offer_count(hand, me.call_result), owned_names)
 	return not current_draft_options.is_empty()
 
@@ -1288,6 +1333,13 @@ func _deal_offers(count: int, taken: Dictionary) -> Array:
 			# rather than a phantom card.
 			break
 		out.append(card)
+		# Now and then a club on the rack is second-hand: worn in already,
+		# and carrying a curse (ClubAbilities.SECOND_HAND_CHANCE).
+		if ClubAbilities.grows(card) and ClubAbilities.curse(card) == "" \
+				and _roll("second_hand", func(): return randf()) < ClubAbilities.SECOND_HAND_CHANCE:
+			var curses: Array = ClubAbilities.CURSES.keys()
+			card["curse"] = _roll("curse", func(): return curses[randi_range(0, curses.size() - 1)])
+			card["marks"] = maxi(int(card.get("marks", 0)), ClubAbilities.WEAR_MARKS)
 		# Also exclude this hole's other options from the remaining draws,
 		# so the offers can't repeat a name amongst themselves either.
 		taken[card.name] = true
@@ -1465,8 +1517,8 @@ func _valid_index(index: int, arr: Array) -> bool:
 
 
 func on_draft_pick(index: int) -> void:
-	if state != State.DRAFT:
-		_reject("draft pick", "not in the draft phase")
+	if state != State.DRAFT or me.draft_stop != Route.SHOP:
+		_reject("draft pick", "not at the pro shop")
 		return
 	if not _valid_index(index, current_draft_options):
 		_reject("draft pick", "index %d outside 0..%d" % [
@@ -1511,8 +1563,8 @@ func _after_draft_pick() -> void:
 
 # Stops a draft that still had a club to keep: "that'll do".
 func on_draft_done() -> void:
-	if state != State.DRAFT:
-		_reject("draft done", "not in the draft phase")
+	if state != State.DRAFT or me.draft_stop != Route.SHOP:
+		_reject("draft done", "not at the pro shop")
 		return
 	if me.draft_taken <= 0:
 		_reject("draft done", "nothing has been kept yet")
@@ -1524,19 +1576,16 @@ func on_draft_done() -> void:
 
 # --- The bag, and the Form cards its clubs bring -----------------------
 # Every way a club joins or leaves the bag goes through these two, because
-# a maker's club brings its signature shot into the Form deck with it and
-# takes it out again when it goes (Brands.SIGNATURE, Section 4).
+# a club brings its shots into the Form deck with it and takes them out
+# again when it goes (FormDeck.bring / take, Section 4).
 
 func add_club(card: Dictionary) -> void:
 	hand.append(card)
 	sort_hand()
 	log_msg("Added [b]%s[/b] to your hand." % card.name)
-	var shot := Brands.signature(card)
-	if shot != "":
-		var fam := Brands.signature_family(card)
-		form_deck.add_card(shot, fam)
-		log_msg("[color=#%s]It brings a %s to your %s.[/color]" % [COLOR_ACCENT.to_html(false), shot,
-			"Form deck, for any club" if fam == "" else "%s form" % FormCard.FAMILY_LABEL.get(fam, "").to_lower()])
+	if not form_deck.bring(card).is_empty():
+		log_msg("[color=#%s]It brings %s to your %s form.[/color]" % [COLOR_ACCENT.to_html(false),
+			Brands.shots_text(card), FormCard.FAMILY_LABEL.get(FormCard.family_of(card), "").to_lower()])
 	var bad := Brands.baggage(card)
 	if bad != "":
 		form_deck.add_bad_card_to_deck(bad, FormCard.family_of(card))
@@ -1546,10 +1595,308 @@ func add_club(card: Dictionary) -> void:
 func remove_club(index: int) -> Dictionary:
 	var removed: Dictionary = hand.pop_at(index)
 	log_msg("Discarded %s." % removed.name)
-	var shot := Brands.signature(removed)
-	if shot != "" and form_deck.remove_card(shot, Brands.signature_family(removed)):
-		log_msg("[i]Its %s leaves your Form deck with it.[/i]" % shot)
+	var gone := form_deck.take(removed)
+	if not gone.is_empty():
+		log_msg("[i]Its %s leave%s your Form deck with it.[/i]" % [
+			", ".join(PackedStringArray(gone)), "s" if gone.size() == 1 else ""])
 	return removed
+
+
+# --- Growth: wear, boosts and curses (ClubAbilities.gd, Section 3E) ------
+
+# The bag's own copy of `club`. Online, a replayed shot holds a copy of the
+# club it was struck with, and what a shot does to a club has to land on
+# the one in the bag.
+func _held(club: Dictionary) -> Dictionary:
+	for c in hand:
+		if c.name == club.get("name", ""):
+			return c
+	return {}
+
+
+# "Driver" in a solo round, "Coley's Driver" with company.
+func _club_kicker(club: Dictionary) -> String:
+	return str(club.name) if not is_multiplayer() else "%s %s" % [possessive(me), club.name]
+
+
+# A shot that found the fairway or the green leaves a mark on its club;
+# enough of them and the club is worn in, a choice taken at the next draft.
+func _mark_club(club: Dictionary) -> void:
+	var mine := _held(club)
+	if not ClubAbilities.grows(mine):
+		return
+	var due := ClubAbilities.wear_pending(mine)
+	mine["marks"] = int(mine.get("marks", 0)) + 1
+	# Not on the last hole: no draft follows it to make the choice at.
+	if ClubAbilities.wear_pending(mine) <= due or current_hole_index >= Course.hole_count():
+		return
+	log_msg("[color=#%s][b]%s is worn in.[/b] Choose what it gains at the next draft.[/color]" % [
+		COLOR_ACCENT.to_html(false), mine.name])
+	Sound.play("ui_confirm")
+	if _can_stamp():
+		hole_banner.stamp("WORN IN", _club_kicker(mine), "Choose what it gains at the draft",
+			HoleBanner.Tone.GOOD)
+
+
+# A ball in the water or out of bounds can leave a curse on the club that
+# put it there. Both rolls go through _roll(), so every machine agrees.
+func maybe_curse_club(club: Dictionary) -> void:
+	var mine := _held(club)
+	if not ClubAbilities.grows(mine) or ClubAbilities.curse(mine) != "":
+		return
+	if _roll("curse_chance", func(): return randf()) >= ClubAbilities.CURSE_CHANCE:
+		return
+	var ids: Array = ClubAbilities.CURSES.keys()
+	var id: String = _roll("curse", func(): return ids[randi_range(0, ids.size() - 1)])
+	mine["curse"] = id
+	if id == "hosel_rocket":
+		form_deck.add_card("Shank", FormCard.family_of(mine), str(mine.name))
+	var what: Dictionary = ClubAbilities.CURSES[id]
+	log_msg("[color=#%s][b]%s: %s.[/b] %s, until a %s mends it or the club goes.[/color]" % [
+		COLOR_FLAG.to_html(false), mine.name, str(what.name).to_lower(), what.does,
+		str(ClubAbilities.BOOSTS[ClubAbilities.MENDS[id]].name).to_lower()])
+	Sound.play("ui_error")
+	if _can_stamp():
+		hole_banner.stamp(str(what.name).to_upper(), _club_kicker(mine), what.does, HoleBanner.Tone.BAD)
+
+
+# The first club in the bag owed a wear-in choice, or -1.
+func wear_due() -> int:
+	for i in range(hand.size()):
+		if ClubAbilities.wear_pending(hand[i]) > 0 and not ClubAbilities.wear_choices(hand[i]).is_empty():
+			return i
+	return -1
+
+
+# Grooves one of a club's shots: the card in the Form deck becomes its
+# "+" (FormCard.grooved), and the club's own list says so.
+func _groove(club: Dictionary, shot: String) -> void:
+	var fam := Brands.shot_family(club, shot)
+	var who := FormDeck.shot_owner(club, fam)
+	form_deck.remove_card(shot, fam, who)
+	form_deck.add_card(shot + FormCard.GROOVE_MARK, fam, who)
+	var shots: Array = club.shots
+	shots[shots.find(shot)] = shot + FormCard.GROOVE_MARK
+
+
+# Puts a boost or a maker's gain (ClubAbilities.gain_info) on a club. Most
+# are numbers the rules read off `boosts`; three change the club itself.
+func _apply_gain(club: Dictionary, id: String, tape_shot: String = "") -> void:
+	match id:
+		"new_shaft":
+			club["max_yard"] = float(club.max_yard) + ClubAbilities.SHAFT_YARDS
+			sort_hand()
+		"lead_tape":
+			(club.shots as Array).append(tape_shot)
+			form_deck.add_card(tape_shot, FormCard.family_of(club), str(club.name))
+		"utility":
+			(club.shots as Array).append("Utility Swing")
+			form_deck.add_card("Utility Swing", "")
+	club["boosts"] = (club.get("boosts", []) as Array) + [id]
+
+
+# Spends a level a club has earned: grooves one of its shots, takes its
+# miss out of the Form deck, or takes its maker's gain. Made at the draft,
+# and costs nothing there.
+func on_wear_in(index: int, choice: int) -> void:
+	if state != State.DRAFT:
+		_reject("wear in", "not in the draft phase")
+		return
+	if not _valid_index(index, hand) or ClubAbilities.wear_pending(hand[index]) <= 0:
+		_reject("wear in", "no club at %d is owed a level" % index)
+		return
+	var club: Dictionary = hand[index]
+	var choices := ClubAbilities.wear_choices(club)
+	if not _valid_index(choice, choices):
+		_reject("wear in", "choice %d outside 0..%d" % [choice, choices.size() - 1])
+		return
+	var shot: String = choices[choice].shot
+	var gained := ""
+	match str(choices[choice].kind):
+		"groove":
+			_groove(club, shot)
+			gained = "its %s is grooved, and comes with a spare card" % shot
+		"drop":
+			# A range session may already have had the card; take another
+			# miss of the family rather than give the level for nothing.
+			var fam := Brands.shot_family(club, shot)
+			if not form_deck.remove_card(shot, fam, FormDeck.shot_owner(club, fam)):
+				form_deck.purge_bad(1, fam)
+			(club.shots as Array).erase(shot)
+			gained = "its %s is gone from your Form deck" % shot
+		"maker":
+			_apply_gain(club, shot)
+			var gain := ClubAbilities.gain_info(shot)
+			gained = "%s. %s" % [str(gain.name).to_lower(), gain.does]
+	club["level"] = int(club.get("level", 0)) + 1
+	log_msg("[color=#%s]%s is worn in: %s.[/color]" % [COLOR_ACCENT.to_html(false), club.name, gained])
+	Sound.play("card_place")
+	refresh_ui()
+
+
+# --- The route: the stop after a hole (Route.gd, Section 3F) -------------
+
+# Takes one of the two stops after this hole. The pro shop opens the rack;
+# the range does its work at once; the fitting bay and the hut wait for
+# what is done there (on_boost, on_event) or for on_leave_stop.
+func on_stop(index: int) -> void:
+	if state != State.DRAFT or me.draft_stop != "":
+		_reject("stop", "no stop to choose")
+		return
+	var stops := Route.stops(wind_seed, current_hole_index)
+	if not _valid_index(index, stops):
+		_reject("stop", "stop %d outside 0..%d" % [index, stops.size() - 1])
+		return
+	me.draft_stop = stops[index]
+	Sound.play("ui_click")
+	if me.draft_stop != Route.SHOP:
+		# The rack is passed by: its clubs go back.
+		_close_draft_offers()
+	if me.draft_stop == Route.RANGE:
+		var purged := form_deck.purge_bad(ShotRules.RANGE_SESSION_PURGE)
+		Sound.play("card_discard")
+		log_msg("[color=#%s]The range — %s.[/color]" % [COLOR_ACCENT.to_html(false),
+			"nothing to work out" if purged.is_empty() else "%s leave%s your Form deck" % [
+				" and ".join(PackedStringArray(purged)), "s" if purged.size() == 1 else ""]])
+		begin_next_draft()
+	refresh_ui()
+
+
+# Walks on from the fitting bay or the hut with nothing taken.
+func on_leave_stop() -> void:
+	if state != State.DRAFT or not [Route.FIT, Route.HUT].has(me.draft_stop):
+		_reject("leave", "no stop to walk on from")
+		return
+	begin_next_draft()
+	refresh_ui()
+
+
+# The fitting bay: one of the boosts on the bench, for the club at `index`.
+# `tape` is which of the offered shots lead tape adds. On a cursed club the
+# boost is the one that mends its curse (ClubAbilities.MENDS), and is spent
+# on the mending.
+func on_boost(boost: String, index: int, tape: int = 0) -> void:
+	if state != State.DRAFT or me.draft_stop != Route.FIT or not me.draft_boosts.has(boost):
+		_reject("boost", "'%s' is not on a bench here" % boost)
+		return
+	if not _valid_index(index, hand) or not ClubAbilities.can_boost(hand[index], boost):
+		_reject("boost", "no club at %d can take '%s'" % [index, boost])
+		return
+	var club: Dictionary = hand[index]
+	var cursed := ClubAbilities.curse(club)
+	if boost == "lead_tape" and cursed == "" and not _valid_index(tape, me.draft_tape):
+		_reject("boost", "shot %d outside 0..%d" % [tape, me.draft_tape.size() - 1])
+		return
+	var what: String = ClubAbilities.BOOSTS[boost].name
+	if cursed != "":
+		if cursed == "hosel_rocket":
+			form_deck.remove_card("Shank", FormCard.family_of(club), str(club.name))
+		club.erase("curse")
+		log_msg("[color=#%s]%s — spent mending %s's %s.[/color]" % [COLOR_ACCENT.to_html(false), what,
+			club.name, str(ClubAbilities.CURSES[cursed].name).to_lower()])
+	else:
+		_apply_gain(club, boost, str(me.draft_tape[tape]) if boost == "lead_tape" else "")
+		log_msg("[color=#%s]%s for %s. %s.[/color]" % [COLOR_ACCENT.to_html(false),
+			what, club.name, ClubAbilities.BOOSTS[boost].does])
+	_boosting = false
+	Sound.play("card_place")
+	begin_next_draft()
+	refresh_ui()
+
+
+# The hut: takes what is on offer there (Route.EVENTS).
+func on_event() -> void:
+	if state != State.DRAFT or me.draft_stop != Route.HUT:
+		_reject("event", "not at the hut")
+		return
+	Sound.play("card_place")
+	match Route.event(wind_seed, current_hole_index, plays_for_keeps()):
+		"gorse":
+			var found := _gorse_club()
+			if not found.is_empty():
+				var curses: Array = ClubAbilities.CURSES.keys()
+				found["curse"] = _roll("curse", func(): return curses[randi_range(0, curses.size() - 1)])
+				found["marks"] = maxi(int(found.get("marks", 0)), ClubAbilities.WEAR_MARKS)
+				log_msg("[color=#%s]Out of the gorse: %s, with a %s.[/color]" % [COLOR_ACCENT.to_html(false),
+					found.name, str(ClubAbilities.CURSES[found.curse].name).to_lower()])
+				if hand.size() >= HAND_CAP:
+					pending_new_card = found
+					state = State.DISCARD_FOR_DRAFT
+					refresh_ui()
+					return
+				add_club(found)
+		"tip":
+			var club := _tip_club()
+			if not club.is_empty():
+				var shot := ""
+				for c in ClubAbilities.wear_choices(club):
+					if c.kind == "groove" and shot == "":
+						shot = c.shot
+				_groove(club, shot)
+				var fam := FormCard.family_of(club)
+				var pool: Array = FormCard.bad_names_for(fam)
+				var bad_name: String = _roll("tip_card", func(): return pool[randi_range(0, pool.size() - 1)])
+				form_deck.add_bad_card_to_deck(bad_name, fam)
+				log_msg("[color=#%s]The tip: %s's %s is grooved — and a %s joins your %s form.[/color]" % [
+					COLOR_ACCENT.to_html(false), club.name, shot, bad_name,
+					FormCard.FAMILY_LABEL.get(fam, "").to_lower()])
+		"cart":
+			me.hand_bonus += Route.CART_STROKES
+			form_deck.add_bad_card_to_deck("Top", "wood")
+			log_msg("[color=#%s]The drinks cart: %d strokes in hand, and a Top in your wood form.[/color]" % [
+				COLOR_ACCENT.to_html(false), Route.CART_STROKES])
+		"hustler":
+			var won: bool = _roll("hustler", func(): return randf()) < 0.5
+			me.hand_bonus += Route.HUSTLER_WIN if won else -Route.HUSTLER_LOSS
+			log_msg("[color=#%s]The hustler: %s.[/color]" % [
+				(COLOR_ACCENT if won else COLOR_FLAG).to_html(false),
+				"you took him — %d strokes in hand" % Route.HUSTLER_WIN if won \
+					else "he took you — %d strokes gone" % Route.HUSTLER_LOSS])
+			if _can_stamp():
+				hole_banner.stamp("TOOK HIM" if won else "HUSTLED", "The practice green",
+					"%+d strokes in hand" % (Route.HUSTLER_WIN if won else -Route.HUSTLER_LOSS),
+					HoleBanner.Tone.GOOD if won else HoleBanner.Tone.BAD)
+	begin_next_draft()
+	refresh_ui()
+
+
+# The club in the gorse: a limited edition from the club deck that the bag
+# does not hold, or failing that the next club that it does not.
+func _gorse_club() -> Dictionary:
+	for pile in [club_deck, club_discard]:
+		for i in range(pile.size()):
+			var c: Dictionary = pile[i]
+			if c.get("limited", false) and ClubAbilities.grows(c) \
+					and not hand.any(func(h): return h.name == c.name):
+				pile.remove_at(i)
+				return c
+	var owned := {}
+	for c in hand:
+		owned[c.name] = true
+	return draw_unowned_club(owned)
+
+
+# The club a stranger's tip is about: the one with the most marks on it
+# that still has a shot to groove. {} if there is none.
+func _tip_club() -> Dictionary:
+	var best := {}
+	for c in hand:
+		if ClubAbilities.wear_choices(c).any(func(w): return w.kind == "groove") \
+				and (best.is_empty() or int(c.get("marks", 0)) > int(best.get("marks", 0))):
+			best = c
+	return best
+
+
+# --- Strokes in hand (Section 3F) ----------------------------------------
+
+# A round played for keeps: one person, on their own, not a course being
+# tested from the editor.
+func plays_for_keeps() -> bool:
+	return for_keeps and not online and player_count == 1 and not GameSetup.return_to_editor
+
+
+func strokes_in_hand() -> int:
+	return STROKES_IN_HAND + me.hand_bonus - me.score_diff()
 
 
 # What the bag has earned: each brand's set tier, and the Staff clubs awake.
@@ -1628,8 +1975,8 @@ func on_call_hole() -> void:
 # Sends the whole offer back and deals as many fresh clubs — at the price
 # of a bad card in the Form deck.
 func on_dig() -> void:
-	if state != State.DRAFT:
-		_reject("dig", "not in the draft phase")
+	if state != State.DRAFT or me.draft_stop != Route.SHOP:
+		_reject("dig", "not at the pro shop")
 		return
 	if not DraftRules.can_dig(hand, me.draft_taken, me.draft_digs, current_draft_options.size()):
 		_reject("dig", "no dig left in this draft")
@@ -1668,8 +2015,8 @@ func on_dig() -> void:
 # Gives up a club from the bag for one more offer. The club is gone for
 # good, and its signature shot with it.
 func on_trade_in(index: int) -> void:
-	if state != State.DRAFT:
-		_reject("trade in", "not in the draft phase")
+	if state != State.DRAFT or me.draft_stop != Route.SHOP:
+		_reject("trade in", "not at the pro shop")
 		return
 	if not DraftRules.can_trade(hand, me.draft_taken, me.draft_traded, current_draft_options.size()):
 		_reject("trade in", "no trade left in this draft")
@@ -1779,7 +2126,7 @@ func on_ability(id: String) -> void:
 					drawn.append(c)
 			form_deck.return_unpicked(drawn, -1)
 			current_form_options = form_deck.draw_cards(drawn.size(),
-				FormCard.family_of(pending_club)) + kept
+				FormCard.family_of(pending_club), str(pending_club.name)) + kept
 			log_msg("[color=#%s]%s — the whole hand goes back; %d fresh card%s.[/color]" % [
 				COLOR_ACCENT.to_html(false), entry.source, drawn.size(), "" if drawn.size() == 1 else "s"])
 		"improve_lie":
@@ -1788,27 +2135,6 @@ func on_ability(id: String) -> void:
 			log_msg("[color=#%s]%s — the lie improves from %s to %s.[/color]" % [
 				COLOR_ACCENT.to_html(false), entry.source, was, current_lie])
 	Sound.play("card_draw")
-	refresh_ui()
-
-
-# End of hole: skip the draft to purge bad cards from the Form deck — the
-# way back from a run of bad holes (Section 4 "range session").
-func on_range_session() -> void:
-	if state != State.DRAFT:
-		_reject("range session", "not in the draft phase")
-		return
-	if form_deck.bad_count() == 0:
-		_reject("range session", "no bad cards to work out")
-		return
-	# It takes the place of one club kept. With only the one to keep, that
-	# ends the draft; a called hole made still has a club to come.
-	var purged := form_deck.purge_bad(ShotRules.RANGE_SESSION_PURGE)
-	me.draft_taken += 1
-	me.draft_keeps -= 1
-	Sound.play("card_discard")
-	log_msg("[color=#%s]Range session — in place of a club, %s leave%s your Form deck.[/color]" % [
-		COLOR_ACCENT.to_html(false), " and ".join(PackedStringArray(purged)), "s" if purged.size() == 1 else ""])
-	_after_draft_pick()
 	refresh_ui()
 
 
@@ -1975,6 +2301,7 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 			log_msg("[color=#%s][b]d20: %d — IN THE HOLE, from %d yards![/b][/color]" % [
 				COLOR_ACCENT.to_html(false), roll, int(before_pos.distance_to(hole.pin_pos))])
 			map_view.drop_in_cup()
+			_mark_club(club)
 			caddy_says("hole_out", {"strokes": strokes})
 			finish_hole(int(before_pos.distance_to(hole.pin_pos)))
 			return
@@ -1989,6 +2316,7 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 		shot_path.append(ball_pos)
 		map_view.set_ball(ball_pos, shot_path)
 		map_view.set_aim_target(ball_pos)
+		_mark_club(club)
 		advance_after_shot()
 		return
 
@@ -2009,6 +2337,11 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 	if lie_result == "rough" and current_lie == "green":
 		log_msg("[i]On the fringe — the Jigger putts it from here.[/i]")
 	var hazard_hit: bool = settled.hazard
+	# What the shot did to the club that hit it (ClubAbilities, "Growth").
+	if int(settled.penalty) > 0:
+		maybe_curse_club(club)
+	elif current_lie == "fairway" or current_lie == "green":
+		_mark_club(club)
 
 	# (The sound of the landing is the map's: it plays it as the ball
 	# touches down, not here once it has stopped.)
@@ -2059,7 +2392,9 @@ func apply_landing_abilities(terrain: String, hazard: bool) -> void:
 func maybe_add_bad_card_to_form_deck(lie_result: String, chance: float, family: String = "") -> void:
 	if not ShotRules.hazard_can_decay_form(hand):
 		return
-	if _roll("decay_chance", func(): return randf()) < chance:
+	# Trouble bites harder as the round goes on: twice as often by the
+	# last hole (Course.late), as the bag and the deck are at their best.
+	if _roll("decay_chance", func(): return randf()) < chance * (1.0 + Course.late(current_hole_index)):
 		# Which bad card it is also has to match across machines, so pick
 		# the name here (add_bad_card_to_deck already takes one) rather
 		# than letting the deck roll it internally.
@@ -2753,6 +3088,17 @@ func begin_end_of_hole() -> void:
 		if you != null and Course.hole_count() >= 4 and current_hole_index * 2 == Course.hole_count():
 			caddy_says("turn", {"margin": match_margin(you), "rival": closest_rival_name(you)}, true)
 
+	# Played for keeps, a round with no strokes left in hand ends here.
+	if plays_for_keeps() and current_hole_index < Course.hole_count() and strokes_in_hand() <= 0:
+		_run_over = true
+		log_msg("[color=#%s][b]Out of strokes in hand.[/b] The round is over after %d holes.[/color]" % [
+			COLOR_FLAG.to_html(false), current_hole_index])
+		if _can_stamp():
+			hole_banner.stamp("OUT OF STROKES", "After %d holes" % current_hole_index,
+				"The round is over", HoleBanner.Tone.BAD)
+		finish_round()
+		return
+
 	# No draft after the last hole: there is no shot left to play a new
 	# club with, so the round ends here. Every way a hole can finish comes
 	# through this function (the last putt, a seat retired mid-hole), so
@@ -3162,8 +3508,15 @@ func refresh_ui() -> void:
 	var cpu := is_cpu_turn()
 	if map_view:
 		map_view.input_locked = cpu
+		# A computer golfer commits its aim without clicking the map, so the
+		# map is never told the aim is over; end it here once play moves on,
+		# or the crosshair follows the mouse through putting and the draft.
+		if map_view.aiming and state != State.AIM:
+			map_view.set_aiming(false)
+		map_view.show_last_aim = state == State.FORM_DRAW
 	if state != State.DRAFT:
 		_trading = false
+		_boosting = false
 
 	if scorecard:
 		if is_multiplayer():
@@ -3247,6 +3600,36 @@ func refresh_ui() -> void:
 				hand_label.text = "Trade in a club"
 				options_label.text = "Tap the club to give up. It is gone for good, and the shot it brought goes with it."
 				build_trade_row()
+			elif _boosting and not cpu and me.draft_stop == Route.FIT:
+				var boost: Dictionary = ClubAbilities.BOOSTS[_boost_pick]
+				step_hint = "The fitting bay — %s" % str(boost.name).to_lower()
+				hand_label.text = "%s: choose the club" % boost.name
+				options_label.text = "%s." % boost.does
+				build_boost_row()
+			elif not cpu and wear_due() >= 0:
+				var worn: Dictionary = hand[wear_due()]
+				step_hint = "Worn in — choose what the club gains"
+				hand_label.text = "%s is worn in" % worn.name
+				options_label.text = "It has found the fairway or the green often enough to be trusted. Choose one; the draft follows."
+				build_wear_row(wear_due())
+			elif me.draft_stop == "":
+				step_hint = "End of the hole — choose where to stop"
+				hand_label.text = "The way to the next tee"
+				var ahead := Route.ahead_text(wind_seed, current_hole_index + 1, Course.hole_count())
+				options_label.text = "One stop, and the other is passed by.%s" % (
+					"" if ahead == "" else " Beside the pro shop ahead: %s." % ahead)
+				build_stop_row(cpu)
+			elif me.draft_stop == Route.FIT:
+				step_hint = "The fitting bay — one boost, for a club you hold"
+				hand_label.text = "On the bench"
+				options_label.text = "Choose a boost, then the club it goes on. Only the right one mends a curse."
+				build_bench_row(cpu)
+			elif me.draft_stop == Route.HUT:
+				var what: Dictionary = Route.EVENTS[Route.event(wind_seed, current_hole_index, plays_for_keeps())]
+				step_hint = "The hut — %s" % str(what.title).to_lower()
+				hand_label.text = what.title
+				options_label.text = what.text
+				build_event_row(what, cpu)
 			else:
 				step_hint = "End of the hole — add %s to your bag" % (
 					"one club" if keeps == 1 else "%d clubs" % keeps)
@@ -3260,9 +3643,14 @@ func refresh_ui() -> void:
 					var cv := make_draft_card(offer, not cpu,
 						DraftAdvisor.gains(hand, offer, HAND_CAP), offer_width)
 					cv.picked.connect(_make_draft_pick_callback(i))
+					# Passing over an offer slots it into the yardage chart.
+					cv.hover_started.connect(func(_v): _set_coverage_offer(offer))
+					cv.hover_ended.connect(func(_v): _set_coverage_offer({}))
 					options_container.add_child(cv)
 				options_container.add_child(make_draft_side(cpu))
 			build_form_placeholders("No Form draw between holes.")
+			if not (_trading or _boosting) or cpu:
+				add_coverage_chart("Pass over a club on offer to see where it slots in. Claret is yardage no club reaches.")
 
 		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
 			step_num = "·"
@@ -3275,9 +3663,13 @@ func refresh_ui() -> void:
 				# what dropping it would cost.
 				var cv := make_card_view(hand[i], not cpu, true, cut_width, 116.0, false)
 				cv.picked.connect(_make_discard_callback(i))
+				var cut_club: Dictionary = hand[i]
+				cv.hover_started.connect(func(_v): _set_coverage_focus(cut_club))
+				cv.hover_ended.connect(func(_v): _set_coverage_focus({}))
 				# What cutting it would cost, so the cut is a read, not a guess.
 				options_container.add_child(card_with_cost(cv, DraftAdvisor.losses(hand, hand[i])))
 			build_form_placeholders("No Form draw while you're cutting the bag.")
+			add_coverage_chart("Pass over a club to see the yards it covers.")
 
 		State.WAITING:
 			step_num = "·"
@@ -3295,6 +3687,8 @@ func refresh_ui() -> void:
 				options_label.text = "In the bunker — no woods."
 			rebuild_bag_row()
 			build_form_placeholders("Drawn fresh for every shot, once you commit your aim.")
+			add_reach_readout()
+			add_coverage_chart("", ball_pos.distance_to(hole.pin_pos) if hole else -1.0)
 
 		State.PUTTING:
 			step_num = "·"
@@ -3312,9 +3706,12 @@ func refresh_ui() -> void:
 				total_par += entry.par
 			var diff := total_strokes - total_par
 			step_num = "·"
-			step_hint = "Round complete"
-			hand_label.text = "Round complete"
+			step_hint = "Out of strokes in hand" if _run_over else "Round complete"
+			hand_label.text = "Out of strokes" if _run_over else "Round complete"
 			options_label.text = "%d strokes (%s)." % [total_strokes, score_diff_text(diff)]
+			if _run_over:
+				options_label.text = "The round ended after %d holes, %s. You had %d strokes in hand to spend." % [
+					round_scores.size(), score_diff_text(diff), STROKES_IN_HAND + me.hand_bonus]
 			var restart_btn := Button.new()
 			restart_btn.text = "Play another round"
 			restart_btn.custom_minimum_size = Vector2(220, 52)
@@ -3362,8 +3759,11 @@ func build_form_placeholders(note: String) -> void:
 		var created: int = me.created_next.size() + ClubAbilities.draw_extras(pending_club, current_lie).size()
 		var count: int = ShotRules.form_choice_count(hand, swing_tier_for_shot(), play_lie(), created,
 			pending_club)
-		form_hint.text = "This swing draws %d from your %s form — %s." % [count,
-			FormCard.FAMILY_LABEL[swinging], "you keep one" if count > 1 else "no choice"]
+		# Dealt from the family's pile and this club's own shots.
+		var pile := form_deck.club_form(pending_club)
+		form_hint.text = "This swing draws %d from the %s pile and the %s's own shots (%d good, %d bad) — %s." % [
+			count, str(FormCard.FAMILY_LABEL[swinging]).to_lower(), pending_club.name,
+			int(pile.good), int(pile.bad), "you keep one" if count > 1 else "no choice"]
 		form_hint.visible = true
 		form_container.add_child(make_form_placeholder(count))
 
@@ -3466,10 +3866,9 @@ func make_draft_card(card: Dictionary, interactive: bool, notes: Array,
 	return cv
 
 
-# The draft's other moves, in a column beside the offers (DraftRules.gd):
-# a range session in place of a club, a dig for fresh offers, a club traded
-# in for one more — and, once something has been kept from a draft that
-# keeps two, a way to stop there.
+# The pro shop's other moves, in a column beside the offers (DraftRules.gd):
+# a dig for fresh offers, a club traded in for one more — and, once
+# something has been kept from a draft that keeps two, a way to stop there.
 func make_draft_side(cpu: bool) -> Control:
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 6)
@@ -3479,14 +3878,6 @@ func make_draft_side(cpu: bool) -> Control:
 	var head := BogeyUI.kicker("Instead" if me.draft_taken == 0 else "Or", BogeyTheme.NEUTRAL_600, 9)
 	col.add_child(head)
 
-	var bad := form_deck.bad_count()
-	if bad > 0:
-		var purge := mini(ShotRules.RANGE_SESSION_PURGE, bad)
-		col.add_child(_draft_side_button("Range session",
-			"%d bad card%s out" % [purge, "" if purge == 1 else "s"],
-			"In place of a club, work the %d worst bad card%s out of your Form deck.\n%d bad card%s in it now." % [
-				purge, "" if purge == 1 else "s", bad, "" if bad == 1 else "s"],
-			func(): submit("range", {}), cpu))
 	if DraftRules.can_dig(hand, me.draft_taken, me.draft_digs, shown):
 		var costs := DraftRules.dig_costs_card(hand)
 		col.add_child(_draft_side_button("Dig",
@@ -3562,6 +3953,146 @@ func build_trade_row() -> void:
 		var cv := make_card_view(hand[i], true, true, width, 116.0, false)
 		cv.picked.connect(_make_trade_callback(i))
 		options_container.add_child(card_with_cost(cv, DraftAdvisor.losses(hand, hand[i])))
+
+
+func _on_boost_pressed(boost: String) -> void:
+	Sound.play("ui_click")
+	_boosting = true
+	_boost_pick = boost
+	_tape_pick = 0
+	refresh_ui()
+
+
+func _on_boost_cancelled() -> void:
+	Sound.play("ui_back")
+	_boosting = false
+	refresh_ui()
+
+
+# One wide button for the strip's forks: the stops, the bench, the hut.
+func _wide_button(title: String, sub_text: String, tip: String, on_press: Callable,
+		disabled: bool) -> Button:
+	var b := _draft_side_button(title, sub_text, tip, on_press, disabled)
+	b.custom_minimum_size = Vector2(WEAR_CHOICE_WIDTH, 52)
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return b
+
+
+# The fork after a hole: the pro shop, or the round's other stop here.
+# Each says what is there, so the choice is a read and not a guess.
+func build_stop_row(cpu: bool) -> void:
+	var stops := Route.stops(wind_seed, current_hole_index)
+	for i in range(stops.size()):
+		var id: String = stops[i]
+		var there: String = Route.STOPS[id].does
+		match id:
+			Route.FIT:
+				there = " · ".join(PackedStringArray(me.draft_boosts.map(
+					func(b): return str(ClubAbilities.BOOSTS[b].name))))
+			Route.RANGE:
+				var bad := form_deck.bad_count()
+				there = "No bad cards to work out" if bad == 0 else "The worst %d of your %d bad card%s leave%s" % [
+					mini(bad, ShotRules.RANGE_SESSION_PURGE), bad, "" if bad == 1 else "s", "s" if bad == 1 else ""]
+			Route.HUT:
+				there = Route.EVENTS[Route.event(wind_seed, current_hole_index, plays_for_keeps())].title
+		options_container.add_child(_wide_button(Route.STOPS[id].name, there,
+			"%s.\n%s" % [Route.STOPS[id].does, there], func(): submit("stop", {"index": i}), cpu))
+
+
+# The fitting bay's bench: a button a boost, and the way out.
+func build_bench_row(cpu: bool) -> void:
+	for boost in me.draft_boosts:
+		var what: Dictionary = ClubAbilities.BOOSTS[boost]
+		var can: bool = hand.any(func(c): return ClubAbilities.can_boost(c, boost))
+		options_container.add_child(_wide_button(what.name, what.does if can else "No club of yours can take it",
+			what.does, func(): _on_boost_pressed(boost), cpu or not can))
+	options_container.add_child(_wide_button("Walk on", "Nothing today",
+		"Leave the fitting bay with the bag as it is.", func(): submit("leave", {}), cpu))
+
+
+# The hut: take what is there, or walk on.
+func build_event_row(what: Dictionary, cpu: bool) -> void:
+	options_container.add_child(_wide_button(what.take, "Take what the hut offers", what.text,
+		func(): submit("event", {}), cpu))
+	options_container.add_child(_wide_button("Walk on", "Leave it",
+		"On to the next tee, with nothing taken.", func(): submit("leave", {}), cpu))
+
+
+# The bag, laid out to choose the club the fitting bay's boost goes on:
+# under each tile, what it would do there. Lead tape first shows its shots.
+func build_boost_row() -> void:
+	var boost := _boost_pick
+	var side := VBoxContainer.new()
+	side.add_theme_constant_override("separation", 6)
+	side.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var back := Button.new()
+	var taping := boost == "lead_tape"
+	back.text = "Back to the bench" if taping else "Back to\nthe bench"
+	back.tooltip_text = "Back to the bench, with the bag as it is."
+	back.custom_minimum_size = Vector2(TRADE_BACK_WIDTH, 36 if taping else 60)
+	BogeyUI.style_button(back, false, 12)
+	back.pressed.connect(_on_boost_cancelled)
+	side.add_child(back)
+	var side_width := TRADE_BACK_WIDTH
+	if taping:
+		side_width = DRAFT_SIDE_WIDTH
+		side.add_child(BogeyUI.kicker("The shot it adds", BogeyTheme.NEUTRAL_600, 9))
+		for i in range(me.draft_tape.size()):
+			var shot := str(me.draft_tape[i])
+			var b := Button.new()
+			b.text = shot
+			b.tooltip_text = FormCard.make(shot).effect_text()
+			b.custom_minimum_size = Vector2(DRAFT_SIDE_WIDTH, 28)
+			BogeyUI.style_button(b, i == _tape_pick, 12)
+			b.pressed.connect(func():
+				_tape_pick = i
+				refresh_ui())
+			side.add_child(b)
+	options_container.add_child(side)
+	var n: int = maxi(hand.size(), 1)
+	var width := clampf(floorf((strip_width() - side_width - BAG_GAP * n) / n),
+		BAG_CARD_MIN - 6.0, BAG_CARD_MAX)
+	for i in range(hand.size()):
+		var club: Dictionary = hand[i]
+		var can := ClubAbilities.can_boost(club, boost)
+		var cv := make_card_view(club, can, true, width, 116.0, false)
+		var note := "Putters take no boost" if not ClubAbilities.grows(club) else "Already has one"
+		if ClubAbilities.curse(club) != "":
+			note = "Cursed: it needs a %s" % str(ClubAbilities.BOOSTS[ClubAbilities.MENDS[ClubAbilities.curse(club)]].name).to_lower()
+		if can:
+			cv.picked.connect(func(_cv): submit("boost", {"boost": boost, "index": i, "shot": _tape_pick}))
+			var cursed := ClubAbilities.curse(club)
+			note = str(ClubAbilities.BOOSTS[boost].does)
+			if cursed != "":
+				note = "Mends its %s" % str(ClubAbilities.CURSES[cursed].name).to_lower()
+			elif boost == "lead_tape":
+				note = "Adds a %s to its shots" % str(me.draft_tape[_tape_pick])
+		else:
+			cv.set_dimmed(true)
+		options_container.add_child(card_with_cost(cv, [{"text": note, "strong": false}]))
+
+
+# A club that is worn in: the club, and a button for each thing the level
+# can be spent on.
+func build_wear_row(index: int) -> void:
+	var club: Dictionary = hand[index]
+	options_container.add_child(make_card_view(club, false, true, BAG_CARD_MAX, 0.0))
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	options_container.add_child(col)
+	var choices := ClubAbilities.wear_choices(club)
+	for i in range(choices.size()):
+		var c: Dictionary = choices[i]
+		var groove: bool = c.kind == "groove"
+		var b := _draft_side_button(c.text,
+			"Dealt with a spare card beside it" if groove else "Out of your Form deck for good",
+			("Whenever its %s is dealt, one more card is dealt beside it." if groove \
+				else "Its %s leaves your Form deck for good.") % c.shot,
+			func(): submit("wear", {"index": index, "choice": i}), false)
+		# Wide enough for "Groove its Controlled Fade".
+		b.custom_minimum_size.x = WEAR_CHOICE_WIDTH
+		col.add_child(b)
 
 
 # What the draft's caption says about how it was earned.
@@ -3692,6 +4223,14 @@ func rebuild_shot_outlook() -> void:
 		specs.add_child(wind_row)
 	specs.add_child(BogeyUI.hairline(0.07))
 	specs.add_child(BogeyUI.spec_row("Strokes", str(strokes)))
+	if plays_for_keeps():
+		# What is left to spend, before this hole's score is in.
+		var left := strokes_in_hand()
+		specs.add_child(BogeyUI.hairline(0.07))
+		var keeps_row := BogeyUI.spec_row("In hand", "%d stroke%s" % [left, "" if left == 1 else "s"],
+			BogeyTheme.FLAG if left <= 3 else BogeyTheme.INK)
+		keeps_row.tooltip_text = "Strokes in hand. Every stroke over par spends one, every stroke under gives one back.\nWith none left after a hole, the round is over."
+		specs.add_child(keeps_row)
 	var hole_best := Records.hole_best(current_hole_index)
 	if hole_best > 0:
 		specs.add_child(BogeyUI.hairline(0.07))
@@ -4050,12 +4589,85 @@ func _on_club_hover_start(_cv: CardView, card: Dictionary) -> void:
 	if map_view:
 		map_view.set_preview_club(card)
 	light_family(FormCard.family_of(card))
+	_set_coverage_focus(card)
+	_show_reach(card)
 
 
 func _on_club_hover_end(_cv: CardView) -> void:
 	if map_view:
 		map_view.set_preview_club({})
 	light_family("")
+	_set_coverage_focus({})
+	_show_reach({})
+
+
+# --- Yardage chart and reach readout (right column) ------------------
+
+# The bag on a yardage ruler, under the Form table — see BagCoverageView.
+# `pin` marks the flag's distance while a shot is being chosen.
+func add_coverage_chart(note: String, pin: float = -1.0) -> void:
+	coverage_view = null
+	if hand.filter(func(c): return c.get("type", "") != "putter").is_empty():
+		return
+	form_container.add_child(BogeyUI.hairline(0.14))
+	form_container.add_child(BogeyUI.kicker("Your yardages", BogeyTheme.INK))
+	if note != "":
+		form_container.add_child(BogeyUI.body(note, 12, BogeyTheme.NEUTRAL_600))
+	coverage_view = BagCoverageView.new()
+	coverage_view.setup(hand, pin, state == State.DRAFT)
+	form_container.add_child(coverage_view)
+
+
+func _set_coverage_offer(club: Dictionary) -> void:
+	if is_instance_valid(coverage_view):
+		coverage_view.set_offer(club)
+
+
+func _set_coverage_focus(club: Dictionary) -> void:
+	if is_instance_valid(coverage_view):
+		coverage_view.set_focus(club)
+
+
+# Club choice: a plain read of what the club passed over carries, against
+# the flag. Flat yards only: wind and slope are the player's to read.
+func add_reach_readout() -> void:
+	form_container.add_child(BogeyUI.hairline(0.14))
+	form_container.add_child(BogeyUI.kicker("Club reach", BogeyTheme.INK))
+	reach_title = BogeyUI.heading("", 22)
+	reach_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	form_container.add_child(reach_title)
+	reach_note = BogeyUI.body("", 13, BogeyTheme.NEUTRAL_700)
+	form_container.add_child(reach_note)
+	_show_reach({})
+
+
+func _show_reach(club: Dictionary) -> void:
+	if not is_instance_valid(reach_title) or not is_instance_valid(reach_note) or not hole:
+		return
+	var to_pin := ball_pos.distance_to(hole.pin_pos)
+	if club.is_empty():
+		reach_title.text = "%d yds to the pin" % roundi(to_pin)
+		reach_note.text = "Pass over a club to see how far it carries."
+		return
+	var lo := float(club.get("min_yard", 0.0))
+	var hi := float(club.get("max_yard", 0.0))
+	if club.get("type", "") == "putter" or lo <= 0.0:
+		reach_title.text = "%s · up to %d yds" % [club.name, roundi(hi)]
+		reach_note.text = "%d yds to the pin." % roundi(to_pin)
+		return
+	var sweet := ShotResolver.tier_yardage_range(club, ShotResolver.Tier.MID)
+	reach_title.text = "%s · %d–%d yds" % [club.name, roundi(lo), roundi(hi)]
+	var after: String
+	if to_pin < lo:
+		after = "The pin is %d — inside its shortest carry, so any swing at it is Extreme Finesse." % roundi(to_pin)
+	elif to_pin <= hi:
+		after = "The pin is %d — in range." % roundi(to_pin)
+	else:
+		after = "The pin is %d — leaves about %d–%d." % [roundi(to_pin),
+			roundi(to_pin - hi), roundi(to_pin - lo)]
+	var dealt := form_deck.club_form(club)
+	reach_note.text = "Sweet spot %d–%d. %s Flat yards, before wind and slope. It is dealt from %d good and %d bad cards." % [
+		roundi(sweet.x), roundi(sweet.y), after, int(dealt.good), int(dealt.bad)]
 
 
 func _make_club_callback(hand_index: int) -> Callable:
@@ -4130,7 +4742,7 @@ func _host_apply(seat: int, kind: String, payload: Dictionary) -> void:
 	if simul:
 		# Everyone drafts at once: any seat still owing a draft may act, but
 		# only with a draft action.
-		if not owes_draft(seat) or not ["draft", "discard", "range", "dig", "trade", "done"].has(kind):
+		if not owes_draft(seat) or not ["draft", "discard", "dig", "trade", "done", "wear", "stop", "leave", "boost", "event"].has(kind):
 			_reject(kind, "seat %d has no draft to make" % seat)
 			return
 	elif seat != active_index:
@@ -4190,8 +4802,6 @@ func _apply_action(kind: String, payload: Dictionary) -> void:
 				float(payload.get("accuracy", 0.0)))
 		"ability":
 			on_ability(str(payload.get("id", "")))
-		"range":
-			on_range_session()
 		"call":
 			on_call_hole()
 		"dig":
@@ -4200,6 +4810,16 @@ func _apply_action(kind: String, payload: Dictionary) -> void:
 			on_trade_in(int(payload.get("index", -1)))
 		"done":
 			on_draft_done()
+		"wear":
+			on_wear_in(int(payload.get("index", -1)), int(payload.get("choice", -1)))
+		"stop":
+			on_stop(int(payload.get("index", -1)))
+		"leave":
+			on_leave_stop()
+		"boost":
+			on_boost(str(payload.get("boost", "")), int(payload.get("index", -1)), int(payload.get("shot", 0)))
+		"event":
+			on_event()
 		_:
 			_reject("action", "unknown kind '%s'" % kind)
 
@@ -4234,6 +4854,9 @@ func snapshot_decks() -> Dictionary:
 			"draft_taken": p.draft_taken,
 			"draft_digs": p.draft_digs,
 			"draft_traded": p.draft_traded,
+			"draft_stop": p.draft_stop,
+			"draft_boosts": p.draft_boosts.duplicate(),
+			"draft_tape": p.draft_tape.duplicate(),
 		})
 	return {"players": out, "active_index": active_index, "state": state,
 		"hole": current_hole_index, "draft_queue": _draft_queue.duplicate(),
@@ -4265,6 +4888,9 @@ func apply_deck_snapshot(decks: Dictionary) -> void:
 		p.draft_taken = int(e.get("draft_taken", 0))
 		p.draft_digs = int(e.get("draft_digs", 0))
 		p.draft_traded = bool(e.get("draft_traded", false))
+		p.draft_stop = str(e.get("draft_stop", ""))
+		p.draft_boosts = (e.get("draft_boosts", []) as Array).duplicate()
+		p.draft_tape = (e.get("draft_tape", []) as Array).duplicate()
 
 	# The host's turn and phase are authoritative. next_to_play() compares
 	# float distances, so recomputing them locally could tie differently —

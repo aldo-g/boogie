@@ -87,7 +87,12 @@
 		"Tip: clubs of the same brand work together. Get two, four or eight of a set for bonuses.",
 		"Tip: your bag holds 14 clubs. After each hole you draft one more, so choose with a plan.",
 		"Tip: landing in rough, sand or water can slip a bad card into your Form deck. Keep it clean.",
-		"Tip: In the Zone throws bad cards out of your Form deck. Worth its weight in roe.",
+		"Tip: every club brings its own shots to your Form deck, and its own miss. The bag is the deck.",
+		"Tip: find the fairway or the green and the club wears in. Three good ones and it earns you a choice.",
+		"Tip: after each hole you take one stop. The pro shop is always there, and you can see what is beside it three holes ahead.",
+		"Tip: a curse needs the right boost at a fitting bay. A bent shaft wants a new one.",
+		"Tip: a club is only dealt its own shots, on top of the family's pile. Groove the club you hit most.",
+		"Tip: water and out of bounds can curse the club that found them. Mind the driver.",
 		"Tip: a Stinger flies low and the wind barely touches it. Bump and Run goes along the ground.",
 		"Tip: a Flop Shot goes up high and stops dead. Good for getting over trouble near the green.",
 		"Tip: finish a shot on the cup and you roll a d20. A natural 20 and it drops in.",
@@ -117,7 +122,7 @@
 	],
 	"bad_card_added": [
 		"That trouble left a bad card in your Form deck. Something fishy's swimming in there now.",
-		"Your Form deck just got a bit murkier. Look out for In the Zone to clean it up.",
+		"Your Form deck just got a bit murkier. A range session will clean it up.",
 		"A bad card's been added to your deck. Don't worry, we'll flush it out eventually."
 	],
 

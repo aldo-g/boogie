@@ -199,6 +199,8 @@ func _assert_match(context: String) -> void:
 		_cmp(context, who + ".draft_traded", pa.draft_traded, pb.draft_traded)
 		_cmp(context, who + ".draft_options", str(_club_names(pa.current_draft_options)), str(_club_names(pb.current_draft_options)))
 		_cmp(context, who + ".bag", str(_club_names(pa.hand)), str(_club_names(pb.hand)))
+		# Marks, levels, boosts and curses live on the clubs themselves.
+		_cmp(context, who + ".clubs", str(pa.hand), str(pb.hand))
 		_cmp(context, who + ".form_deck", str(_card_names(pa.form_deck.deck)), str(_card_names(pb.form_deck.deck)))
 		_cmp(context, who + ".scores", str(pa.round_scores), str(pb.round_scores))
 		_cmp(context, who + ".ability_log", str(pa.ability_log), str(pb.ability_log))
@@ -247,7 +249,8 @@ func _step_both() -> bool:
 	# three club options — so those are the two actions after which the
 	# decks must be re-synced.
 	if kind == "aim" or kind == "draft" or kind == "discard" or kind == "putt" or kind == "form" \
-			or kind == "ability" or kind == "range" or kind == "dig" or kind == "trade" or kind == "done":
+			or kind == "ability" or kind == "dig" or kind == "trade" or kind == "done" \
+			or ["wear", "stop", "leave", "boost", "event"].has(kind):
 		_sync_decks()
 
 	_assert_match("%s #%d (hole %d)" % [kind, actions, a.current_hole_index])
@@ -261,11 +264,13 @@ func _choose_action() -> Array:
 	var ability := TestBags.pick_ability(a, 0.3)
 	if ability != "":
 		return ["ability", ability]
-	if TestBags.wants_range(a, 0.15):
-		return ["range", null]
+	var stop := TestBags.stop_move(a)
+	if not stop.is_empty():
+		return [stop.kind, stop.payload]
 	var hunt := TestBags.pick_hunt(a, 0.25)
 	if not hunt.is_empty():
-		return [hunt.kind, hunt.payload.get("index", null)]
+		# Wear and boost take two arguments, so they keep their payload.
+		return [hunt.kind, hunt.payload if hunt.kind == "wear" else hunt.payload.get("index", null)]
 	match a.state:
 		a.State.CLUB_SELECT:
 			if a.hand.is_empty():
@@ -310,7 +315,10 @@ func _sync_decks() -> void:
 		pb.current_form_options = _cards_from_names(_card_names(pa.current_form_options))
 		pb.current_form_forced = pa.current_form_forced
 		pb.pending_club = pa.pending_club.duplicate(true)
-		pb.pending_new_card = pa.pending_new_card
+		# A copy, as it would be over the wire: clubs are written to as they
+		# wear, so the two instances must not share one.
+		pb.pending_new_card = (pa.pending_new_card as Dictionary).duplicate(true) \
+			if pa.pending_new_card != null else null
 		pb.ability_log = pa.ability_log.duplicate(true)
 		pb.armed = pa.armed.duplicate()
 		pb.created_next = pa.created_next.duplicate()
@@ -325,8 +333,12 @@ func _apply_action(m, kind: String, arg) -> void:
 		"discard": m.on_discard_pick(arg)
 		"putt": m.on_putt_stopped(arg.result, arg.accuracy)
 		"ability": m.on_ability(arg)
-		"range": m.on_range_session()
 		"call": m.on_call_hole()
 		"dig": m.on_dig()
 		"trade": m.on_trade_in(arg)
 		"done": m.on_draft_done()
+		"wear": m.on_wear_in(arg.index, arg.choice)
+		"stop": m.on_stop(arg.index)
+		"leave": m.on_leave_stop()
+		"boost": m.on_boost(arg.boost, arg.index, arg.shot)
+		"event": m.on_event()

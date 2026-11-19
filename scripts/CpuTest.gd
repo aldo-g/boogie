@@ -159,7 +159,9 @@ func _check_input_is_ignored() -> void:
 			_main.submit("form", {"index": 0})
 		_main.State.DRAFT:
 			_main.submit("draft", {"index": 0})
-			_main.submit("range", {})
+			_main.submit("stop", {"index": 1})
+			_main.submit("leave", {})
+			_main.submit("event", {})
 			_main.submit("dig", {})
 			_main.submit("trade", {"index": 0})
 			_main.submit("done", {})
@@ -322,6 +324,7 @@ func _draft_checks() -> Array:
 	# after the first.
 	p.call_result = "made"
 	m.begin_draft_phase()
+	m.on_stop(0)   # the pro shop
 	if m.current_draft_options.size() != 5 or p.draft_keeps != 2:
 		bad.append("a call made dealt %d and keeps %d (expected 5 and 2)" % [m.current_draft_options.size(), p.draft_keeps])
 	var clubs_before: int = m.hand.size()
@@ -338,6 +341,7 @@ func _draft_checks() -> Array:
 	# A call missed: two. Then a dig replaces both, at the cost of a card.
 	p.call_result = "missed"
 	m.begin_draft_phase()
+	m.on_stop(0)   # the pro shop
 	if m.current_draft_options.size() != 2:
 		bad.append("a call missed dealt %d (expected 2)" % m.current_draft_options.size())
 	var before_names := _offer_names(m)
@@ -386,6 +390,7 @@ func _draft_checks() -> Array:
 	# ...and takes it away again when it is traded in.
 	p.call_result = ""
 	m.begin_draft_phase()
+	m.on_stop(0)   # the pro shop
 	var wedge := -1
 	for i in range(m.hand.size()):
 		if m.hand[i].name == "Titanist Tour Wedge":

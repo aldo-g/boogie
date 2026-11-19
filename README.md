@@ -53,10 +53,23 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
   directions to build in.
 - **Limited-edition clubs** are mixed into the same pool at lower odds — the
   same club types with better stats or a bonus ability.
-- **Clubs bring their shots.** Every maker has a signature Form card
-  (Titanist's Knockdown, Slazinger's Bomb, ...). Drafting one of its clubs
-  puts that card in your Form deck; cutting the club takes it out. A
-  Slazinger club brings a bad card as well.
+- **Clubs bring their shots.** Every club but a putter brings two or three
+  Form cards to your deck (a Driver: Flushed, Power Draw and a Hook), and
+  takes them out again when it is cut. A maker's club brings the maker's
+  signature card among them (Titanist's Knockdown, Slazinger's Bomb, ...).
+  A club's shots are dealt to that club alone, on top of its family's small
+  shared pile, so the bag is the deck and each club is its own.
+- **Clubs grow.** A shot that finds the fairway or the green leaves a mark
+  on its club; three marks and it is worn in, twice at most, and each time
+  you choose: groove one of its shots (it is dealt with a spare card beside
+  it), lose its miss, or (a maker's club) take its maker's own gain. At a
+  fitting bay a club you hold takes a **boost**: Regrip, Custom fit, New
+  shaft, Fresh grooves or Lead tape.
+- **Clubs can be cursed.** A ball in the water or out of bounds can leave a
+  Bent shaft, a Loose grip or a Hosel rocket on the club that put it there,
+  and one club in eight on the rack is second-hand: worn in already, and
+  cursed. Only the right boost mends each (New shaft, Regrip, Custom fit),
+  or the club leaves the bag.
 - **Staff clubs**: two of each maker's ten clubs are poor in a mixed bag and
   excellent once four of the maker's clubs are in it. Taking one early is a
   bet on the set, and the club that completes the set wakes them.
@@ -79,9 +92,16 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
 - Activated set bonuses sit in the same box: Titanist 8 re-draws the hand,
   MacGregorian 8 improves your lie, Nimbus 2 plays a shot one tier better,
   Nimbus 8 plays it as the ideal club.
-- **Range session**: at the end of any hole you can skip the draft to
-  remove 2 bad cards from your Form deck. It's the way back from a run of
-  bad holes, paid for in bag progress.
+- **The way round**: after every hole there is a fork, and you take one
+  stop. The **pro shop** (the draft) is always one of the two. The other is
+  fixed for the round and shown three holes ahead: a **fitting bay** (three
+  boosts on the bench, one for a club you hold), the **range** (the two
+  worst bad cards leave your Form deck) or **the hut**, where something
+  happens — a cursed club in the gorse, a stranger's tip, the drinks cart,
+  a hustler — and you take it or walk on.
+- **Strokes in hand**: a solo round is played for keeps. You start with
+  ten; every stroke over par spends one and every stroke under gives one
+  back; with none left after a hole, the round is over.
 
 **Shot resolution — the Form Card System**
 - Each club has a yardage band (min–max) and a type that determines
@@ -94,9 +114,10 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
   - **Extreme Finesse** → no draw at all; a bad card is created and forced on you
 - **Your form is the club's.** Every Form card belongs to a club family —
   Wood, Iron, Wedge or Putter — and a swing is dealt only from the family of
-  the club in hand: a driver is never handed a Flop Shot. Each family has its
-  own shots and its own misses, and keeps its own form, shown in the Form
-  column between draws.
+  the club in hand: a driver is never handed a Flop Shot. Within the family,
+  a swing draws the family's own small pile plus the shots of the club in
+  hand, and no other club's. Each family has its own misses and keeps its
+  own form, shown in the Form column between draws.
 - Form cards are **fully known before you pick** — degrees of deviation,
   distance multiplier, side. The deck's good cards are Stinger, Controlled
   Draw/Fade, Power Draw, Soft Fade, Flushed, Spinner, Punch Out, Flop Shot,
@@ -104,8 +125,8 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
   deck); bad ones are Hook, Slice, Pull, Push, Duck Hook, Overswing, Top,
   Thin, Chunk, Skied, Shank and Yips. Pure Strike, Big Strike and Steady
   Hands are never drawn — only clubs create them.
-- The Form deck starts at 35 good / 18 bad, about two good to one bad in
-  each family. **Trouble can add a bad card into that deck** — one time in
+- The Form deck starts at 17 good / 8 bad, about two good to one bad in
+  each family, and the clubs in the bag bring the rest. **Trouble can add a bad card into that deck** — one time in
   three for sand, water or out of bounds, one in five for a ball that
   finishes in the rough — in the family of the club that found the trouble.
   So a wild driver goes cold and leaves the wedges alone, and a scrappy
@@ -318,6 +339,7 @@ Bogey/
     ├── Records.gd         Per-course bests and history, saved between sessions
     ├── DraftAdvisor.gd    What a draft pick would change, and what a cut would cost
     ├── DraftRules.gd      The rules of the draft: the call, the dig, the trade-in
+    ├── Route.gd           The way round: the stop after each hole, and the hut
     ├── Settings.gd        Volume, shot speed and putt key, saved between sessions
     ├── SettingsPanel.gd   The settings controls (title page and in-game popup)
     ├── ClubRoster.gd      Loads the club roster; starter bag, draft pool, live brands

@@ -29,6 +29,10 @@ func _initialize() -> void:
 	for count in _counts_from_env():
 		if not _run_round(count):
 			all_ok = false
+		# Alone, the round is for keeps: random play must run out of strokes
+		# in hand and be stopped before the last hole.
+		if count == 1 and not _run_round(1, true):
+			all_ok = false
 	print("\nALL ROUNDS: %s" % ("OK" if all_ok else "FAIL"))
 	quit(0 if all_ok else 1)
 
@@ -45,7 +49,7 @@ func _counts_from_env() -> Array:
 	return out if not out.is_empty() else [1, 2, 3, 4]
 
 
-func _run_round(count: int) -> bool:
+func _run_round(count: int, keeps: bool = false) -> bool:
 	GameSetup.player_count = count
 	var main = load("res://scenes/Main.tscn").instantiate()
 	get_root().add_child(main)
@@ -64,6 +68,7 @@ func _run_round(count: int) -> bool:
 		return false
 
 	main.map_view.skip_animation = true
+	main.for_keeps = keeps
 	# Seat 0 keeps the drafted starter bag; the rest carry ability
 	# loadouts, so a group round exercises every club ability too.
 	for i in range(1, main.players.size()):
@@ -94,7 +99,11 @@ func _run_round(count: int) -> bool:
 
 	if ok:
 		for p in main.players:
-			if p.round_scores.size() != Course.hole_count():
+			if keeps:
+				if not main._run_over or p.round_scores.size() >= Course.hole_count():
+					print("  !! for keeps, %s played %d holes and was not stopped" % [p.name, p.round_scores.size()])
+					ok = false
+			elif p.round_scores.size() != Course.hole_count():
 				print("  !! %s scored %d holes, expected %d" % [p.name, p.round_scores.size(), Course.hole_count()])
 				ok = false
 			if p.hand.size() < 3 or p.hand.size() > main.HAND_CAP:
@@ -110,8 +119,8 @@ func _run_round(count: int) -> bool:
 	var totals: Array = []
 	for p in main.players:
 		totals.append("%s=%d" % [p.name, p.total_strokes()])
-	print("players=%d -> %s  (%d actions)  %s" % [
-		count, "OK" if ok else "FAIL", actions, ", ".join(totals)])
+	print("players=%d%s -> %s  (%d actions)  %s" % [
+		count, " for keeps" if keeps else "", "OK" if ok else "FAIL", actions, ", ".join(totals)])
 
 	main.free()
 	return ok
@@ -143,8 +152,9 @@ func _step(main) -> bool:
 	if ability != "":
 		main.on_ability(ability)
 		return true
-	if TestBags.wants_range(main, 0.15):
-		main.on_range_session()
+	var stop := TestBags.stop_move(main)
+	if not stop.is_empty():
+		main._apply_action(stop.kind, stop.payload)
 		return true
 	var hunt := TestBags.pick_hunt(main, 0.25)
 	if not hunt.is_empty():

@@ -25,6 +25,7 @@ var wind_cap: float = -1.0       # < 0: the game's own wind
 var no_draft: bool = false
 
 var hole_log: Array = []
+var curses: int = 0              # curses that landed on a club this round
 
 
 func refresh_ui() -> void:
@@ -84,6 +85,13 @@ func maybe_add_bad_card_to_form_deck(lie_result: String, chance: float, family: 
 		else:
 			hole_log[-1].hazards += 1
 		hole_log[-1].bad_added += form_deck.bad_count() - before
+
+
+func maybe_curse_club(club: Dictionary) -> void:
+	var was := ClubAbilities.curse(_held(club))
+	super.maybe_curse_club(club)
+	if ClubAbilities.curse(_held(club)) != was:
+		curses += 1
 
 
 func begin_draft_phase() -> void:

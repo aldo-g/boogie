@@ -398,7 +398,7 @@ func _check_effect_data() -> void:
 	for c in deck:
 		_expect(not ["Pure Strike", "Big Strike", "Steady Hands"].has(c.name), "%s is not in the Form deck" % c.name)
 		good += 1 if c.good else 0
-	_expect(good == 35 and deck.size() == 53, "the Form deck is 35 good / 18 bad (%d / %d)" % [good, deck.size() - good])
+	_expect(good == 17 and deck.size() == 25, "the Form deck starts 17 good / 8 bad (%d / %d)" % [good, deck.size() - good])
 	# Every card in the game can be made by name (decks travel online as
 	# names), is on the list for its side, and has a caddy line.
 	for n in FormCard.BAD_NAMES + FormCard.GOOD_NAMES:
@@ -574,6 +574,7 @@ func _check_abilities() -> void:
 
 	# Purges take the worst bad cards first.
 	var pdeck := FormDeck.new()
+	pdeck.add_bad_card_to_deck("Shank", "wedge")
 	var bad_before := pdeck.bad_count()
 	var purged := pdeck.purge_bad(2)
 	_expect(purged.size() == 2 and pdeck.bad_count() == bad_before - 2, "purge_bad removes two bad cards")
@@ -833,10 +834,148 @@ func _check_signatures() -> void:
 	_expect(int(ShotRules.resolve([_club("The Metronome")], iron, 140, "fairway", stock).degree) > 0, "...but not on its own")
 
 	var bringing := _texts(DraftAdvisor.gains([], _club("Titanist 4-Iron")))
-	_expect(bringing.contains("Brings a Knockdown to your iron form"), "the draft says what a club brings (%s)" % bringing)
+	_expect(bringing.contains("Brings Knockdown, ") and bringing.contains("to your iron form"), "the draft says what a club brings (%s)" % bringing)
 	_expect(_texts(DraftAdvisor.gains([], _club("Slazinger Cannon Driver"))).contains("and a Duck Hook with it"),
 		"...and what comes with it")
-	_expect(_texts(DraftAdvisor.gains([], _club("Nimbus Driver"))).contains("every club's form"), "...and that a Nimbus shot is anyone's")
+	_expect(_texts(DraftAdvisor.gains([], _club("Nimbus Driver"))).contains("Utility Swing (any club)"), "...and that a Nimbus shot is anyone's")
+	_check_growth()
+
+
+# --- Every club brings its shots; wear, boosts and curses (Section 3E) ----
+
+func _check_growth() -> void:
+	# What each kind of club brings.
+	_expect(_club("Driver").shots == ["Flushed", "Power Draw", "Hook"], "a Driver brings two shots and a miss (%s)" % [_club("Driver").shots])
+	_expect(_club("Bogey-Mart Driver").shots == ["Flushed", "Hook"], "a Bogey-Mart club brings one shot and a miss")
+	_expect(_club("Putter").shots.is_empty() and not ClubAbilities.grows(_club("Putter")), "a putter brings nothing and does not grow")
+	var blade: Array = _club("Titanist 4-Iron").shots
+	_expect(blade.size() == 3 and blade[0] == "Knockdown" and not FormCard.make(blade[2]).good,
+		"a maker's club brings its signature, a shot and a miss (%s)" % [blade])
+	_expect(_club("Gold Cleek").shots.all(func(s): return FormCard.make(s).good), "a limited edition brings no miss")
+	for c in _all_clubs():
+		for s in c.shots:
+			_expect(FormCard.GOOD_NAMES.has(s) or FormCard.BAD_NAMES.has(s), "%s brings a real card (%s)" % [c.name, s])
+
+	# The deck takes a club's shots and gives them back.
+	var deck := FormDeck.new()
+	var total := deck.deck.size()
+	var driver := _club("Driver")
+	deck.bring(driver)
+	_expect(deck.deck.size() == total + 3 and deck.bad_count("wood") == 3, "a club's shots join its family")
+	_expect(deck.take(driver).size() == 3 and deck.deck.size() == total, "...and leave with it")
+	var nimbus := _club("Nimbus Driver")
+	deck.bring(nimbus)
+	_expect(deck.draw_cards(40, "wedge").any(func(c): return c.name == "Utility Swing"), "a Nimbus club's Utility Swing is anyone's")
+
+	# Wear: three marks a level, two levels, each a choice.
+	var worn := _club("7-Iron")
+	_expect(ClubAbilities.wear_pending(worn) == 0, "a new club is owed nothing")
+	worn["marks"] = ClubAbilities.WEAR_MARKS
+	_expect(ClubAbilities.wear_pending(worn) == 1, "three marks is a level")
+	worn["marks"] = 99
+	_expect(ClubAbilities.wear_pending(worn) == ClubAbilities.MAX_LEVEL, "...and two levels is the most")
+	var choices := ClubAbilities.wear_choices(worn)
+	_expect(choices.size() == 3 and choices[0].kind == "groove" and choices[2].kind == "drop", "a level grooves a shot or drops the miss (%s)" % [choices])
+	worn.shots[0] += FormCard.GROOVE_MARK
+	_expect(ClubAbilities.wear_choices(worn).size() == 2, "a grooved shot is not grooved twice")
+
+	# A grooved card is itself, travels by name, and comes with a spare.
+	var grooved := FormCard.make("Flushed+")
+	_expect(grooved.grooved and grooved.name == "Flushed" and grooved.key() == "Flushed+", "Flushed+ is a grooved Flushed")
+	var gd := FormDeck.new()
+	gd.deck = []
+	for n in ["Flushed+", "Stinger", "Stinger", "Stinger", "Stinger"]:
+		gd.add_card(n, "wood")
+	var dealt := 0
+	for i in range(20):
+		var drawn := gd.draw_for_shot(Tier.MID, false, 0, false, "wood")
+		dealt += drawn.cards.size() - (4 if drawn.cards.any(func(c): return c.grooved) else 3)
+		gd.return_unpicked(drawn.cards, -1)
+	_expect(dealt == 0, "a hand with a grooved card in it is one card bigger")
+	_expect(gd.remove_card("Flushed+", "wood") and not gd.remove_card("Flushed", "wood"), "a grooved card is removed as itself")
+
+	# Boosts change the numbers the rules already read.
+	var plain := _club("7-Iron")   # 95-145
+	var bag := [plain]
+	_expect(ShotRules.swing_tier(bag, plain, 132) == Tier.FULL, "132 is a full 7-Iron")
+	plain["boosts"] = ["custom_fit"]
+	_expect(ShotRules.swing_tier(bag, plain, 132) == Tier.MID, "...and a Mid one once it is fitted")
+	_expect(not ClubAbilities.can_boost(plain, "custom_fit") and ClubAbilities.can_boost(plain, "regrip"), "a club takes each boost once")
+	_expect(not ClubAbilities.can_boost(_club("Putter"), "regrip"), "a putter takes none")
+	_expect(not ClubAbilities.can_boost(_club("The Metronome"), "custom_fit"), "a club that is all Mid has no middle to widen")
+	var soft := _club("7-Iron")
+	var hook := _degrees([], soft, "Hook")
+	soft["boosts"] = ["regrip"]
+	_expect(_degrees([], soft, "Hook") < hook, "a regripped club's misses hit softer")
+	var spin := _club("7-Iron")
+	var roll := float(ShotRules.resolve([], spin, 130, "fairway", FormCard.make("Stinger")).roll_mult)
+	spin["boosts"] = ["grooves"]
+	_expect(float(ShotRules.resolve([], spin, 130, "fairway", FormCard.make("Stinger")).roll_mult) < roll, "fresh grooves stop it quicker")
+
+	# Curses.
+	var bent := _club("7-Iron")
+	var count := ShotRules.form_choice_count([bent], Tier.MID, "fairway", 0, bent)
+	bent["curse"] = "bent_shaft"
+	_expect(ShotRules.form_choice_count([bent], Tier.MID, "fairway", 0, bent) == count - 1, "a bent shaft is dealt one fewer")
+	_expect(ClubAbilities.can_boost(bent, "new_shaft") and not ClubAbilities.can_boost(bent, "regrip"),
+		"only a new shaft mends a bent one")
+	for id in ClubAbilities.CURSES:
+		_expect(ClubAbilities.BOOSTS.has(ClubAbilities.MENDS[id]), "%s has a boost that mends it" % id)
+	var loose := _club("7-Iron")
+	loose["curse"] = "loose_grip"
+	_expect(_degrees([], loose, "Hook") > hook, "a loose grip's misses hit harder")
+	var rocket := _club("7-Iron")
+	rocket["curse"] = "hosel_rocket"
+	var rd := FormDeck.new()
+	rd.bring(rocket)
+	_expect(rd.count_of("Shank") == 1, "a club that arrives with a hosel rocket brings its Shank")
+	rd.take(rocket)
+	_expect(rd.count_of("Shank") == 0, "...and it leaves with the club")
+
+	# Dealt to the club: a club's shots are its own, the family's pile is shared.
+	var own := FormDeck.new()
+	var big := _club("Driver")
+	var three := _club("3-Wood")
+	own.bring(big)
+	own.bring(three)
+	var strays := 0
+	var seen_own := false
+	for i in range(30):
+		var drawn := ShotRules.draw_form(own, [big, three], three, 180, "fairway")
+		for c in drawn.cards:
+			strays += 1 if c.owner == "Driver" else 0
+			seen_own = seen_own or c.owner == "3-Wood"
+		own.return_unpicked(drawn.cards, -1)
+	_expect(strays == 0 and seen_own, "a 3-Wood is dealt its own shots and never the Driver's (%d strays)" % strays)
+	var pile := own.club_form(three)
+	_expect(int(pile.good) == 6 and int(pile.bad) == 3, "a 3-Wood's pile is the wood pile and its three (%s)" % [pile])
+	_expect(int(own.family_form()["wood"].good) == 4, "the family's own form leaves the clubs' shots out")
+
+	# A maker's club can wear into its maker's gain, once.
+	var tour := _club("Titanist 4-Iron")
+	var gains := ClubAbilities.wear_choices(tour).filter(func(c): return c.kind == "maker")
+	_expect(gains.size() == 1 and gains[0].shot == "tour_grind", "a Titanist club can take a tour grind (%s)" % [gains])
+	var dealt_before := ShotRules.form_choice_count([tour], Tier.MID, "fairway", 0, tour)
+	tour["boosts"] = ["tour_grind"]
+	_expect(ShotRules.form_choice_count([tour], Tier.MID, "fairway", 0, tour) == dealt_before + 1, "...and is dealt one more for it")
+	_expect(ClubAbilities.wear_choices(tour).filter(func(c): return c.kind == "maker").is_empty(), "...once")
+	_expect(ClubAbilities.wear_choices(_club("7-Iron")).filter(func(c): return c.kind == "maker").is_empty(), "a standard club has no maker's gain")
+	var mashie := _club("MacGregorian Brassie")
+	mashie["boosts"] = ["hickory"]
+	_expect(is_equal_approx(ShotRules.lie_distance_cap([], "rough", mashie), 1.0), "a hickory shaft takes no cut from rough")
+	for b in ClubAbilities.MAKER_WEAR:
+		_expect(ClubAbilities.gain_info(ClubAbilities.MAKER_WEAR[b]).does != "", "%s's gain is described" % b)
+
+	# The route: the same for every machine, the pro shop always one of the two.
+	var Route := preload("res://scripts/Route.gd")
+	var kinds := {}
+	for n in range(1, 60):
+		var fork := Route.stops(1234, n)
+		_expect(fork == Route.stops(1234, n) and fork[0] == Route.SHOP and Route.STOPS.has(fork[1]) and fork[1] != Route.SHOP,
+			"hole %d's fork is the pro shop and one other" % n)
+		kinds[fork[1]] = true
+		_expect(not Route.EVENTS[Route.event(1234, n, false)].has("keeps"), "a hut pays no strokes in hand to a round not played for them")
+	_expect(kinds.size() == 3, "all three other stops turn up (%s)" % [kinds.keys()])
 
 
 # --- The draft's rules (DraftRules.gd) ------------------------------------

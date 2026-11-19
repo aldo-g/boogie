@@ -32,6 +32,7 @@ extends RefCounted
 
 const Tier := ShotResolver.Tier
 const DraftRules := preload("res://scripts/DraftRules.gd")
+const Route := preload("res://scripts/Route.gd")
 
 # A human stopping the putt marker: timing error, standard deviation in
 # seconds. 100 ms averages ~1.2 putts from 10 yds and ~1.6 from 30 — a
@@ -59,6 +60,9 @@ var call_at: float = 0.30
 # this, and trades in a club whose loss would cost the bag less than that.
 var dig_below: float = 0.5
 var trade_below: float = 0.4
+# From this many clubs in the bag, a stop other than the pro shop is worth
+# taking for its own sake (choose_stop).
+var late_bag_at: int = 11
 # BotSim's `allout`: chase one maker's top set with everything it has —
 # every club of that maker it is offered, and a dig, then a trade-in,
 # whenever the rack shows none. No rival plays like this. It is the measure
@@ -106,7 +110,8 @@ func _init(seed_value: int = 0) -> void:
 
 func reset_log() -> void:
 	notes = {"shots": [], "created_seen": 0, "created_played": 0, "abilities": [],
-		"range": false, "draft": "", "cut": "", "called": false, "digs": 0, "trades": 0}
+		"range": false, "draft": "", "cut": "", "called": false, "digs": 0, "trades": 0,
+		"wears": 0, "boosts": 0, "stop": ""}
 
 
 # Works out the next shot without playing it; act() then plays that plan
@@ -160,6 +165,40 @@ func act(main) -> bool:
 			if pick >= 0:
 				main.on_form_pick(pick)
 		main.State.DRAFT:
+			# A club that is worn in: lose its miss if it has one to lose,
+			# otherwise groove its first shot.
+			var worn: int = main.wear_due()
+			if worn >= 0:
+				var choices := ClubAbilities.wear_choices(main.hand[worn])
+				var gain := 0
+				for i in range(choices.size()):
+					if choices[i].kind == "drop":
+						gain = i
+				notes.wears += 1
+				main.on_wear_in(worn, gain)
+				return true
+			# The fork after the hole (Route.gd), then what is done there.
+			match str(main.me.draft_stop):
+				"":
+					var stop := choose_stop(main)
+					notes.stop = str(Route.stops(main.wind_seed, main.current_hole_index)[stop])
+					notes.range = notes.stop == Route.RANGE
+					main.on_stop(stop)
+					return true
+				Route.FIT:
+					var fit := _boost_move(main)
+					if fit.is_empty():
+						main.on_leave_stop()
+					else:
+						notes.boosts += 1
+						main.on_boost(str(fit.boost), int(fit.index), 0)
+					return true
+				Route.HUT:
+					if _wants_event(main):
+						main.on_event()
+					else:
+						main.on_leave_stop()
+					return true
 			var move := choose_draft_move(main)
 			match str(move.kind):
 				"dig":
@@ -170,9 +209,6 @@ func act(main) -> bool:
 					main.on_trade_in(int(move.index))
 				"done":
 					main.on_draft_done()
-				"range":
-					notes.range = true
-					main.on_range_session()
 				_:
 					var taken := str(main.current_draft_options[int(move.index)].name)
 					notes.draft = taken if notes.draft == "" else "%s + %s" % [notes.draft, taken]
@@ -676,6 +712,10 @@ static func bag_score(bag: Array) -> float:
 			score += 0.3
 		if Brands.baggage(c) != "":
 			score -= 0.4
+		# What has been put into a club, and what is wrong with it.
+		score += 0.5 * float(c.get("level", 0)) + 0.4 * float((c.get("boosts", []) as Array).size())
+		if ClubAbilities.curse(c) != "":
+			score -= 1.5
 	return score
 
 
@@ -695,16 +735,11 @@ func choose_draft(main) -> int:
 			best_gain = gain
 			best = i
 	_last_gain = best_gain
-	if allow_range and main.form_deck.bad_count() > 0:
-		var bad: int = main.form_deck.bad_count()
-		if bad >= range_bad_at or (bad >= range_bad_at - 1 and best_gain < range_weak_gain) \
-				or best_gain <= 0.0:
-			return -1
 	return best
 
 
-# The draft's next move: {kind, index} — "pick" a club, a "range" session,
-# or one of the hunting moves (DraftRules.gd): "dig", "trade", "done".
+# The pro shop's next move: {kind, index} — "pick" a club, or one of the
+# hunting moves (DraftRules.gd): "dig", "trade", "done".
 func choose_draft_move(main) -> Dictionary:
 	var p = main.me
 	if all_out:
@@ -715,9 +750,7 @@ func choose_draft_move(main) -> Dictionary:
 	var gain := _last_gain
 	if p.draft_taken > 0:
 		# A called hole made keeps two: the second only if it earns its place.
-		if pick < 0:
-			return {"kind": "range"}
-		return {"kind": "pick", "index": pick} if gain > 0.0 else {"kind": "done"}
+		return {"kind": "pick", "index": pick} if gain > 0.0 and pick >= 0 else {"kind": "done"}
 	if allow_hunt:
 		var shown: int = main.current_draft_options.size()
 		# A club the bag would not miss buys one more offer.
@@ -732,9 +765,59 @@ func choose_draft_move(main) -> Dictionary:
 				and (not DraftRules.dig_costs_card(main.hand)
 					or main.form_deck.bad_count() <= range_bad_at - 2):
 			return {"kind": "dig"}
-	if pick < 0:
-		return {"kind": "range"}
-	return {"kind": "pick", "index": pick}
+	return {"kind": "pick", "index": maxi(pick, 0)}
+
+
+# Which of the two stops to take after this hole (an index into
+# Route.stops): the pro shop unless the other is worth more than a club.
+#   Fitting bay — to mend a curse, or once the bag is nearly full
+#   Range       — once a quarter of the Form deck is bad cards
+#   The hut     — once the bag is nearly full, for what it thinks a bargain
+func choose_stop(main) -> int:
+	var bag: Array = main.hand
+	match str(Route.stops(main.wind_seed, main.current_hole_index)[1]):
+		Route.FIT:
+			var fit := _boost_move(main)
+			if not fit.is_empty() and (bool(fit.mends) or bag.size() >= late_bag_at):
+				return 1
+		Route.RANGE:
+			var deck: int = main.form_deck.deck.size() + main.form_deck.discard.size()
+			if allow_range and bag.size() >= 6 and main.form_deck.bad_count() * 4 >= deck:
+				return 1
+		Route.HUT:
+			if bag.size() >= late_bag_at and _wants_event(main):
+				return 1
+	return 0
+
+
+# What it would do at the fitting bay: {boost, index, mends}, or {} for
+# nothing. A curse the bench can mend comes first, then the club it has hit
+# the most good shots with.
+func _boost_move(main) -> Dictionary:
+	var best := {}
+	var most := -1
+	for boost in main.me.draft_boosts:
+		for i in range(main.hand.size()):
+			var c: Dictionary = main.hand[i]
+			if not ClubAbilities.can_boost(c, boost):
+				continue
+			var mends: bool = ClubAbilities.curse(c) != ""
+			var worth := int(c.get("marks", 0)) + (100 if mends else 0)
+			if worth > most:
+				most = worth
+				best = {"boost": boost, "index": i, "mends": mends}
+	return best
+
+
+# Whether it takes what the hut offers: a grooved shot or strokes in hand
+# always, a cursed club while the bag has room, a coin toss never.
+func _wants_event(main) -> bool:
+	match Route.event(main.wind_seed, main.current_hole_index, main.plays_for_keeps()):
+		"gorse":
+			return main.hand.size() < main.HAND_CAP
+		"hustler":
+			return false
+	return true
 
 
 # Going all out for one maker's top set: the move that serves the chase, or
