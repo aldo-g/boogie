@@ -966,6 +966,31 @@ func _check_growth() -> void:
 	for b in ClubAbilities.MAKER_WEAR:
 		_expect(ClubAbilities.gain_info(ClubAbilities.MAKER_WEAR[b]).does != "", "%s's gain is described" % b)
 
+	# The putter wears its own way, and Regrip mends a twitchy one.
+	var blade_putter := _club("Putter")
+	var band := ClubAbilities.putt_band_mult([blade_putter], 6.0, false)
+	blade_putter["level"] = 1
+	_expect(ClubAbilities.putt_band_mult([blade_putter], 6.0, false) > band, "a worn-in putter widens the meter's bands")
+	blade_putter["curse"] = "twitchy"
+	_expect(ClubAbilities.putt_band_mult([blade_putter], 6.0, false) < band * (1.0 + ClubAbilities.PUTTER_WEAR_BAND),
+		"a twitchy one narrows them")
+	_expect(ClubAbilities.can_boost(blade_putter, "regrip") and not ClubAbilities.can_boost(blade_putter, "new_shaft"),
+		"only a regrip mends a twitchy putter")
+	_expect(ClubAbilities.curse_info("twitchy").does != "" and ClubAbilities.curse_info("bent_shaft").does != "",
+		"every curse is described")
+
+	# Tempo and Pocket.
+	_expect(FormCard.make("Controlled Draw").tempo and FormCard.make("Stinger").pocket
+		and not FormCard.make("Flushed").tempo and not FormCard.make("Flushed").pocket, "the right cards carry Tempo and Pocket")
+	var td := FormDeck.new()
+	var tempo_club := _club("7-Iron")
+	var plain_n: int = ShotRules.draw_form(td, [tempo_club], tempo_club, 120, "fairway").cards.size()
+	var tempo_n: int = ShotRules.draw_form(FormDeck.new(), [tempo_club], tempo_club, 120, "fairway", {}, [], 1).cards.size()
+	_expect(tempo_n == plain_n + 1, "Tempo's card is one more in the next hand (%d, %d)" % [plain_n, tempo_n])
+
+	# A hole costs triple par at most.
+	_expect(ShotRules.hole_cap(3) == 9 and ShotRules.hole_cap(5) == 15, "a hole is capped at triple par")
+
 	# The route: the same for every machine, the pro shop always one of the two.
 	var Route := preload("res://scripts/Route.gd")
 	var kinds := {}

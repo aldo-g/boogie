@@ -2,8 +2,8 @@ extends Control
 
 # ---------------------------------------------------------
 # PARS AND CHARS TITLE SCREEN + LOBBY
-# Course map fills the entire background, washed to parchment on the
-# left where the menu card sits.
+# The menu card on the left; on the right, the course the round will be
+# played on, drawn whole, with the arrows that change it and Play.
 #
 # Three modes in one screen rather than separate scenes, since the whole
 # UI is built in code and swapping a panel is cheaper than a scene change:
@@ -15,18 +15,15 @@ extends Control
 # across the internet needs port forwarding or a VPN.
 # ---------------------------------------------------------
 
-const COURSE_MAP := preload("res://assets/maps/llanfair-course.jpeg")
 const TITLE_FONT := preload("res://assets/fonts/AlexBrush-Regular.ttf")
 const Palette := preload("res://scripts/BogeyTheme.gd")
 const Rivals := preload("res://scripts/Rivals.gd")
+const CoursePlan := preload("res://scripts/CoursePlan.gd")
 const MAIN_SCENE := "res://scenes/Main.tscn"
 const EDITOR_SCENE := "res://scenes/CourseEditor.tscn"
 
 const MAX_PLAYERS := 4
 const CARD_WIDTH := 560
-
-const COLOR_DARK_GREEN := Palette.FAIRWAY_DEEP
-const COLOR_FADED_WHITE := Palette.PARCHMENT
 
 enum Mode { MENU, HOSTING, JOINING, CREDITS, SETTINGS, RECORDS }
 
@@ -37,6 +34,8 @@ var address_field: LineEdit
 var name_field: LineEdit
 var start_button: Button
 var card: PanelContainer
+var course_col: VBoxContainer     # the course on the right; rebuilt when it changes
+var course_controls: Array = []   # its arrows, Play and editor link: menu only
 
 
 func _ready() -> void:
@@ -54,43 +53,25 @@ func _ready() -> void:
 func build_ui() -> void:
 	theme = BogeyUI.theme()
 
-	# Course map, filling the entire window edge-to-edge.
-	var bg := TextureRect.new()
-	bg.texture = COURSE_MAP
-	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	# Plain paper. The picture on this screen is the course itself.
+	var bg := ColorRect.new()
+	bg.color = BogeyTheme.PARCHMENT
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
-	# A parchment wash fading in from the left, so the menu sits on calm
-	# paper and the course stays the hero on the right.
-	var grad := Gradient.new()
-	grad.offsets = PackedFloat32Array([0.0, 0.3, 0.62])
-	grad.colors = PackedColorArray([
-		Color(COLOR_FADED_WHITE, 0.9), Color(COLOR_FADED_WHITE, 0.7), Color(COLOR_FADED_WHITE, 0.0)])
-	var grad_tex := GradientTexture2D.new()
-	grad_tex.gradient = grad
-	grad_tex.fill_from = Vector2(0, 0)
-	grad_tex.fill_to = Vector2(1, 0)
-	var wash := TextureRect.new()
-	wash.texture = grad_tex
-	wash.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	wash.stretch_mode = TextureRect.STRETCH_SCALE
-	wash.set_anchors_preset(Control.PRESET_FULL_RECT)
-	wash.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(wash)
-
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left", 88)
+	margin.add_theme_constant_override("margin_right", 56)
 	margin.add_theme_constant_override("margin_top", 40)
 	margin.add_theme_constant_override("margin_bottom", 40)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(margin)
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 56)
+	margin.add_child(cols)
 
-	# The menu card. It stops mouse input, so only clicks on the open
-	# course fall through to the tee-off-solo shortcut.
+	# The menu card.
 	var card_style := BogeyUI.panel(BogeyTheme.CARD_BG, 44, BogeyUI.RADIUS + 1)
 	card_style.content_margin_top = 30
 	card_style.content_margin_bottom = 30
@@ -101,9 +82,13 @@ func build_ui() -> void:
 	card_style.shadow_offset = Vector2(0, 10)
 	card = BogeyUI.make_panel(card_style)
 	card.custom_minimum_size = Vector2(CARD_WIDTH, 0)
-	card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	card.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	margin.add_child(card)
+	cols.add_child(card)
+
+	course_col = VBoxContainer.new()
+	course_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	course_col.add_theme_constant_override("separation", 8)
+	cols.add_child(course_col)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 0)
@@ -131,6 +116,7 @@ func build_ui() -> void:
 	panel.add_theme_constant_override("separation", 10)
 	vbox.add_child(panel)
 
+	_rebuild_course()
 	_rebuild_panel()
 
 	# Ease the card in rather than popping it on.
@@ -194,14 +180,10 @@ func _rebuild_panel() -> void:
 			_build_settings()
 		Mode.RECORDS:
 			_build_records()
+	_sync_course_controls()
 
 
 func _build_menu() -> void:
-	_build_course_picker()
-	panel.add_child(_gap(2))
-	panel.add_child(BogeyUI.hairline(0.12))
-	panel.add_child(_gap(2))
-
 	# Each group is a label and its controls. What a group is for is said
 	# once, quietly, beside its label — and again on the hover.
 	panel.add_child(_group_head("On this screen", "Hot-seat: one screen, furthest from the pin plays first"))
@@ -210,11 +192,18 @@ func _build_menu() -> void:
 	local_row.add_theme_constant_override("separation", 8)
 	panel.add_child(local_row)
 
-	for n in range(1, MAX_PLAYERS + 1):
-		var b := _button("Solo" if n == 1 else "%d Players" % n, n == 1)
+	# A round alone is the Play button beside the course.
+	for n in range(2, MAX_PLAYERS + 1):
+		var b := _button("%d Players" % n)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_on_local_pressed.bind(n))
 		local_row.add_child(b)
+
+	# The tour: the four courses as one run, alone.
+	var tour_btn := _button("The Tour — all four courses, one bag")
+	tour_btn.tooltip_text = "Alone, for strokes in hand. Six clubs travel from each course to the next,\nwith everything they have gained, and each course allows two fewer strokes."
+	tour_btn.pressed.connect(_on_tour_pressed)
+	panel.add_child(tour_btn)
 
 	# A round against one computer golfer: the same rules, their own bag
 	# and draft. Three of them, by how well they play.
@@ -283,13 +272,6 @@ func _build_menu() -> void:
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(link[1])
 		footer.add_child(b)
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(spacer)
-	var hint := BogeyUI.body("or click the course to tee off solo", 13, BogeyTheme.NEUTRAL_500)
-	hint.autowrap_mode = TextServer.AUTOWRAP_OFF
-	hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	footer.add_child(hint)
 
 
 # A group's label, with a few quiet words on what the group is for set at
@@ -307,12 +289,14 @@ func _group_head(text: String, note: String) -> Control:
 	return row
 
 
-# Which course this round is played on: one of the game's own (see
-# CourseLibrary) or anything saved from the editor. Applies to solo,
-# hot-seat and hosted rounds alike — a hosted round sends the course to
-# everyone who joins.
-func _build_course_picker() -> void:
-	panel.add_child(_kicker("Course"))
+# The course this round is played on — one of the game's own (see
+# CourseLibrary) or anything saved from the editor — drawn whole (CoursePlan),
+# with the arrows that change it and the button that plays it alone. The
+# same course is what hot-seat and hosted rounds play; a hosted round
+# sends it to everyone who joins.
+func _rebuild_course() -> void:
+	_clear(course_col)
+	course_controls = []
 	var courses := _course_choices()
 	var index := 0
 	for i in courses.size():
@@ -323,54 +307,75 @@ func _build_course_picker() -> void:
 			index = i
 			break
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	panel.add_child(row)
-
-	var prev := _button("‹")
-	prev.custom_minimum_size = Vector2(46, 46)
-	prev.disabled = courses.size() < 2
-	prev.pressed.connect(_on_course_step.bind(courses, index, -1))
-	row.add_child(prev)
-
-	var s := BogeyUI.panel(BogeyTheme.CARD_BG, 0, BogeyUI.RADIUS)
-	s.content_margin_left = 16
-	s.content_margin_right = 16
-	s.content_margin_top = 6
-	s.content_margin_bottom = 8
-	s.border_color = BogeyTheme.NEUTRAL_400
-	s.set_border_width_all(1)
-	var box := BogeyUI.make_panel(s)
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(box)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 0)
-	col.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_child(col)
-	var name_l := BogeyUI.heading(Course.active_name, 24)
-	name_l.clip_text = true
-	col.add_child(name_l)
-	col.add_child(BogeyUI.body("%s · %s" % [Course.summary(Course.active()),
-		CourseTheme.label(Course.active_theme)], 13, BogeyTheme.NEUTRAL_600))
-	col.add_child(BogeyUI.body(Records.summary_line(), 13, BogeyTheme.NEUTRAL_600))
-	box.tooltip_text = CourseLibrary.blurb(Course.active_id)
-
-	var next := _button("›")
-	next.custom_minimum_size = Vector2(46, 46)
-	next.disabled = courses.size() < 2
-	next.pressed.connect(_on_course_step.bind(courses, index, 1))
-	row.add_child(next)
-
-	var edit := _button("Course editor")
+	var head := HBoxContainer.new()
+	course_col.add_child(head)
+	var kicker := _kicker("Course")
+	kicker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(kicker)
+	var edit := Button.new()
+	edit.text = "Course editor"
+	BogeyUI.style_link_button(edit)
+	edit.focus_mode = Control.FOCUS_NONE
 	edit.pressed.connect(_on_editor_pressed)
-	row.add_child(edit)
+	head.add_child(edit)
+
+	# Arrows first and together, so they hold still under the cursor while
+	# the names beside them change length.
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	course_col.add_child(row)
+	var arrows: Array = []
+	for step in [-1, 1]:
+		var b := _button("‹" if step < 0 else "›")
+		b.custom_minimum_size = Vector2(46, 46)
+		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		b.disabled = courses.size() < 2
+		b.pressed.connect(_on_course_step.bind(courses, index, step))
+		row.add_child(b)
+		arrows.append(b)
+	var name_l := BogeyUI.heading(Course.active_name, 44)
+	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_l.clip_text = true
+	row.add_child(name_l)
+	var play := _button("Play", true)
+	play.custom_minimum_size = Vector2(200, 52)
+	play.add_theme_font_size_override("font_size", 17)
+	play.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	play.tooltip_text = "A round alone on %s." % Course.active_name
+	play.pressed.connect(_on_local_pressed.bind(1))
+	row.add_child(play)
+	course_controls = arrows + [play, edit]
 
 	# What the terrain does to a shot, so the choice is an informed one.
-	var terrain := BogeyUI.body("%s — %s." % [CourseTheme.label(Course.active_theme),
-		CourseTheme.play_summary(Course.active_theme)], 13)
+	var terrain := BogeyUI.body("%s · %s — %s." % [Course.summary(Course.active()),
+		CourseTheme.label(Course.active_theme), CourseTheme.play_summary(Course.active_theme)], 14)
 	terrain.tooltip_text = CourseTheme.blurb(Course.active_theme)
 	terrain.mouse_filter = Control.MOUSE_FILTER_STOP
-	panel.add_child(terrain)
+	course_col.add_child(terrain)
+	var about := CourseLibrary.blurb(Course.active_id)
+	var record := Records.summary_line()
+	var note := "  ·  ".join([about, record].filter(func(t): return t != ""))
+	if note != "":
+		course_col.add_child(BogeyUI.body(note, 13, BogeyTheme.NEUTRAL_600))
+	course_col.add_child(_gap(4))
+
+	# The course itself, every hole on one sheet.
+	var plan := CoursePlan.new()
+	plan.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	course_col.add_child(plan)
+	plan.show_course()
+	_sync_course_controls()
+
+
+# Changing the course and playing it alone are for the menu. In a lobby
+# the course is settled, and a joiner isn't told the host's until the
+# round starts — the one here would be the wrong one, so it isn't shown.
+func _sync_course_controls() -> void:
+	if course_col == null:
+		return
+	course_col.visible = mode != Mode.JOINING
+	for c in course_controls:
+		c.visible = mode == Mode.MENU
 
 
 # Every course there is to pick, as [{ name, path, id }]: the game's own
@@ -390,7 +395,7 @@ func _on_course_step(courses: Array, index: int, step: int) -> void:
 	var ok: bool = Course.use_shipped(str(pick.id)) if str(pick.id) != "" else Course.use_file(str(pick.path))
 	if not ok:
 		Course.use_builtin()
-	_rebuild_panel()
+	_rebuild_course()
 
 
 func _on_editor_pressed() -> void:
@@ -638,6 +643,13 @@ func _on_local_pressed(count: int) -> void:
 	get_tree().change_scene_to_file(MAIN_SCENE)
 
 
+# The tour starts on the first of its courses, whatever the picker says.
+func _on_tour_pressed() -> void:
+	Sound.play("ui_confirm")
+	GameSetup.start_tour()
+	get_tree().change_scene_to_file(MAIN_SCENE)
+
+
 # You in seat 0, the chosen computer golfer in seat 1.
 func _on_rival_pressed(skill: String) -> void:
 	Sound.play("ui_confirm")
@@ -749,13 +761,3 @@ func _on_round_starting(payload: Dictionary) -> void:
 		else:
 			Course.use(course)
 	get_tree().change_scene_to_file(MAIN_SCENE)
-
-
-# Clicking the background still tees off solo, but ONLY from the menu — in
-# a lobby or the credits that shortcut would fire on every stray click and
-# drop the player into a solo round instead of the screen they opened.
-func _unhandled_input(event: InputEvent) -> void:
-	if mode != Mode.MENU:
-		return
-	if (event is InputEventMouseButton or event is InputEventKey) and event.pressed:
-		_on_local_pressed(1)

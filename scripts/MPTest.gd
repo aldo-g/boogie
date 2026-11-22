@@ -33,8 +33,49 @@ func _initialize() -> void:
 		# in hand and be stopped before the last hole.
 		if count == 1 and not _run_round(1, true):
 			all_ok = false
+	if not _check_tour():
+		all_ok = false
 	print("\nALL ROUNDS: %s" % ("OK" if all_ok else "FAIL"))
 	quit(0 if all_ok else 1)
+
+
+# The tour: a second course starts with the bag carried from the first,
+# a Form deck built from it, and a tighter allowance.
+func _check_tour() -> bool:
+	GameSetup.start_tour()
+	GameSetup.tour_leg = 1
+	var kept: Array = TestBags.loadout(0).slice(0, 5)
+	kept[0]["level"] = 1
+	GameSetup.tour_bag = kept
+	GameSetup.tour_brands = ["titanist", "callowell", "pingwell", "nimbus"]
+	var main = load("res://scenes/Main.tscn").instantiate()
+	get_root().add_child(main)
+	if main.players.is_empty():
+		main.player_count = 1
+		Course.use_shipped(main.TOUR[1])
+		main.build_ui()
+		main.init_game()
+		main._apply_tour_carry()
+		main.start_hole()
+	var problems: Array = []
+	if main.hand.size() != kept.size() or int(main.hand.filter(func(c): return c.name == kept[0].name)[0].get("level", 0)) != 1:
+		problems.append("the bag did not travel (%d clubs)" % main.hand.size())
+	if main.strokes_allowance() != main.STROKES_IN_HAND - main.TOUR_TIGHTEN:
+		problems.append("the second course allows %d strokes in hand" % main.strokes_allowance())
+	var owned := 0
+	for c in main.form_deck.deck:
+		owned += 1 if c.owner != "" else 0
+	if owned == 0:
+		problems.append("the Form deck was not built from the bag")
+	if main.club_deck.any(func(c): return main.hand.any(func(h): return h.name == c.name)):
+		problems.append("the draft pool offers a club already in the bag")
+	if Course.active_name == Course.BUILTIN_NAME:
+		problems.append("the second course is still %s" % Course.active_name)
+	print("tour carry -> %s" % ("OK" if problems.is_empty() else "FAIL: " + "; ".join(problems)))
+	main.free()
+	GameSetup.reset_to_local(1)
+	Course.use_builtin()
+	return problems.is_empty()
 
 
 func _counts_from_env() -> Array:

@@ -85,6 +85,17 @@ var draft_stop: String = ""
 var draft_boosts: Array = []
 var draft_tape: Array = []
 
+# Shots that work with the swings around them (FormCard.tempo / pocket):
+# extra cards owed to the next Form draw, and the card waiting to join it.
+var tempo: int = 0
+var pocket: Array = []                 # Array[FormCard], one at most
+
+# This hole's putting, for the putter's wear (ClubAbilities, "The putter"):
+# the strokes taken when the green was reached (-1 before it is), and how
+# long the first putt was.
+var putt_from: int = -1
+var putt_first: float = 0.0
+
 # Strokes in hand won and lost at the hut, on top of the round's allowance
 # (Main.strokes_in_hand).
 var hand_bonus: int = 0
@@ -143,6 +154,8 @@ func start_hole(tee_pos: Vector2) -> void:
 	aim_target = tee_pos
 	holed_out = false
 	yips_pending = false
+	putt_from = -1
+	putt_first = 0.0
 	putt_dist = 0.0
 	putt_dir = Vector2(0, 1)
 	pending_club = {}

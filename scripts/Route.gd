@@ -48,11 +48,12 @@ const EVENTS := {
 	"cart": {"title": "The drinks cart", "take": "Have one", "keeps": true,
 		"text": "Two strokes in hand. A Top joins your wood form."},
 	"hustler": {"title": "The hustler", "take": "Play him", "keeps": true,
-		"text": "Double or quits on the practice green. Win, and it is three strokes in hand. Lose, and it is two gone."},
+		"text": "One putt on the practice green, from five yards, on the real meter. Hole it and it is three strokes in hand. Miss and it is two gone."},
 }
 const CART_STROKES := 2
 const HUSTLER_WIN := 3
 const HUSTLER_LOSS := 2
+const HUSTLER_YARDS := 5.0
 
 
 static func _rng(round_seed: int, hole_n: int, what: String) -> RandomNumberGenerator:

@@ -33,6 +33,16 @@ const FORM_DECAY_CHANCE := 1.0 / 3.0
 # instead of only ever cleaner.
 const ROUGH_DECAY_CHANCE := 1.0 / 5.0
 
+# The most a hole can cost: this many times its par, and the ball is
+# picked up. A hole can otherwise be unfinishable (an island green found
+# from the same spot every time).
+const MAX_PAR_MULT := 3
+
+
+static func hole_cap(par: int) -> int:
+	return par * MAX_PAR_MULT
+
+
 # A range session (skipping an end-of-hole draft) purges this many bad
 # cards from the Form deck.
 const RANGE_SESSION_PURGE := 2
@@ -166,13 +176,14 @@ static func draw_bonus(bag: Array, club: Dictionary, lie: String) -> int:
 #   from_lie — true when the lie (not the tier) forced the bad card
 #   had_forced_card — true when a bad card was created for the shot
 static func draw_form(deck: FormDeck, bag: Array, club: Dictionary,
-		distance: float, lie: String, armed: Dictionary = {}, created: Array = []) -> Dictionary:
+		distance: float, lie: String, armed: Dictionary = {}, created: Array = [],
+		extra: int = 0) -> Dictionary:
 	var tier := swing_tier(bag, club, distance, armed)
 	var lie_forced := lie_forces_card(bag, lie)
 	# Dealt from the family of the club in hand, and from no other
 	# (Section 4 "Form by club family").
 	var result := deck.draw_for_shot(tier, lie_forced,
-		draw_bonus(bag, club, lie), Brands.drops_worst_draw(bag), FormCard.family_of(club),
+		draw_bonus(bag, club, lie) + extra, Brands.drops_worst_draw(bag), FormCard.family_of(club),
 		str(club.get("name", "")))
 	result["tier"] = tier
 	result["from_lie"] = lie_forced and tier != Tier.EXTREME_FINESSE

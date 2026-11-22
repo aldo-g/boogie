@@ -113,6 +113,18 @@ const STROKES_IN_HAND := 10
 var for_keeps: bool = true
 var _run_over: bool = false
 
+# --- The tour (Section 3G) -----------------------------------------------
+# The four courses as one run, alone and for keeps (GameSetup.tour). After
+# each course TOUR_KEEP clubs travel to the next, with everything they have
+# gained, and each course allows TOUR_TIGHTEN fewer strokes in hand.
+const TOUR := [Course.BUILTIN_ID, "windlestraw-links", "mirage-mesa", "thin-air-ridge"]
+const TOUR_KEEP := 6
+const TOUR_TIGHTEN := 2
+const MAIN_SCENE := "res://scenes/Main.tscn"
+
+# The putt being played is the hustler's, at the hut (Route.EVENTS).
+var _hustle: bool = false
+
 # Online, everyone drafts at once instead: each machine shows its own
 # player's draft, and the next hole starts when the last pick is in. Each
 # player's progress is Player.draft_stage. Shared round state — every
@@ -314,6 +326,8 @@ func _ready() -> void:
 	online = GameSetup.online
 	my_seat = clampi(GameSetup.my_seat, 0, player_count - 1) if online else 0
 	cpu_seats = {} if online else GameSetup.cpu_seats.duplicate()
+	if GameSetup.tour:
+		Course.use_shipped(TOUR[clampi(GameSetup.tour_leg, 0, TOUR.size() - 1)])
 	build_ui()
 
 	if online and not GameSetup.round_payload.is_empty():
@@ -324,6 +338,7 @@ func _ready() -> void:
 		apply_seat_names(GameSetup.seat_names)
 	else:
 		init_game()
+		_apply_tour_carry()
 		if online:
 			apply_seat_names(GameSetup.seat_names)
 
@@ -837,6 +852,7 @@ func init_game() -> void:
 	# A shot being planned reads the players about to be replaced.
 	_cpu_reset()
 	_run_over = false
+	_hustle = false
 	players = []
 	_bots = {}
 	for i in range(player_count):
@@ -1253,8 +1269,16 @@ func begin_form_draw() -> void:
 	# brings to its own draw.
 	var created: Array = me.created_next + ClubAbilities.draw_extras(pending_club, current_lie)
 	me.created_next = []
+	# Tempo: the last card played owes this draw a card. Pocket: the card
+	# that waited joins the hand, and a hand with it in is never forced.
 	var result := ShotRules.draw_form(form_deck, hand, pending_club,
-		ball_pos.distance_to(aim_target), lie, me.armed, created)
+		ball_pos.distance_to(aim_target), lie, me.armed, created, me.tempo)
+	me.tempo = 0
+	if not me.pocket.is_empty():
+		me.pocket[0].waited = true
+		result.cards.append_array(me.pocket)
+		result.forced = false
+		me.pocket = []
 	var tier: int = result.tier
 	current_form_options = result.cards
 	current_form_forced = result.forced
@@ -1334,12 +1358,16 @@ func _deal_offers(count: int, taken: Dictionary) -> Array:
 			break
 		out.append(card)
 		# Now and then a club on the rack is second-hand: worn in already,
-		# and carrying a curse (ClubAbilities.SECOND_HAND_CHANCE).
-		if ClubAbilities.grows(card) and ClubAbilities.curse(card) == "" \
+		# and carrying a curse (ClubAbilities.SECOND_HAND_CHANCE). A putter's
+		# is its own: worn in a level, and twitchy.
+		if ClubAbilities.curse(card) == "" \
 				and _roll("second_hand", func(): return randf()) < ClubAbilities.SECOND_HAND_CHANCE:
 			var curses: Array = ClubAbilities.CURSES.keys()
-			card["curse"] = _roll("curse", func(): return curses[randi_range(0, curses.size() - 1)])
+			var rolled: String = _roll("curse", func(): return curses[randi_range(0, curses.size() - 1)])
+			card["curse"] = "twitchy" if ClubAbilities.is_putter(card) else rolled
 			card["marks"] = maxi(int(card.get("marks", 0)), ClubAbilities.WEAR_MARKS)
+			if ClubAbilities.is_putter(card):
+				card["level"] = maxi(int(card.get("level", 0)), 1)
 		# Also exclude this hole's other options from the remaining draws,
 		# so the offers can't repeat a name amongst themselves either.
 		taken[card.name] = true
@@ -1792,8 +1820,11 @@ func on_boost(boost: String, index: int, tape: int = 0) -> void:
 		if cursed == "hosel_rocket":
 			form_deck.remove_card("Shank", FormCard.family_of(club), str(club.name))
 		club.erase("curse")
+		if _can_stamp():
+			hole_banner.stamp("MENDED", _club_kicker(club), "%s no more" % ClubAbilities.curse_info(cursed).name,
+				HoleBanner.Tone.GOOD)
 		log_msg("[color=#%s]%s — spent mending %s's %s.[/color]" % [COLOR_ACCENT.to_html(false), what,
-			club.name, str(ClubAbilities.CURSES[cursed].name).to_lower()])
+			club.name, str(ClubAbilities.curse_info(cursed).name).to_lower()])
 	else:
 		_apply_gain(club, boost, str(me.draft_tape[tape]) if boost == "lead_tape" else "")
 		log_msg("[color=#%s]%s for %s. %s.[/color]" % [COLOR_ACCENT.to_html(false),
@@ -1818,7 +1849,7 @@ func on_event() -> void:
 				found["curse"] = _roll("curse", func(): return curses[randi_range(0, curses.size() - 1)])
 				found["marks"] = maxi(int(found.get("marks", 0)), ClubAbilities.WEAR_MARKS)
 				log_msg("[color=#%s]Out of the gorse: %s, with a %s.[/color]" % [COLOR_ACCENT.to_html(false),
-					found.name, str(ClubAbilities.CURSES[found.curse].name).to_lower()])
+					found.name, str(ClubAbilities.curse_info(str(found.curse)).name).to_lower()])
 				if hand.size() >= HAND_CAP:
 					pending_new_card = found
 					state = State.DISCARD_FOR_DRAFT
@@ -1846,16 +1877,30 @@ func on_event() -> void:
 			log_msg("[color=#%s]The drinks cart: %d strokes in hand, and a Top in your wood form.[/color]" % [
 				COLOR_ACCENT.to_html(false), Route.CART_STROKES])
 		"hustler":
-			var won: bool = _roll("hustler", func(): return randf()) < 0.5
-			me.hand_bonus += Route.HUSTLER_WIN if won else -Route.HUSTLER_LOSS
-			log_msg("[color=#%s]The hustler: %s.[/color]" % [
-				(COLOR_ACCENT if won else COLOR_FLAG).to_html(false),
-				"you took him — %d strokes in hand" % Route.HUSTLER_WIN if won \
-					else "he took you — %d strokes gone" % Route.HUSTLER_LOSS])
-			if _can_stamp():
-				hole_banner.stamp("TOOK HIM" if won else "HUSTLED", "The practice green",
-					"%+d strokes in hand" % (Route.HUSTLER_WIN if won else -Route.HUSTLER_LOSS),
-					HoleBanner.Tone.GOOD if won else HoleBanner.Tone.BAD)
+			# Settled on the putt meter (on_putt_stopped): one putt, holed or not.
+			_hustle = true
+			putt_dist = Route.HUSTLER_YARDS
+			state = State.PUTTING
+			log_msg("[color=#%s]The hustler: one putt from %s. Hole it.[/color]" % [
+				COLOR_ACCENT.to_html(false), putt_distance_text()])
+			refresh_ui()
+			return
+	begin_next_draft()
+	refresh_ui()
+
+
+# The hustler's putt is in (or not): pay up either way, and walk on.
+func _settle_hustle(won: bool) -> void:
+	_hustle = false
+	state = State.DRAFT
+	var paid: int = Route.HUSTLER_WIN if won else -Route.HUSTLER_LOSS
+	me.hand_bonus += paid
+	log_msg("[color=#%s]The hustler: %s.[/color]" % [(COLOR_ACCENT if won else COLOR_FLAG).to_html(false),
+		"you took him — %d strokes in hand" % paid if won else "he took you — %d strokes gone" % -paid])
+	Sound.play("ui_confirm" if won else "ui_error")
+	if _can_stamp():
+		hole_banner.stamp("TOOK HIM" if won else "HUSTLED", "The practice green",
+			"%+d strokes in hand" % paid, HoleBanner.Tone.GOOD if won else HoleBanner.Tone.BAD)
 	begin_next_draft()
 	refresh_ui()
 
@@ -1896,7 +1941,116 @@ func plays_for_keeps() -> bool:
 
 
 func strokes_in_hand() -> int:
-	return STROKES_IN_HAND + me.hand_bonus - me.score_diff()
+	return strokes_allowance() + me.hand_bonus - me.score_diff()
+
+
+# What a round starts with: fewer on each course of a tour.
+func strokes_allowance() -> int:
+	return STROKES_IN_HAND - (TOUR_TIGHTEN * GameSetup.tour_leg if on_tour() else 0)
+
+
+# --- The tour (Section 3G) -----------------------------------------------
+
+func on_tour() -> bool:
+	return GameSetup.tour and plays_for_keeps()
+
+
+# True at the end of a tour course with another still to play.
+func tour_continues() -> bool:
+	return on_tour() and state == State.DONE and not _run_over and GameSetup.tour_leg < TOUR.size() - 1
+
+
+func tour_course_name(leg: int) -> String:
+	if leg <= 0:
+		return Course.BUILTIN_NAME
+	return str(CourseLibrary.course(TOUR[leg]).get("name", TOUR[leg]))
+
+
+# "3 of 4 played: 221 strokes, 8 over par" — the courses behind, and this
+# one once it is finished.
+func tour_total_text() -> String:
+	var total := 0
+	var par := 0
+	for r in GameSetup.tour_results:
+		total += int(r.strokes)
+		par += int(r.par)
+	var played: int = GameSetup.tour_results.size()
+	if state == State.DONE:
+		total += me.total_strokes()
+		par += me.total_par()
+		played += 1
+	return "%d of %d played: %d strokes, %s" % [played, TOUR.size(), total, score_diff_text(total - par)]
+
+
+# The bag a tour carries into this course: the clubs kept from the last,
+# the same makers in a fresh draft pool, and a Form deck built from the bag.
+func _apply_tour_carry() -> void:
+	if not GameSetup.tour or GameSetup.tour_leg <= 0 or GameSetup.tour_bag.is_empty():
+		return
+	var p: Player = players[0]
+	p.hand = GameSetup.tour_bag.duplicate(true)
+	ClubRoster.sort_bag(p.hand)
+	p.live_brands = GameSetup.tour_brands.duplicate()
+	var pool: Array = ClubRoster.build_pool(p.live_brands).filter(
+		func(c): return not p.hand.any(func(h): return h.name == c.name))
+	pool.shuffle()
+	p.club_deck = pool
+	p.club_discard = []
+	p.form_deck = FormDeck.new()
+	for club in p.hand:
+		p.form_deck.bring(club)
+
+
+# Leaves a club behind while packing for the next course.
+func _on_pack_leave(index: int) -> void:
+	if not tour_continues() or not _valid_index(index, hand) or hand.size() <= TOUR_KEEP:
+		return
+	Sound.play("card_discard")
+	remove_club(index)
+	refresh_ui()
+
+
+# On to the next course, with the bag as packed.
+func _on_tour_next() -> void:
+	if not tour_continues() or hand.size() > TOUR_KEEP:
+		return
+	Sound.play("ui_confirm")
+	GameSetup.tour_results.append({"course": Course.active_name,
+		"strokes": me.total_strokes(), "par": me.total_par()})
+	GameSetup.tour_leg += 1
+	GameSetup.tour_bag = hand.duplicate(true)
+	GameSetup.tour_brands = live_brands.duplicate()
+	get_tree().change_scene_to_file(MAIN_SCENE)
+
+
+# The bag, laid out to choose what stays behind: each tile with what
+# leaving it would cost. The last putter always travels.
+func build_pack_row() -> void:
+	var putters: int = hand.filter(func(c): return ClubAbilities.is_putter(c)).size()
+	var width := bag_card_width(hand.size())
+	for i in range(hand.size()):
+		var club: Dictionary = hand[i]
+		var stays: bool = ClubAbilities.is_putter(club) and putters <= 1
+		var cv := make_card_view(club, not stays, true, width, 116.0, false)
+		if stays:
+			cv.set_dimmed(true)
+		else:
+			cv.picked.connect(func(_cv): _on_pack_leave(i))
+		options_container.add_child(card_with_cost(cv,
+			[{"text": "Your only putter travels", "strong": false}] if stays else DraftAdvisor.losses(hand, club)))
+
+
+# What the bag became over the round, in a line.
+func bag_summary() -> String:
+	var levels := 0
+	var boosts := 0
+	var cursed := 0
+	for c in hand:
+		levels += int(c.get("level", 0))
+		boosts += (c.get("boosts", []) as Array).size()
+		cursed += 1 if ClubAbilities.curse(c) != "" else 0
+	return "The bag: %d clubs, %d level%s worn in, %d boost%s, %d cursed." % [hand.size(),
+		levels, "" if levels == 1 else "s", boosts, "" if boosts == 1 else "s", cursed]
 
 
 # What the bag has earned: each brand's set tier, and the Staff clubs awake.
@@ -2176,8 +2330,21 @@ func on_form_pick(index: int) -> void:
 		_reject("form pick", "no club selected for this shot")
 		return
 	var card: FormCard = current_form_options[index]
-	form_deck.return_unpicked(current_form_options, index)
+	# A Pocket card passed over waits for the next swing, one at a time
+	# and once only; the rest of the hand goes to the discard pile.
+	var rest: Array = current_form_options.duplicate()
+	rest.remove_at(index)
+	for c in rest:
+		if c.pocket and not c.created and not c.waited and me.pocket.is_empty():
+			me.pocket = [c]
+	for c in current_form_options:
+		c.waited = false
+	if not me.pocket.is_empty():
+		rest.erase(me.pocket[0])
+	form_deck.return_unpicked(rest, -1)
 	_file_played_card(pending_club, card)
+	if card.tempo:
+		me.tempo = 1
 	current_form_options = []
 	current_form_forced = false
 	Sound.play("card_place")
@@ -2413,6 +2580,8 @@ func maybe_add_bad_card_to_form_deck(lie_result: String, chance: float, family: 
 # on the hole. In multiplayer the turn now passes to whoever is furthest
 # from the pin, which may well be this same player again.
 func advance_after_shot() -> void:
+	if _pick_up():
+		return
 	# Hand over to whoever is now furthest from the pin. In a solo round
 	# this is always the same player; in a group round it can also land
 	# back on the player who just played, if they are still furthest out.
@@ -2439,6 +2608,9 @@ func advance_after_shot() -> void:
 func start_putting() -> void:
 	state = State.PUTTING
 	putt_dist = ball_pos.distance_to(hole.pin_pos)
+	if me.putt_from < 0:
+		me.putt_from = strokes
+		me.putt_first = putt_dist
 	_putt_dir = (ball_pos - hole.pin_pos).normalized()
 	if _putt_dir == Vector2.ZERO:
 		_putt_dir = Vector2(0, 1)
@@ -2479,6 +2651,11 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 	# would throw the ball to a nonsense spot rather than crash. Clamp it
 	# to the 0..1 the meter is documented to emit.
 	accuracy = clampf(accuracy, 0.0, 1.0)
+
+	# The hustler's putt at the hut is no stroke: it only settles the bet.
+	if _hustle:
+		_settle_hustle(result == "sunk")
+		return
 
 	# The Titanist Blade Putter: a putt that stays out is taken again, no
 	# stroke added. Covers a Yips-tainted putt too — that's the mulligan.
@@ -2555,6 +2732,8 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 # it also stops one player sinking a long sequence of putts while the
 # others sit watching.
 func continue_after_putt() -> void:
+	if _pick_up():
+		return
 	if is_multiplayer() and not advance_turn():
 		begin_end_of_hole()
 		return
@@ -3025,7 +3204,53 @@ func _on_header_restart_pressed() -> void:
 # in, so this hands over rather than going straight to the draft.
 # `holed_from` is the distance in yards when the ball went in from off the
 # green (the d20 came up 20), or -1 when it was putted in.
+# A hole costs triple par at most (ShotRules.hole_cap): once there, the
+# ball is picked up and the hole is scored at the cap.
+func _pick_up() -> bool:
+	if strokes < ShotRules.hole_cap(hole_par):
+		return false
+	log_msg("[color=#%s]Picked up at %d — the most a par %d can cost.[/color]" % [
+		COLOR_FLAG.to_html(false), ShotRules.hole_cap(hole_par), hole_par])
+	finish_hole()
+	return true
+
+
+# What the hole did to the putter (ClubAbilities, "The putter"): a putt
+# holed in one from distance is a mark, and a level widens the meter's
+# bands at once; three putts can leave it twitchy.
+func _putter_after_hole() -> void:
+	if me.putt_from < 0:
+		return
+	var putter := {}
+	for c in hand:
+		if ClubAbilities.is_putter(c) and putter.is_empty():
+			putter = c
+	if putter.is_empty():
+		return
+	var putts: int = strokes - me.putt_from
+	if putts == 1 and me.putt_first >= ClubAbilities.PUTT_MARK_YARDS:
+		putter["marks"] = int(putter.get("marks", 0)) + 1
+		var level: int = mini(ClubAbilities.MAX_LEVEL, int(putter.marks) / ClubAbilities.WEAR_MARKS)
+		if level > int(putter.get("level", 0)):
+			putter["level"] = level
+			log_msg("[color=#%s][b]%s is worn in.[/b] The putt meter's bands are wider.[/color]" % [
+				COLOR_ACCENT.to_html(false), putter.name])
+			if _can_stamp():
+				hole_banner.stamp("WORN IN", _club_kicker(putter), "The putt meter's bands are wider",
+					HoleBanner.Tone.GOOD)
+	elif putts >= ClubAbilities.TWITCHY_PUTTS and ClubAbilities.curse(putter) == "" \
+			and _roll("twitchy", func(): return randf()) < ClubAbilities.CURSE_CHANCE:
+		putter["curse"] = "twitchy"
+		var what := ClubAbilities.curse_info("twitchy")
+		log_msg("[color=#%s][b]%s: twitchy.[/b] %s, until a regrip mends it.[/color]" % [
+			COLOR_FLAG.to_html(false), putter.name, what.does])
+		if _can_stamp():
+			hole_banner.stamp("TWITCHY", _club_kicker(putter), "%d putts. %s" % [putts, what.does],
+				HoleBanner.Tone.BAD)
+
+
 func finish_hole(holed_from: int = -1) -> void:
+	strokes = mini(strokes, ShotRules.hole_cap(hole_par))
 	var diff := strokes - hole_par
 	me.holed_out = true
 	_after_putt_drops(func(): Sound.jingle(diff))
@@ -3038,6 +3263,7 @@ func finish_hole(holed_from: int = -1) -> void:
 			log_msg("[color=#%s]Your best on this hole — beats %d.[/color]" % [COLOR_ACCENT.to_html(false), prev_best])
 	var streak := under_par_streak(me)
 	show_hole_banner(diff, holed_from, streak)
+	_putter_after_hole()
 	if is_cpu_seat(active_index):
 		caddy_says("rival_holed", {"diff": diff, "rival": me.name}, true)
 	elif me.call_result != "" and holed_from < 0:
@@ -3378,6 +3604,12 @@ func _on_header_menu_pressed() -> void:
 
 
 func restart_round() -> void:
+	# A tour starts again from its first course, which is another scene's
+	# worth of setup (the course, the scorecard).
+	if GameSetup.tour:
+		GameSetup.start_tour()
+		get_tree().change_scene_to_file(MAIN_SCENE)
+		return
 	current_hole_index = 1
 	_restart_armed = false
 	_show_restart_armed(false)
@@ -3695,6 +3927,11 @@ func refresh_ui() -> void:
 			step_hint = "On the green — stop the marker in the band"
 			hand_label.text = "Putting  ·  %s" % putt_distance_text()
 			options_label.text = "The further out you are, the tighter the band."
+			if _hustle:
+				step_hint = "The hustler — one putt, holed or not"
+				hand_label.text = "The hustler  ·  %s" % putt_distance_text()
+				options_label.text = "Hole it for %d strokes in hand. Anything else costs %d. It is no stroke on the card." % [
+					Route.HUSTLER_WIN, Route.HUSTLER_LOSS]
 			build_putt_controls()
 			build_form_placeholders("No Form draw on the green — a putt is a timing check.")
 
@@ -3708,17 +3945,40 @@ func refresh_ui() -> void:
 			step_num = "·"
 			step_hint = "Out of strokes in hand" if _run_over else "Round complete"
 			hand_label.text = "Out of strokes" if _run_over else "Round complete"
-			options_label.text = "%d strokes (%s)." % [total_strokes, score_diff_text(diff)]
+			options_label.text = "%d strokes (%s). %s" % [total_strokes, score_diff_text(diff), bag_summary()]
 			if _run_over:
-				options_label.text = "The round ended after %d holes, %s. You had %d strokes in hand to spend." % [
-					round_scores.size(), score_diff_text(diff), STROKES_IN_HAND + me.hand_bonus]
+				options_label.text = "The round ended after %d holes, %s. You had %d strokes in hand to spend. %s" % [
+					round_scores.size(), score_diff_text(diff), strokes_allowance() + me.hand_bonus, bag_summary()]
+			if on_tour():
+				options_label.text = "The tour, %s. %s" % [tour_total_text(), options_label.text]
 			var restart_btn := Button.new()
 			restart_btn.text = "Play another round"
 			restart_btn.custom_minimum_size = Vector2(220, 52)
 			restart_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			BogeyUI.style_button(restart_btn, true, 15)
 			restart_btn.pressed.connect(restart_round)
-			options_container.add_child(restart_btn)
+			if tour_continues():
+				# Pack for the next course: the bag down to what travels, then on.
+				var next_course := tour_course_name(GameSetup.tour_leg + 1)
+				var over: int = hand.size() - TOUR_KEEP
+				step_hint = "Next on the tour: %s" % next_course
+				if over > 0:
+					hand_label.text = "Pack for %s: leave %d behind" % [next_course, over]
+					options_label.text = "The tour, %s. %d clubs travel, with everything they have gained. Tap a club to leave it behind." % [
+						tour_total_text(), TOUR_KEEP]
+					restart_btn.free()
+					build_pack_row()
+				else:
+					hand_label.text = "Packed for %s" % next_course
+					restart_btn.text = "Tee off at %s" % next_course
+					restart_btn.pressed.disconnect(restart_round)
+					restart_btn.pressed.connect(_on_tour_next)
+					options_container.add_child(restart_btn)
+			else:
+				if on_tour():
+					hand_label.text = "The tour is over" if _run_over else "Tour complete"
+					restart_btn.text = "Start the tour again"
+				options_container.add_child(restart_btn)
 			build_form_placeholders("")
 
 	if cpu:
@@ -3766,6 +4026,15 @@ func build_form_placeholders(note: String) -> void:
 			int(pile.good), int(pile.bad), "you keep one" if count > 1 else "no choice"]
 		form_hint.visible = true
 		form_container.add_child(make_form_placeholder(count))
+
+	# What the last swing left for the next one.
+	var owed := PackedStringArray()
+	if not me.pocket.is_empty():
+		owed.append("In your pocket: %s. It joins your next hand." % me.pocket[0].key())
+	if me.tempo > 0:
+		owed.append("Tempo: your next swing is dealt one more card.")
+	if not owed.is_empty() and state != State.PUTTING and state != State.DONE:
+		form_container.add_child(BogeyUI.body("\n".join(owed), 12, BogeyTheme.FAIRWAY_DEEP))
 
 	# Between draws the column shows what the next one will be dealt from.
 	_family_rows = {}
@@ -4064,7 +4333,7 @@ func build_boost_row() -> void:
 			var cursed := ClubAbilities.curse(club)
 			note = str(ClubAbilities.BOOSTS[boost].does)
 			if cursed != "":
-				note = "Mends its %s" % str(ClubAbilities.CURSES[cursed].name).to_lower()
+				note = "Mends its %s" % str(ClubAbilities.curse_info(cursed).name).to_lower()
 			elif boost == "lead_tape":
 				note = "Adds a %s to its shots" % str(me.draft_tape[_tape_pick])
 		else:
@@ -4231,6 +4500,9 @@ func rebuild_shot_outlook() -> void:
 			BogeyTheme.FLAG if left <= 3 else BogeyTheme.INK)
 		keeps_row.tooltip_text = "Strokes in hand. Every stroke over par spends one, every stroke under gives one back.\nWith none left after a hole, the round is over."
 		specs.add_child(keeps_row)
+		if on_tour():
+			specs.add_child(BogeyUI.hairline(0.07))
+			specs.add_child(BogeyUI.spec_row("Tour", "%d of %d" % [GameSetup.tour_leg + 1, TOUR.size()]))
 	var hole_best := Records.hole_best(current_hole_index)
 	if hole_best > 0:
 		specs.add_child(BogeyUI.hairline(0.07))
@@ -4854,6 +5126,8 @@ func snapshot_decks() -> Dictionary:
 			"draft_taken": p.draft_taken,
 			"draft_digs": p.draft_digs,
 			"draft_traded": p.draft_traded,
+			"tempo": p.tempo,
+			"pocket": form_card_names(p.pocket),
 			"draft_stop": p.draft_stop,
 			"draft_boosts": p.draft_boosts.duplicate(),
 			"draft_tape": p.draft_tape.duplicate(),
@@ -4888,6 +5162,8 @@ func apply_deck_snapshot(decks: Dictionary) -> void:
 		p.draft_taken = int(e.get("draft_taken", 0))
 		p.draft_digs = int(e.get("draft_digs", 0))
 		p.draft_traded = bool(e.get("draft_traded", false))
+		p.tempo = int(e.get("tempo", 0))
+		p.pocket = form_cards_from_names(e.get("pocket", []))
 		p.draft_stop = str(e.get("draft_stop", ""))
 		p.draft_boosts = (e.get("draft_boosts", []) as Array).duplicate()
 		p.draft_tape = (e.get("draft_tape", []) as Array).duplicate()

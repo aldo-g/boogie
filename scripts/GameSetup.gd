@@ -43,10 +43,32 @@ static var round_payload: Dictionary = {}
 static var return_to_editor: bool = false
 
 
+# --- The tour (Section 3G) ---------------------------------------------
+# The game's four courses played as one run, alone. `tour_leg` is which
+# course is being played (an index into Main.TOUR); the rest is what is
+# carried from one course to the next: the clubs kept, the makers in the
+# draft pool, and each course's result so far.
+static var tour: bool = false
+static var tour_leg: int = 0
+static var tour_bag: Array = []
+static var tour_brands: Array = []
+static var tour_results: Array = []
+
+
+static func start_tour() -> void:
+	reset_to_local(1)
+	tour = true
+
+
 # Back to a plain solo round. Called when entering a local game so a
 # previous online session can't leak settings into it.
 static func reset_to_local(count: int) -> void:
 	player_count = count
+	tour = false
+	tour_leg = 0
+	tour_bag = []
+	tour_brands = []
+	tour_results = []
 	cpu_seats = {}
 	online = false
 	my_seat = 0

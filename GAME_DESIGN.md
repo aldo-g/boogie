@@ -414,6 +414,19 @@ They are the numbers the rules already read (severity, the Mid span, the band, t
 - **A curse lasts until the one boost that mends it is spent on the club, or the club leaves the bag.** Spent that way the boost lifts the curse and does nothing else. (The first cut let any boost mend any curse, and the bot mended nine in ten at the next draft: 0.86 landed a round and 0.09 were left at the end. A curse did not bite.)
 - The card says the curse in claret where it says the club's type, and the hover detail says what it does and what mends it.
 
+### The putter (2026-11-20)
+
+The putter is the most-used club in the bag and was the only one that took no part. It brings no shots, so it grows its own way:
+
+- **A putt holed in one from 15 feet or more leaves a mark** (5 yards). Three marks is a level, two at most, as for any club.
+- **A level needs no choice**: the putt meter's bands are 8% wider for each, at once. The card is stamped WORN IN. (10 feet and 12% at first, which had the bot's putter at its second level by the turn.)
+- **Three putts on a green can leave it twitchy** (one time in two): the meter's bands are a fifth narrower. A second-hand putter on the rack arrives twitchy, and worn in a level.
+- **Regrip mends it**, at a fitting bay, which is the only boost a putter takes.
+
+### What the card shows (2026-11-20)
+
+The bag tile says where a club stands without a hover: the marks toward its next level beside its type ("WOOD 2/3"), what it has gained ("IRON +2"), WORN IN in green while a choice waits, and a curse by name in claret. The end of a round says what the bag became in a line (clubs, levels worn in, boosts, cursed).
+
 ### As built
 
 - The rules are in `ClubAbilities.gd` ("Growth"): `wear_pending`, `wear_choices`, `can_boost`, `curse`, `MENDS`, `MAKER_WEAR`, and the sizes above as constants. `Main.gd` owns the marks and the rolls (`_mark_club`, `maybe_curse_club`) and the actions: `on_wear_in` ("wear") and `on_boost` ("boost"), legal online for any seat still drafting. What a fitting bay would have on its bench is `Player.draft_boosts` (and `draft_tape`), rolled through `_roll()` when the hole ends and sent in `snapshot_decks()`.
@@ -468,7 +481,7 @@ One of these, fixed with the route. Each can be walked on from.
 | **A club in the gorse** | A limited edition joins the bag, already worn in and carrying a curse (the bag full, something is cut for it) |
 | **A stranger's tip** | The club with the most marks has a shot grooved on the spot; a bad card joins that club's family |
 | **The drinks cart** *(a round for keeps only)* | Two strokes in hand; a Top joins the wood pile |
-| **The hustler** *(a round for keeps only)* | A coin toss: three strokes in hand, or two gone |
+| **The hustler** *(a round for keeps only)* | One putt from five yards on the real putt meter, with the putter in the bag as it is: holed, three strokes in hand; anything else, two gone. It is no stroke on the card. (A coin toss until 2026-11-20.) |
 
 ### Strokes in hand
 
@@ -486,6 +499,33 @@ One of these, fixed with the route. Each can be walked on from.
 `Route.gd` (the stops, the hut, the look-ahead; pure functions, loaded by preload), `Main.gd` (`on_stop`, `on_leave_stop`, `on_boost`, `on_event`; `strokes_in_hand`, `plays_for_keeps`), `Player.draft_stop` / `draft_boosts` / `hand_bonus`. Online the four are actions like any other ("stop", "leave", "boost", "event"), legal for any seat still drafting. GreedyBot takes the pro shop unless the other stop is worth more than a club: the fitting bay to mend a curse or once the bag holds eleven, the range once a quarter of the Form deck is bad, the hut once the bag holds eleven (and never the hustler).
 
 **What this is not.** It is a fork a hole with the road ahead in view, not a map of lanes that join and part; an event is a fixed trade and a coin toss, not a played challenge; and there is no money. Those are the next steps if this one earns them.
+
+---
+
+## 3G. The Tour (2026-11-20)
+
+A run was one round: the bag peaked around the 14th and was thrown away on the 18th. **The tour is the game's four courses as one run** — Bogey Links, Windlestraw Links, Mirage Mesa, Thin Air Ridge, in that order — alone and for strokes in hand, from its own button on the title screen.
+
+- **Six clubs travel from each course to the next**, with everything they have gained: wear, boosts, curses, the shots they bring. After the last putt the bag is laid out and the rest are left behind one at a time; the only putter always travels.
+- **The rest starts again**: a fresh Form deck built from the six, a fresh draft pool of the same four makers (so a set can be carried on), and the route and the wind of a new round.
+- **Each course allows two fewer strokes in hand**: ten, eight, six, four. Running out ends the tour where it stands.
+- The end of each course gives the tour's total so far; each course is still a round of its own for the course records.
+
+**Measured (2026-11-20)** — the seven follow-ups together (the tile, the cap, the late wind and pins, the putter, the tour, Tempo and Pocket, the hustler's putt). BotSim as in Section 3E, 96 rounds an arm. The bot does not play the tour or the hustler.
+
+| Arm | Against par | Front nine | Back nine | Cards in a Form hand |
+|---|---|---|---|---|
+| Before them (Section 3E, "as built") | +1.94 ± 0.47 | +2.49 | -0.55 | 2.74 |
+| First cut: a pocketed card waits until played; the putter marks from 10 ft, 12% a level | -0.57 ± 0.43 | +0.84 | -1.42 | 3.34 |
+| As built: a pocketed card waits once; the putter marks from 15 ft, 8% a level | +0.94 ± 0.47 | +1.59 | -0.66 | 3.13 |
+| ...the same with the old late wind and pins | +0.61 ± 0.49 | +1.71 | -1.09 | 3.09 |
+
+- **The game is about a stroke easier again** (1.0 ± 0.7), and 2.2 easier than the game of 2026-11-17. It is the bigger hands: Tempo and Pocket put 0.4 more cards in an average hand, and a bigger hand is what dodges a bad card. If that is too much, the lever is which cards carry the keywords (four do), not their rules.
+- **The livelier late wind and tighter late pins made the back nine 0.4 ± 0.4 harder**, which cannot be told from nothing, and it is still the easy half by more than two strokes. Section 5 said as much on 2026-11-16 ("the lever is the bag's arc, not the weather") and this bears it out. The change is kept because it costs nothing measurable; it is not the answer.
+- **Ten strokes in hand is generous for a good player now**: the mid-skill bot runs out in 4% of rounds (9% before, 16% in the game of 2026-11-17).
+- **The cap is rare in sensible play**: nine holes in 144 rival rounds were picked up.
+
+**As built**: the carry is held in `GameSetup` (`tour`, `tour_leg`, `tour_bag`, `tour_brands`, `tour_results`) and each course is a fresh load of the game scene, so nothing about a round had to learn to change course mid-flight. `Main.gd`: `TOUR`, `TOUR_KEEP`, `TOUR_TIGHTEN`, `_apply_tour_carry`, `build_pack_row`, `strokes_allowance`. MPTest checks that a second course starts with the carried bag, a deck built from it and the tighter allowance. **Not measured**: no bot plays a tour, so six clubs and the 10-8-6-4 allowances are first guesses.
 
 ---
 
@@ -647,6 +687,19 @@ The Form deck could be cleaned (range sessions, In the Zone) and dirtied (hazard
 - **A played card goes to the discard pile like the ones passed over (fixed 2026-11-16).** It never did: only the unpicked cards were returned, so every shot took a card out of the game. A round has about 48 carded shots and the deck had 42 cards, so it ran dry on the back nine — 19.5 cards left at the start of the 10th, 4.8 at the 18th (BotSim, medium bot, 96 rounds) — and an empty deck deals a fallback Pure Strike: the bot played 4.9 of them a round on holes 13-18 against 0.05 on holes 1-6. **Every balance figure in this document measured before this date was measured on that draining deck.** Mending it on its own moved the medium bot from +3.9 to +2.9 against par (±0.7): the free Pure Strikes had been worth less than the damage the thinning deck did before it emptied. Created cards still exhaust.
 - **Range session (decided 2026-10-17)**: at the end of any hole, instead of drafting a club, remove the 2 worst bad cards from your Form deck. It costs bag progress rather than strokes, and it's the way back from a death spiral.
 
+### Tempo and Pocket (2026-11-20)
+
+Cards in a club's pile did nothing to each other: a hand was three separate offers. Two keywords, on cards that were already in the game, make one swing matter to the next.
+
+| Keyword | On | What it does |
+|---|---|---|
+| **Tempo** | Controlled Draw, Controlled Fade | Once played, your next swing is dealt one more card |
+| **Pocket** | Stinger, Punch Out | Passed over, it waits and joins your next swing's hand, whatever the club. One card waits at a time. A hand with it in is never forced, so it is a way out of sand |
+
+- Both are said on the card, and the Form column says what the last swing left for the next ("In your pocket: Stinger").
+- **A card waits once.** Passed over a second time it is discarded like any other. (In the first cut it went back to the pocket until it was played. The bot then had an extra card on most swings, its average hand went from 2.7 cards to 3.3, and with the putter's first numbers the round was 2.5 strokes easier: -0.57 ± 0.43 against par, from +1.94.)
+- `FormCard.tempo` / `pocket`; `Player.tempo` and `Player.pocket`, sent in `snapshot_decks()`. The bot plays them as ordinary cards and does not plan around either.
+
 ### Created cards ("exhaust" resources, not draws)
 
 To stop top-tier good cards (like Pure Strike) from being either "always in the pool, trivializing decisions" or "randomly lucky when drawn," they don't live in the natural Form deck at all. Instead, **club abilities generate them directly into your Form hand**, and once played they **exhaust** — removed from the game entirely, not discarded back into the cycle. This turns them into a genuine resource to manage (save it for the shot that really can't miss) rather than a lucky draw to hope for.
@@ -748,13 +801,15 @@ The simulations (Open Questions, below) said the round got easier as it went: th
 
 1. **The rough costs something** beyond distance — a ball that finishes in it can leave a bad Form card (Section 4, "Form deck composition & hazards").
 2. **Pins move** from round to round (above) — variety rather than difficulty: on its own it changes nothing measurable.
-3. **Conditions build**: the wind gets up and the pins get tucked away, both on the same ramp, both nothing at all for the first five holes.
+3. **Conditions build**: the wind gets up and the pins get tucked away, both on the same ramp, both nothing at all for the first five holes. (Steeper since 2026-11-20: the late lift of the wind 0.26 to 0.45 of the terrain's ceiling, the late pin depth 0.70 to 0.85, the chance of a guarded pin on the last hole 0.7 to 0.9. Measured in Section 3G: 0.4 ± 0.4 strokes on the back nine.)
 
 **Measured** (BotSim, Coley Niblick's settings, 96 rounds a side over the four courses, one tree with each lever switched, on the mended Form deck — Section 4): all three together cost **+2.5 strokes** (standard error 0.6): +1.30 against par under the old rules, +3.75 with them. Split up: the pins and the late build without the rough's card +1.8; the rough's card on top of that +0.7 at 1 in 5 and +0.9 at 1 in 3. So the chance stays at 1 in 5: going to 1 in 3 buys nothing that can be measured in strokes, but it nearly doubles the bad cards a wayward player collects (4.5 a round to 7.5 for the weekend-hacker rival) and has them spending five of eighteen drafts at the range. What the rough's card does show up in is the draft: 3.2 range sessions a round without it, 3.8 with it.
 
 **What it did not do** is make the back nine the hard half. Under the old rules the bot plays the front in +3.0 and the back in -1.7; with all three levers, +4.3 and -0.6. The course is harder all round, by a stroke or so on each nine, but the closing holes are still five strokes easier than the opening ones — that gap is the bag (three Bogey-Mart clubs on the 1st tee, fourteen chosen ones by the 12th), and no amount of wind closes it without becoming a different game. If the back nine is to be the climax, the lever is the bag's arc, not the weather.
 
 **The rivals** on Bogey Links now shoot 85.8, 74.5 and 66.6 (48 rounds each), against 80.2, 72.9 and 65.1 when they were first measured; `Rivals.gd` says +15, +4 and -4 accordingly. The weekend hacker has moved most: a tucked pin beside water punishes a bot that fires at every flag.
+
+**The most a hole can cost (2026-11-20): triple par.** A ball that has taken three times the hole's par in strokes is picked up and the hole is scored at that: 9 on a par 3, 12 on a par 4, 15 on a par 5 (`ShotRules.hole_cap`). In every mode. It ends the hole described next, which random play in the test harness still met about one solo round in fifteen.
 
 **A hole that can't be finished.** An earlier run of these simulations, on the draining deck, found one: on an island green a ball in the water is replayed from where it was struck, and from rough beside the lake into a gale no club carries it — one easy-rival round in 48 took 117 on Bogey Links' 17th and a medium round never ended. It has not recurred in the 670-odd rounds played since the deck was mended (worst hole: 13), but nothing in the rules prevents it, and tucked pins and a livelier wind on the closing holes are the conditions for it. A maximum score per hole (the Rules of Golf's own "Maximum Score" format) would end it; not built, because it is a rule and not a tuning number.
 
@@ -855,9 +910,11 @@ The hole ends only when **every** player is in. Each player's score for the hole
 
 | Rival | | Aim misjudgement (yds per 100, sd) | Putt timing error (sd) | Typical round on Bogey Links |
 |---|---|---|---|---|
-| Dory Mulligan | Weekend hacker | 19 | 225 ms | ~86 (15 over) |
-| Coley Niblick | Club regular | 13 | 185 ms | ~75 (4 over) |
-| Ace Marlin | Scratch golfer | 8 | 150 ms | ~67 (4 under) |
+| Dory Mulligan | Weekend hacker | 19 | 225 ms | ~88 (17 over) |
+| Coley Niblick | Club regular | 13 | 185 ms | ~74 (3 over) |
+| Ace Marlin | Scratch golfer | 8 | 150 ms | ~66 (5 under) |
+
+(Re-measured 2026-11-22, 48 rounds each, after the holes were bent — Section 8: 87.9, 74.2 and 66.2. On 2026-11-20 they were 83.6, 72.7 and 64.4. They were ~86, ~75 and ~67 until then; clubs that grow and bigger Form hands have made every golfer two to three strokes better.)
 
 Measured with BotSim, 48 rounds each, late on 2026-11-16 — after the course began to push back (Section 5) and the Form deck was mended (Section 4); before both they were ~80, ~73 and ~65. With no misjudgement at all the same bot shot ~58 then (not re-measured since), which is the ceiling; that bot is not offered as a rival because nobody would enjoy losing to it.
 
@@ -891,6 +948,7 @@ Deck shuffles are deliberately **not** made deterministic. Doing so would need e
 
 - **Base game**: 1 full 18-hole course with a fixed, designed layout (yardages and hazard placement fixed), plus the base hazard/bad-card set and the shared club deck (standards + limited editions).
 - **Custom courses (built 2026-10-16)**: an in-game course editor builds courses of 1-18 holes in the same format the base course uses — fairway centreline, green, bunkers, water, elevation and green tilt — and saves them as JSON. Any course can be picked for solo, hot-seat or online play; the host's course travels in the round payload and is sanitised on arrival. Shorter courses simply mean fewer holes and fewer drafts, so the Bag never fills: brand sets are much harder to complete on a 3- or 9-hole course, which is fine for quick games but is not the balance the design targets.
+- **Bent holes, and the course on one sheet (2026-11-22)**: the title screen now draws the chosen course whole — every hole routed tee to green on one piece of ground (`CoursePlan.gd`; the routing is invented when the course is shown, since a course file says nothing about where its holes lie). Seen whole, the four courses were 72 near-straight strips, so every par 4 and par 5 was given a shaped line: a dogleg, a bow out and back, or a double bend, 25-90 yards at the most. Each point of a hole moved sideways by an amount that depends only on how far out it is, so lengths, widths, hazards and elevations are where they were along the hole; the par 3s are untouched. It is not free: a bend's inside corner is out of bounds (Section 5). Measured with BotSim on the same seeds before and after, at Coley Niblick's settings: Bogey Links +1.6 strokes (se 0.7, 48 rounds), Windlestraw Links -2.1 (1.3, 24 rounds), Mirage Mesa +1.0 (1.2), Thin Air Ridge +1.8 (1.0); on Bogey Links the weekend hacker lost 4.2 (1.2) and the scratch golfer 1.9 (0.7). The rivals' typical scores were moved to match. Records are kept, as they are whenever a hole is reshaped.
 - **More courses, and terrain (built 2026-11-16)**: three more fixed 18-hole courses ship alongside the base course, each on its own **course terrain**. Terrain is a property of the course, not of a lie — the lies in Section 5 are the same game everywhere — and it does exactly two things to play, both known before the swing:
 
   | Terrain | Run-out after landing | Wind draw | Course |
@@ -947,6 +1005,7 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 14. ~~**Deepen the draft**~~ **Done** (2026-11-17) — ten clubs a maker with two Staff clubs each, twelve limited editions, signature shots that clubs bring to the Form deck, and three ways to hunt for a club: call the hole, dig, trade in. See Sections 3C, 3D and 4.
 15. ~~**Grow the clubs**~~ **Done** (2026-11-19) — every club brings its shots to a deck that starts at 25 cards and is dealt them alone, clubs wear in with use (a maker's club into its maker's gain), boosts at the fitting bay, and curses from water, out of bounds and second-hand clubs, each mended by one boost. See Sections 3E and 4.
 16. ~~**The way round**~~ **Done** (2026-11-19) — a fork after every hole (pro shop, or a fitting bay, the range or the hut), four things that can happen at the hut, a solo round played for ten strokes in hand, and trouble that bites harder late. See Section 3F.
+17. ~~**Seven follow-ups**~~ **Done** (2026-11-20) — growth shown on the bag tile, a hole capped at triple par, a livelier late wind and tighter late pins, the putter wearing in and going twitchy, the tour of four courses, Tempo and Pocket cards, and the hustler settled by a real putt. See Sections 3E, 3F, 3G, 4 and 5.
 
 ---
 

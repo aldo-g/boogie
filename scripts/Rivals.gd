@@ -21,7 +21,14 @@ extends RefCounted
 # that figure has not been re-measured.
 # Re-measured 2026-11-17 with the deeper draft (Staff clubs, signature
 # shots, calling, digging and trading in): 85.8 over 48 rounds, 74.5 and
-# 66.9 over 72 each — unchanged, so `typical` stands.
+# 66.9 over 72 each — unchanged, so `typical` stood.
+# Re-measured 2026-11-20 (48 rounds each, seeds 201-248) after clubs
+# began to bring their shots, wear in and be boosted, the route, and the
+# Tempo and Pocket cards: 83.6, 72.7 and 64.4, so +13, +2 and -7.
+# Re-measured 2026-11-22 (same 48 seeds) after the holes were bent into
+# doglegs and curves: 87.9, 74.2 and 66.2, so +17, +3 and -5. A bend's
+# inside corner is out of bounds, and the wilder the golfer the more it
+# costs: 4.2 strokes (se 1.2), 1.6 (0.7) and 1.9 (0.7).
 # ---------------------------------------------------------
 
 const ORDER := ["easy", "medium", "hard"]
@@ -32,21 +39,21 @@ const SKILLS := {
 		"blurb": "Weekend hacker",
 		"aim": 19.0,     # yards of misjudgement per 100 yards of shot (sd)
 		"putt": 0.225,   # putt-meter timing error, seconds (sd)
-		"typical": 15,   # strokes against par on the built-in course
+		"typical": 17,   # strokes against par on the built-in course
 	},
 	"medium": {
 		"name": "Coley Niblick",
 		"blurb": "Club regular",
 		"aim": 13.0,
 		"putt": 0.185,
-		"typical": 4,
+		"typical": 3,
 	},
 	"hard": {
 		"name": "Ace Marlin",
 		"blurb": "Scratch golfer",
 		"aim": 8.0,
 		"putt": 0.150,
-		"typical": -4,
+		"typical": -5,
 	},
 }
 

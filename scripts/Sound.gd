@@ -80,7 +80,7 @@ const MUSIC_DB := -14.0
 const VOICES := 8  # simultaneous sound effects
 
 var sfx_enabled := true
-var music_enabled := true
+var music_enabled := false  # muted for now — flip to true (or press M) to bring music back
 
 var _streams: Dictionary = {}       # group -> Array[AudioStream]
 var _voices: Array = []             # Array[AudioStreamPlayer]

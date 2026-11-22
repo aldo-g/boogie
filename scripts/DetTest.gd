@@ -322,6 +322,8 @@ func _sync_decks() -> void:
 		pb.ability_log = pa.ability_log.duplicate(true)
 		pb.armed = pa.armed.duplicate()
 		pb.created_next = pa.created_next.duplicate()
+		pb.pocket = _cards_from_names(_card_names(pa.pocket))
+		pb.tempo = pa.tempo
 
 
 func _apply_action(m, kind: String, arg) -> void:

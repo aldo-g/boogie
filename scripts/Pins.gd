@@ -30,11 +30,11 @@ const SPOTS := [
 	Vector2(-0.707, -0.707), Vector2(0.707, -0.707), Vector2(-0.707, 0.707), Vector2(0.707, 0.707),
 ]
 const DEPTH_EARLY := 0.40
-const DEPTH_LATE := 0.70
+const DEPTH_LATE := 0.85   # 0.70 until 2026-11-20
 # On the last hole, the chance the pin goes on the guarded side (scaled by
 # how late the hole is; never on the opening holes) — and how many spots
 # count as that side, so even the last green has more than one Sunday pin.
-const GUARDED_LATE := 0.7
+const GUARDED_LATE := 0.9  # 0.7 until 2026-11-20
 const GUARDED_SPOTS := 3
 # Trouble further than this from a spot isn't guarding it.
 const GUARD_REACH := 25.0

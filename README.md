@@ -65,6 +65,12 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
   it), lose its miss, or (a maker's club) take its maker's own gain. At a
   fitting bay a club you hold takes a **boost**: Regrip, Custom fit, New
   shaft, Fresh grooves or Lead tape.
+- **The putter grows too**: a putt holed in one from fifteen feet or more is a
+  mark, and each level widens the putt meter's bands. Three putts on a
+  green can leave it twitchy (narrower bands) until a Regrip mends it.
+- **Tempo and Pocket**: a Controlled Draw or Fade, once played, deals your
+  next swing one more card; a Stinger or Punch Out passed over waits in
+  your pocket and joins your next hand, once.
 - **Clubs can be cursed.** A ball in the water or out of bounds can leave a
   Bent shaft, a Loose grip or a Hosel rocket on the club that put it there,
   and one club in eight on the rack is second-hand: worn in already, and
@@ -99,6 +105,10 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
   worst bad cards leave your Form deck) or **the hut**, where something
   happens — a cursed club in the gorse, a stranger's tip, the drinks cart,
   a hustler — and you take it or walk on.
+- **The tour**: the four courses as one run, alone. Six clubs travel from
+  each course to the next with everything they have gained, and each
+  course allows two fewer strokes in hand (ten, eight, six, four).
+- **A hole costs triple par at most**: there, the ball is picked up.
 - **Strokes in hand**: a solo round is played for keeps. You start with
   ten; every stroke over par spends one and every stroke under gives one
   back; with none left after a hole, the round is over.
@@ -241,9 +251,9 @@ harness:
 
 | Golfer | | Typically shoots |
 |---|---|---|
-| Dory Mulligan | Weekend hacker | about 86 (15 over) |
-| Coley Niblick | Club regular | about 75 (4 over) |
-| Ace Marlin | Scratch golfer | about 67 (4 under) |
+| Dory Mulligan | Weekend hacker | about 88 (17 over) |
+| Coley Niblick | Club regular | about 74 (3 over) |
+| Ace Marlin | Scratch golfer | about 66 (5 under) |
 
 A computer golfer is an ordinary seat in a hot-seat round, played by
 `GreedyBot` through the same functions the screen calls for a person. It
@@ -374,6 +384,7 @@ Bogey/
     ├── CourseShape.gd     Turns centrelines into curved polygons
     ├── CourseMapView.gd   The hole map: aiming, ball flight, everything that moves
     ├── CourseArt.gd       The painted ground under it, drawn once per hole
+    ├── CoursePlan.gd      The whole course on one sheet, for the title screen
     ├── ElevationProfileView.gd  Side-view elevation strip under the hole map
     ├── Wind.gd            Per-hole wind from the round's seed, and how to describe it
     ├── Pins.gd            Where each green's hole is cut this round, from the same seed
@@ -395,7 +406,7 @@ editor.
 1. Install [Godot 4.x](https://godotengine.org) (standard/non-.NET build).
 2. Open Godot, click **Import**, and select `project.godot` in this repo.
 3. Press **Play** (▶ top-right, or Cmd+B on macOS / F5 on Windows/Linux).
-   It runs `scenes/Title.tscn`; click to tee off.
+   It runs `scenes/Title.tscn`; pick a course and press Play to tee off.
 
 To parse-check a script without opening the editor:
 

@@ -29,6 +29,8 @@ extends SceneTree
 #      for a given seed, different from one round to the next
 #  10. the map draws promptly on a plate with no room for it (the editor's
 #      first frame) instead of planting scenery to the horizon
+#  11. the title screen's plan of a course (CoursePlan) finds every hole a
+#      place of its own, the same place every time
 # ---------------------------------------------------------
 
 var failures: Array = []
@@ -45,6 +47,7 @@ func _initialize() -> void:
 	_check_shipped_courses()
 	_check_round_builds()
 	await _check_no_room_to_draw()
+	_check_course_plan()
 	Course.use_builtin()
 	if failures.is_empty():
 		print("\nCOURSES: OK")
@@ -184,6 +187,38 @@ func _check_no_room_to_draw() -> void:
 		var took := Time.get_ticks_msec() - began
 		_expect(took < 3000, "drawing the map on a %dx%d plate took %d ms" % [int(plate.x), int(plate.y), took])
 		map.queue_free()
+
+
+# The title screen lays a course's holes out on one sheet. No two may lie
+# across each other, and a course must lie the same way every time it's
+# shown. A one-hole course and three identical holes are the odd cases.
+func _check_course_plan() -> void:
+	var plan = load("res://scripts/CoursePlan.gd")
+	var courses: Array = CourseLibrary.all().duplicate()
+	courses.append({"name": "One", "holes": [Course.blank_hole(3)]})
+	courses.append({"name": "Three", "holes": [Course.blank_hole(4), Course.blank_hole(4), Course.blank_hole(4)]})
+	for c in courses:
+		Course.use(c)
+		var holes: Array = []
+		for n in range(1, Course.hole_count() + 1):
+			holes.append(HoleData.hole(n))
+		var coastal: bool = plan.COAST.has(Course.active_theme)
+		var places: Array = plan.route(holes, 1.04, coastal)
+		_expect(places.size() == holes.size(), "%s: the plan places %d of %d holes" % [c.name, places.size(), holes.size()])
+		_expect(places == plan.route(holes, 1.04, coastal), "%s: the plan routes differently the second time" % c.name)
+		var feet: Array = []
+		for i in places.size():
+			feet.append(places[i] * plan.footprint(holes[i], i == 0, coastal))
+			if coastal:
+				_expect(plan._on_land(CourseArt._rect_of(feet[i])), "%s: hole %d lies in the sea on the plan" % [c.name, i + 1])
+				var sea: Array = plan.sea_of(holes[i])
+				_expect(sea.is_empty() or plan.from_sea(places[i] * Vector2(sea[1], holes[i].pin_pos.y * 0.5)) <= plan.COAST_REACH,
+					"%s: hole %d has the sea beside it but isn't on the shore" % [c.name, i + 1])
+		for i in feet.size():
+			for j in i:
+				_expect(Geometry2D.intersect_polygons(feet[i], feet[j]).is_empty(),
+					"%s: holes %d and %d lie across each other on the plan" % [c.name, j + 1, i + 1])
+	Course.use_builtin()
 
 
 func _expect(ok: bool, what: String) -> void:
@@ -338,7 +373,11 @@ func _play_round(main) -> bool:
 			main.State.FORM_DRAW:
 				main.on_form_pick(randi() % main.current_form_options.size())
 			main.State.DRAFT:
-				main.on_draft_pick(randi() % main.current_draft_options.size())
+				# The fork first (Route.gd): this round always takes the pro shop.
+				if main.me.draft_stop == "":
+					main.on_stop(0)
+				else:
+					main.on_draft_pick(randi() % main.current_draft_options.size())
 			main.State.DISCARD_FOR_DRAFT, main.State.DISCARD_FOR_HAZARD:
 				main.on_discard_pick(randi() % main.hand.size())
 			main.State.PUTTING:

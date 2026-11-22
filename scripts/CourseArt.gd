@@ -274,8 +274,8 @@ func _draw() -> void:
 
 	if _hillshade:
 		var hb := _hillshade_bounds
-		var top_left := view._to_px(Vector2(hb.position.x, hb.end.y))
-		var bottom_right := view._to_px(Vector2(hb.end.x, hb.position.y))
+		var top_left := _to_px(Vector2(hb.position.x, hb.end.y))
+		var bottom_right := _to_px(Vector2(hb.end.x, hb.position.y))
 		# Half a texel in from each edge: this node tiles its textures, and
 		# a stretched image must not blend its edges into each other.
 		var src := Rect2(Vector2(0.5, 0.5), Vector2(_hillshade.get_size()) - Vector2.ONE)
@@ -344,7 +344,7 @@ func _draw_water(poly: PackedVector2Array, t: Dictionary, s: float) -> void:
 			if Geometry2D.is_point_in_polygon(p, poly) \
 					and Geometry2D.is_point_in_polygon(p + Vector2(4.5, 0), poly) \
 					and Geometry2D.is_point_in_polygon(p - Vector2(4.5, 0), poly):
-				var c := view._to_px(p)
+				var c := _to_px(p)
 				draw_polyline(PackedVector2Array([c + Vector2(-2.4, 0.2) * k, c + Vector2(-1.2, -0.6) * k,
 					c + Vector2(0, 0.1) * k, c + Vector2(1.2, 0.7) * k, c + Vector2(2.4, 0.0) * k]),
 					ripple, 1.0, true)
@@ -401,8 +401,8 @@ func _draw_green_slope(hole: HoleData) -> void:
 				var g := hole.gradient_at(p)
 				if g.length() > 0.008:
 					var down := -g.normalized()
-					var c := view._to_px(p)
-					var tip := view._to_px(p + down * 2.0)
+					var c := _to_px(p)
+					var tip := _to_px(p + down * 2.0)
 					var dir_px := (tip - c).normalized()
 					var side := Vector2(-dir_px.y, dir_px.x)
 					var len := 3.0 + clampf(g.length() * 80.0, 0.0, 3.0)
@@ -432,8 +432,8 @@ func _draw_tee(hole: HoleData, t: Dictionary, s: float) -> void:
 	draw_colored_polygon(pad, t.fringe)
 	_fill_through(pad, Color(t.green_alt, 0.7), _stripe(), 7.0 * s)
 	_outline(pad, (t.collar as Color).darkened(0.12), 1.0)
-	var tee_px := view._to_px(c)
-	var side := (view._to_px(c + across) - tee_px).normalized()
+	var tee_px := _to_px(c)
+	var side := (_to_px(c + across) - tee_px).normalized()
 	var gap: float = clampf(3.6 * s, 3.0, 9.0)
 	for k in [-1.0, 1.0]:
 		draw_circle(tee_px + side * k * gap, 2.2, BogeyTheme.INK_SOFT)
@@ -467,7 +467,7 @@ func _draw_stakes(hole: HoleData, s: float) -> void:
 					break
 			if wet:
 				continue
-			var px := view._to_px(p)
+			var px := _to_px(p)
 			draw_circle(px + Vector2(0.7, 0.9), 1.3, Color(COLOR_SHADOW, 0.3))
 			draw_circle(px, 1.3, Color(0.97, 0.96, 0.93, 0.9))
 
@@ -491,19 +491,19 @@ func _draw_yardage_markers(hole: HoleData, s: float) -> void:
 		var y: float = hole.green_pos.y - dist_to_pin
 		if y <= hole.tee_pos.y + 5.0 or y >= hole.green_pos.y - 5.0:
 			continue
-		var p := view._to_px(Vector2(_left_edge(hole, y) + 6.0, y))
+		var p := _to_px(Vector2(_left_edge(hole, y) + 6.0, y))
 		draw_line(p + Vector2(0, -5), p + Vector2(0, 5), ink, 1.5)
 		draw_string(font, p + Vector2(6, 4), "%d" % dist_to_pin, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, ink)
 		var mid := Vector2(hole.centre_x_at(y), y)
 		if hole.terrain_at(mid) == "fairway":
-			var c := view._to_px(mid)
+			var c := _to_px(mid)
 			var r: float = clampf(1.3 * s, 1.8, 3.2)
 			draw_circle(c, r + 0.8, Color(BogeyTheme.INK, 0.5))
 			draw_circle(c, r, discs[dist_to_pin])
 
 
 func _draw_pin(hole: HoleData) -> void:
-	var pin_px := view._to_px(hole.pin_pos)
+	var pin_px := _to_px(hole.pin_pos)
 	# The stick's shadow lies across the green, away from the light.
 	draw_line(pin_px, pin_px + SHADOW_DIR * 11.0, Color(COLOR_SHADOW, 0.22), 2.0, true)
 	draw_circle(pin_px, 2.6, BogeyTheme.INK)
@@ -563,7 +563,7 @@ func _draw_scenery(hole: HoleData, t: Dictionary, s: float) -> void:
 			if near.has_point(p) and not _is_clear(hole, p, 9.0 if big else 4.0):
 				continue
 			var scale: float = lerpf(0.7, 1.3, _rand(i, j, salt + 3)) * (1.0 if inside else 1.18)
-			var item := [kind, view._to_px(p), scale, hash(Vector3i(i, j, salt + 4))]
+			var item := [kind, _to_px(p), scale, hash(Vector3i(i, j, salt + 4))]
 			# What lies on the ground goes down now; what stands on it waits,
 			# so a tree is never under a snow patch or a dune.
 			if kind in _FLAT:
@@ -698,11 +698,18 @@ func _draw_rock(px: Vector2, r: float, h: int, col: Color, butte: bool) -> void:
 
 # --- Shape helpers -----------------------------------------------------
 
+# Yards on the hole to pixels on this node. Everything here is painted
+# through it, so a painting that lays its holes out some other way
+# (CoursePlan) has only this to change.
+func _to_px(yard_pt: Vector2) -> Vector2:
+	return view._to_px(yard_pt)
+
+
 func _px_poly(yard_poly: PackedVector2Array) -> PackedVector2Array:
 	var out := PackedVector2Array()
 	out.resize(yard_poly.size())
 	for i in yard_poly.size():
-		out[i] = view._to_px(yard_poly[i])
+		out[i] = _to_px(yard_poly[i])
 	return out
 
 
@@ -763,7 +770,7 @@ func _fill_through(poly: PackedVector2Array, col: Color, mask: Texture2D, tile_p
 		nudge: Vector2 = Vector2.ZERO) -> void:
 	if poly.size() < 3 or mask == null or tile_px <= 0.5:
 		return
-	var origin := view._to_px(Vector2.ZERO) + nudge
+	var origin := _to_px(Vector2.ZERO) + nudge
 	var uvs := PackedVector2Array()
 	uvs.resize(poly.size())
 	for i in poly.size():

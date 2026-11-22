@@ -48,6 +48,14 @@ var family: String = ""
 # It plays as it always did, and comes with a spare: one more card is dealt
 # beside it, so it never costs the hand a choice.
 var grooved: bool = false
+# Shots that work with the swings around them (Section 4 "Tempo and Pocket").
+# Tempo: once played, the next swing is dealt one more card.
+# Pocket: passed over, it waits and joins the next swing's hand.
+var tempo: bool = false
+var pocket: bool = false
+# This card came into the hand from the pocket. It waits once: passed over
+# again it is discarded like any other. Only true while it is in a hand.
+var waited: bool = false
 # The club that brought this card (its name), or "" for a card of the
 # family's own pile. A swing is dealt its family's pile and the shots of
 # the club in hand, and no other club's (FormDeck, "Dealt to the club").
@@ -157,6 +165,10 @@ func _other_bits() -> Array:
 		bits.append("removes a bad card from your Form deck")
 	if grooved:
 		bits.append("grooved: one more card is dealt beside it")
+	if tempo:
+		bits.append("tempo: your next swing is dealt one more card")
+	if pocket:
+		bits.append("pocket: passed over, it waits for your next swing, once")
 	if off_tier:
 		bits.append("off the Mid tier, so it is pushed")
 	elif mid_only:
@@ -185,6 +197,16 @@ func with_run(share: float) -> FormCard:
 
 func as_mishit() -> FormCard:
 	mishit = true
+	return self
+
+
+func with_tempo() -> FormCard:
+	tempo = true
+	return self
+
+
+func with_pocket() -> FormCard:
+	pocket = true
 	return self
 
 
@@ -267,11 +289,11 @@ static func make(card_name: String) -> FormCard:
 		"Pure Strike":
 			return FormCard.new("Pure Strike", true, 0, 0.0, 1.0)
 		"Stinger":
-			return FormCard.new("Stinger", true, 0, 0.0, 0.92).with_roll(1.8).with_flight(0.4)
+			return FormCard.new("Stinger", true, 0, 0.0, 0.92).with_roll(1.8).with_flight(0.4).with_pocket()
 		"Controlled Draw":
-			return FormCard.new("Controlled Draw", true, -1, 10.0, 1.0)
+			return FormCard.new("Controlled Draw", true, -1, 10.0, 1.0).with_tempo()
 		"Controlled Fade":
-			return FormCard.new("Controlled Fade", true, 1, 10.0, 1.0)
+			return FormCard.new("Controlled Fade", true, 1, 10.0, 1.0).with_tempo()
 		"Power Draw":
 			# A draw that runs: longer, and chases on after landing.
 			return FormCard.new("Power Draw", true, -1, 6.0, 1.08).with_roll(1.4)
@@ -285,7 +307,7 @@ static func make(card_name: String) -> FormCard:
 			return FormCard.new("Spinner", true).with_roll(0.25)
 		"Punch Out":
 			# The rough escape that stays low, where Flop Shot goes high.
-			return FormCard.new("Punch Out", true, 0, 0.0, 0.9, true).with_roll(1.4).with_flight(0.6)
+			return FormCard.new("Punch Out", true, 0, 0.0, 0.9, true).with_roll(1.4).with_flight(0.6).with_pocket()
 		"Flop Shot":
 			return FormCard.new("Flop Shot", true, 0, 0.0, 0.85, true).with_roll(0.15).with_flight(1.6)
 		"Bump and Run":

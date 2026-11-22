@@ -34,6 +34,14 @@ func _initialize() -> void:
 		_check("draft_pick(%d) refused in wrong state" % bad, m.state == m.State.CLUB_SELECT)
 		m.on_discard_pick(bad)
 		_check("discard_pick(%d) left bag intact" % bad, m.hand.size() == bag_before)
+		# The route's and the fitting bay's entry points, outside a draft.
+		m.on_stop(bad)
+		m.on_wear_in(bad, bad)
+		m.on_boost("regrip", bad, bad)
+		m.on_event()
+		m.on_leave_stop()
+		_check("stop/wear/boost/event/leave(%d) refused outside the draft" % bad,
+			m.state == m.State.CLUB_SELECT and m.hand.size() == bag_before and m.me.draft_stop == "")
 
 	# --- Actions sent in the wrong phase ---
 	m.on_putt_stopped("sunk", 1.0)

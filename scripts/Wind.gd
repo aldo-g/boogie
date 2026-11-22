@@ -27,7 +27,9 @@ const CALM_MPH := 3.0
 # nine asks more of the low cards without handing out more disasters: a
 # 30 mph hole decides a round more than it tests it, and there were
 # enough of those.
-const LATE_LIFT := 0.26
+# (0.26 until 2026-11-20, when the back nine was still playing three
+# strokes easier than the front: Section 5, "The course pushes back".)
+const LATE_LIFT := 0.45
 
 
 # The two constants above are the parkland numbers. The terrain a course

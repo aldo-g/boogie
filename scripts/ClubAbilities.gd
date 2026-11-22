@@ -263,11 +263,12 @@ static func has_boost(club: Dictionary, id: String) -> bool:
 # Whether `boost` can go on `club`. On a cursed club only the boost that
 # mends its curse can (MENDS), and it is spent on the mending.
 static func can_boost(club: Dictionary, boost: String) -> bool:
-	if not grows(club) or not BOOSTS.has(boost):
+	if not BOOSTS.has(boost):
 		return false
 	if curse(club) != "":
 		return MENDS[curse(club)] == boost
-	if has_boost(club, boost):
+	# A putter takes a boost only to be mended.
+	if not grows(club) or has_boost(club, boost):
 		return false
 	return boost != "custom_fit" or _has_middle(club)
 
@@ -292,7 +293,8 @@ const CURSES := {
 const CURSE_CHANCE := 0.5
 const LOOSE_GRIP_SEVERITY := 1.5
 # The one boost that mends each curse.
-const MENDS := {"bent_shaft": "new_shaft", "loose_grip": "regrip", "hosel_rocket": "custom_fit"}
+const MENDS := {"bent_shaft": "new_shaft", "loose_grip": "regrip", "hosel_rocket": "custom_fit",
+	"twitchy": "regrip"}
 # A club on the rack is second-hand this often: already worn in (a level
 # waits), and carrying a curse.
 const SECOND_HAND_CHANCE := 0.125
@@ -300,6 +302,32 @@ const SECOND_HAND_CHANCE := 0.125
 
 static func curse(club: Dictionary) -> String:
 	return str(club.get("curse", ""))
+
+
+# A curse's {name, does}, a putter's included.
+static func curse_info(id: String) -> Dictionary:
+	return CURSES.get(id, PUTTER_CURSES.get(id, {"name": id, "does": ""}))
+
+
+# --- The putter (Section 3E "The putter") -------------------------------
+# It brings no shots, so it wears its own way: a putt holed in one from
+# PUTT_MARK_YARDS or more leaves a mark, a level comes with no choice to
+# make (the putt meter's bands are wider), and three putts on a green can
+# leave it twitchy. Regrip mends that.
+
+static func is_putter(club: Dictionary) -> bool:
+	return club.get("type", "") == "putter"
+
+
+# (3 yards and 12% at first: the bot's putter was at its second level by
+# the turn and the round was most of a stroke easier for it.)
+const PUTT_MARK_YARDS := 5.0
+const PUTTER_WEAR_BAND := 0.08   # wider bands, a level
+const PUTTER_CURSES := {
+	"twitchy": {"name": "Twitchy", "does": "The putt meter's bands are a fifth narrower"},
+}
+const TWITCHY_BAND := 0.8
+const TWITCHY_PUTTS := 3         # putts on one green that can leave it
 
 
 # What has been done to a club, in a line: "Worn in 1 · Regrip". "" for a
@@ -389,6 +417,11 @@ static func putt_band_mult(bag: Array, putt_yards: float, steady: bool) -> float
 		elif putt_yards < 4.0:
 			mult *= float(effect(club, "putt_short_band", 1.0))
 		steady_scale = maxf(steady_scale, float(effect(club, "steady_mult", 1.0)))
+		# A putter that is worn in holes more; a twitchy one, fewer.
+		if is_putter(club):
+			mult *= 1.0 + PUTTER_WEAR_BAND * float(club.get("level", 0))
+			if curse(club) == "twitchy":
+				mult *= TWITCHY_BAND
 	if steady:
 		mult *= 1.0 + STEADY_HANDS_WIDEN * steady_scale
 	return mult

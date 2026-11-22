@@ -39,7 +39,7 @@ static func gains(bag: Array, club: Dictionary, bag_cap: int = 14) -> Array:
 	var cursed := ClubAbilities.curse(club)
 	if cursed != "":
 		# Short enough for two lines of a draft card.
-		out.append({"text": "Second-hand: worn in, with a %s" % str(ClubAbilities.CURSES[cursed].name).to_lower(),
+		out.append({"text": "Second-hand: worn in, with a %s" % str(ClubAbilities.curse_info(cursed).name).to_lower(),
 			"strong": true})
 	if ClubAbilities.grows(club):
 		var bad := Brands.baggage(club)
