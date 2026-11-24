@@ -51,7 +51,6 @@ var abandoned: bool = false
 
 # --- Putting ---
 var putt_dist: float = 0.0
-var putt_dir: Vector2 = Vector2(0, 1)
 var yips_pending: bool = false         # Section 4 putting cross-trigger
 
 # --- Club abilities (ClubAbilities.gd) ---
@@ -157,7 +156,6 @@ func start_hole(tee_pos: Vector2) -> void:
 	putt_from = -1
 	putt_first = 0.0
 	putt_dist = 0.0
-	putt_dir = Vector2(0, 1)
 	pending_club = {}
 	pending_new_card = null
 	current_draft_options = []

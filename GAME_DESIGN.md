@@ -1,12 +1,12 @@
 # Pars and Chars — Game Design Document
 
-*A mid-weight golf deckbuilder. 60-90 min per round. Solo vs. par or head-to-head. Video game (Steam target), built as a card-resolution deckbuilder in the spirit of Slay the Spire — no timing checks anywhere in the tee-to-green game, and no dice except one: a shot that finishes on the cup from off the green earns a hole-out d20 (Section 4). Putting is the other deliberate exception: it's a timing meter whose difficulty scales with distance (Section 6).*
+*A mid-weight golf deckbuilder. 60-90 min per round. Solo vs. par or head-to-head. Video game (Steam target), built as a card-resolution deckbuilder in the spirit of Slay the Spire — no timing checks anywhere in the tee-to-green game, and no dice except one: a shot that finishes on the cup from off the green earns a hole-out d20 (Section 4). Putting is aimed too: you set a line and a weight on the green and the ball rolls over its slope (Section 6).*
 
 ---
 
 ## 1. High Concept
 
-You play a round of golf by building a permanent, ever-growing hand of clubs (your **Bag**, up to 14 cards) — one card at a time, at the end of each hole. Every shot is resolved by drawing from a separate **Form** hand (representing your current swing state — good and bad), reading its fully known effect, and aiming to compensate or exploit it. Nothing is hidden or randomly rolled once a card is drawn — luck lives in the draw, skill lives in reading it and adjusting your aim. Hazards degrade your Form deck; putting switches to a distance-scaled timing meter. Play solo against par, or against friends.
+You play a round of golf by building a permanent, ever-growing hand of clubs (your **Bag**, up to 14 cards) — one card at a time, at the end of each hole. Every shot is resolved by drawing from a separate **Form** hand (representing your current swing state — good and bad), reading its fully known effect, and aiming to compensate or exploit it. Nothing is hidden or randomly rolled once a card is drawn — luck lives in the draw, skill lives in reading it and adjusting your aim. Hazards degrade your Form deck; a putt is aimed on the green and rolled over its slope. Play solo against par, or against friends.
 
 ---
 
@@ -20,7 +20,7 @@ Each course is a **fixed, designed layout** — all 18 holes have known yardage,
 4. **Read the Form card's known effect**, then make your **final aim adjustment** to compensate or exploit it.
 5. **Resolve deterministically** — fairway, rough, bunker, water, or green.
 6. **Repeat** steps 2-5 until on the green.
-7. **Putt** — switch to the putting meter, a timing check that gets harder the further you are from the hole.
+7. **Putt** — aim on the green: set a line and a weight, and the ball rolls over the slope (Section 6).
 8. **Score the hole.**
 9. **End of the hole: choose a stop** (Section 3F, since 2026-11-19): the pro shop, or the round's other stop here (a fitting bay, the range or the hut). The pro shop is the **draft**: draw 3 cards from the shared club deck, look at all 3, pick 1 to add permanently to your Bag. If your Bag is at the 14-card cap, discard a card first to make room. There is no draft after the last hole: the round ends on the final putt, since there is no shot left to play a new club with. A hole you **called** on the tee changes those numbers, and a draft can be **dug** or widened by **trading in** a club (Section 3D).
 10. Move to the next hole.
@@ -227,7 +227,7 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 | Titanist Pro Driver | Wood | 185-225 | Buffers deviation 20% better; **-30% distance from rough** |
 | Titanist 4-Iron | Iron | 150-180 | Buffers deviation 25% better |
 | Titanist 8-Iron | Iron | 85-120 | Buffers deviation 25% better |
-| Titanist Blade Putter | Putter | Green | Steady Hands also narrows nothing — but grants a **second** timing attempt once per round |
+| Titanist Blade Putter | Putter | Green | Once per round, a putt that stays out is taken again with no stroke added |
 
 **Callowell** — *forgiveness; wide bands, blunts bad cards, low ceiling*
 
@@ -245,7 +245,7 @@ Yardage bands are the tuning surface: a *wide* band means more shots land in the
 | Ping-Well i-Series 5 | Iron | 130-175 | Mid-tier band is **widened** — the middle third counts as the middle half |
 | Ping-Well i-Series 8 | Iron | 80-125 | Same widened Mid tier |
 | Ping-Well Lob Wedge | Wedge | 15-55 | Creates Flop Shot on **any** hazard lie, not just bunker |
-| Ping-Well Mallet Putter | Putter | Green | Steady Hands widens the sunk band **twice** as much |
+| Ping-Well Mallet Putter | Putter | Green | Steady Hands makes the cup play bigger by **twice** as much |
 
 **MacGregorian** — *heritage; low running ball, built for scrappy lies*
 
@@ -360,7 +360,7 @@ Until this date the draft could only be waited on. Every club came past about on
 
 ## 3E. Growing a Club (2026-11-19)
 
-Alastair's brief, after the deeper draft: the deck-building was still weak, and *"we are already offering a club, and those clubs should be able to be grown and boosted as that feels more natural"*. So the club stays the one thing a hole pays out, and the club becomes the thing that is built. Four parts: every club brings its shots (Section 4, "Clubs bring their shots"), and the three here. Putters take no part in any of it: they bring no shots and are played on the meter.
+Alastair's brief, after the deeper draft: the deck-building was still weak, and *"we are already offering a club, and those clubs should be able to be grown and boosted as that feels more natural"*. So the club stays the one thing a hole pays out, and the club becomes the thing that is built. Four parts: every club brings its shots (Section 4, "Clubs bring their shots"), and the three here. Putters take no part in any of it: they bring no shots and are aimed on the green.
 
 **Everything a club gains is kept on the club** (`marks`, `level`, `boosts`, `curse` and its `shots`, on the club's own Dictionary), so it shows on the card, travels with the bag online, and is given up when the club is traded in or cut.
 
@@ -419,8 +419,8 @@ They are the numbers the rules already read (severity, the Mid span, the band, t
 The putter is the most-used club in the bag and was the only one that took no part. It brings no shots, so it grows its own way:
 
 - **A putt holed in one from 15 feet or more leaves a mark** (5 yards). Three marks is a level, two at most, as for any club.
-- **A level needs no choice**: the putt meter's bands are 8% wider for each, at once. The card is stamped WORN IN. (10 feet and 12% at first, which had the bot's putter at its second level by the turn.)
-- **Three putts on a green can leave it twitchy** (one time in two): the meter's bands are a fifth narrower. A second-hand putter on the rack arrives twitchy, and worn in a level.
+- **A level needs no choice**: the cup plays 8% bigger for each, at once. The card is stamped WORN IN. (10 feet and 12% at first, which had the bot's putter at its second level by the turn.)
+- **Three putts on a green can leave it twitchy** (one time in two): the cup plays a fifth smaller. A second-hand putter on the rack arrives twitchy, and worn in a level.
 - **Regrip mends it**, at a fitting bay, which is the only boost a putter takes.
 
 ### What the card shows (2026-11-20)
@@ -481,7 +481,7 @@ One of these, fixed with the route. Each can be walked on from.
 | **A club in the gorse** | A limited edition joins the bag, already worn in and carrying a curse (the bag full, something is cut for it) |
 | **A stranger's tip** | The club with the most marks has a shot grooved on the spot; a bad card joins that club's family |
 | **The drinks cart** *(a round for keeps only)* | Two strokes in hand; a Top joins the wood pile |
-| **The hustler** *(a round for keeps only)* | One putt from five yards on the real putt meter, with the putter in the bag as it is: holed, three strokes in hand; anything else, two gone. It is no stroke on the card. (A coin toss until 2026-11-20.) |
+| **The hustler** *(a round for keeps only)* | One real putt from five yards on the green just played, with the putter in the bag as it is: holed, three strokes in hand; anything else, two gone. It is no stroke on the card. (A coin toss until 2026-11-20.) |
 
 ### Strokes in hand
 
@@ -531,7 +531,7 @@ A run was one round: the bag peaked around the 14th and was thrown away on the 1
 
 ## 4. Shot Resolution — The Form Card System
 
-Every shot from tee to green is resolved by reading a fully known Form card and aiming around it — no hidden probability and no timing check (putting is the exception; see Section 6). The only die in the game is the hole-out d20: a shot that finishes on the cup from off the green earns the roll, and only a natural 20 drops. That way a player who reads the cards perfectly can earn a hole-out but can't make one happen at will. Luck lives in what you draw; skill lives in reading it correctly and adjusting your aim.
+Every shot from tee to green is resolved by reading a fully known Form card and aiming around it — no hidden probability and no timing check (putting included; see Section 6). The only die in the game is the hole-out d20: a shot that finishes on the cup from off the green earns the roll, and only a natural 20 drops. That way a player who reads the cards perfectly can earn a hole-out but can't make one happen at will. Luck lives in what you draw; skill lives in reading it correctly and adjusting your aim.
 
 ### The two-hand split
 
@@ -600,7 +600,7 @@ Top, Thin, Chunk and Skied are **mishits** (bad contact rather than a bad line);
 | Punch Out | 90% distance, ignores the rough penalty, low (0.6x flight), runs out 1.4x — the low rough escape, where Flop Shot is the high one |
 | Flop Shot | High, soft landing — ignores rough/bunker penalty entirely, stops dead (0.15x roll), balloons in wind (1.6x flight) |
 | Bump and Run | Low running shot — carries half the aimed distance (0.5x flight, so the wind barely touches it) and runs the rest to the target. The run is judged: struck with the pace the slope asks for, up to 1.6x the planned run — so rough on the way leaves it short, sand or water in its path stops it, and side slope still bends its line. No green check, since a low runner arrives without backspin. |
-| Steady Hands | Widens the putt meter's bands on this putt (+60%; Ping-Well Mallet doubles that). **Created only**, used on the green |
+| Steady Hands | The cup plays bigger on this putt (+60%; Ping-Well Mallet doubles that). **Created only**, used on the green |
 | In the Zone | Plays straight at standard distance, and removes the worst bad card from your Form deck — from the family it was played with first, from any other only once that family has none |
 | Knockdown, Bomb, Safe Swing, Scotch Runner, Stock Shot, Utility Swing | The **signature shots**: never in the deck a round starts with, only ever brought to it by a maker's club — see "Clubs bring their shots" below |
 
@@ -640,7 +640,7 @@ The Form deck could be cleaned (range sessions, In the Zone) and dirtied (hazard
 | **Ping-Well** | Stock Shot | Straight and full **from the Mid tier**; from any other tier it is pushed 8° right. The Form hand shows it as it will play for the swing in hand |
 | **Nimbus** | Utility Swing | Straight, 95% distance. It belongs to **no family**: any club can be dealt it, and it counts in every family's form |
 
-- **Putters bring nothing.** They are played on the meter, and the putter's pile of chips (seven cards) is too small to take a card without changing its nature.
+- **Putters bring nothing.** They are aimed on the green, and the putter's pile of chips (seven cards) is too small to take a card without changing its nature.
 - **Standard clubs and Bogey-Mart bring nothing** — one more reason to leave them behind.
 - **The risk is the baggage.** A Slazinger bag hits Bombs and owns Duck Hooks, and cutting the driver later does not take the Duck Hook back. That is the brand's set bonus (more cards, harder bad ones) said again in the deck.
 - **They are ordinary deck cards**: dealt, discarded and reshuffled with their family, counted in the form table, listed in the deck popup, and named in the draft ("Brings a Knockdown to your iron form").
@@ -711,7 +711,7 @@ To stop top-tier good cards (like Pure Strike) from being either "always in the 
 | **Woods** | Power/burst | "Big Strike" — guarantees near-max distance, ignores deviation | **Active** — saved for a deliberate big moment (a carry over water, a reachable par-5) |
 | **Irons** | Precision/control | "Pure Strike" — guarantees zero deviation, standard distance | **Active** — saved for a shot that really can't miss |
 | **Wedges** | Finesse/recovery | "Flop Shot," or directly purges one bad card from your Form deck | **Passive** — triggers automatically when you're already in a hazard, rewarding correct club selection rather than activation timing |
-| **Putter** | Green mastery | "Steady Hands" — widens the sunk band on your next putt | **Active** — saved for a genuinely must-make putt |
+| **Putter** | Green mastery | "Steady Hands" — the cup plays bigger on your next putt | **Active** — saved for a genuinely must-make putt |
 
 **The design principle**: Passive fits abilities that reward good *positional play* (reaching for the right club in a bad lie); Active fits abilities meant to be *saved for a clutch moment* (the timing decision itself is the interesting choice).
 
@@ -738,7 +738,7 @@ To stop top-tier good cards (like Pure Strike) from being either "always in the 
 
 ### Putting cross-trigger (the Yips)
 
-The Yips card can be drawn in your Form hand approaching the green. You can avoid playing it (pick one of the other 2 draws), but if you're forced to play it, it taints your *next* putt specifically — that putt misses regardless of how well you actually strike it on the meter. This keeps the Yips doing what it's known for: a mental carryover into putting, not just another distance modifier.
+The Yips card can be drawn in your Form hand approaching the green. You can avoid playing it (pick one of the other 2 draws), but if you're forced to play it, it taints your *next* putt specifically — that putt misses regardless of how well you read it (it is jabbed off the line, and the cup takes nothing). This keeps the Yips doing what it's known for: a mental carryover into putting, not just another distance modifier.
 
 ### The aim guide (2026-11-16)
 
@@ -756,7 +756,7 @@ Nothing on the map accounts for the wind, the slope, the run-out or the Form car
 
 **Scope note (2026-09-08):** weather and slope were **cut**. Terrain — tee, fairway, rough, bunker, water, green — was the only environmental system in the game. The per-flight weather *deck* stays cut (the round is a continuous run of holes), but **wind is back as of 2026-10-16** — see "Wind" below.
 
-**Update (2026-10-16): elevation and roll are back in** — see "Elevation & roll" below. Slope returns as authored ground on every hole rather than marked zones. It moves the ball through carry and run-out, and the green's tilt reads into the putting meter (Section 6, "Reading the green").
+**Update (2026-10-16): elevation and roll are back in** — see "Elevation & roll" below. Slope returns as authored ground on every hole rather than marked zones. It moves the ball through carry and run-out, and the green's tilt bends and paces every putt (Section 6).
 
 
 | Terrain | Effect on Form draw | Effect on distance | Other effects |
@@ -766,7 +766,7 @@ Nothing on the map accounts for the wind, the slope, the run-out or the Form car
 | **Rough** | Normal (swing tier still applies) | **-20%** — whatever distance you aimed for is multiplied by 0.8 | 1 chance in 5 of leaving a bad card in your Form deck (2026-11-16) |
 | **Bunker** | Forces the Extreme Finesse treatment regardless of swing tier: the club creates 1 fresh bad Form card on the spot, no draw, no choice, forced to play it | **-50%** — whatever distance you aimed for is multiplied by 0.5 | Driver/Fairway Woods unplayable — irons/wedges only |
 | **Water** | — | — | Not a lie you play from — a resolution outcome. +1 penalty stroke, ball placed back at nearest fairway/rough point at roughly the same distance as before the shot |
-| **Green** | N/A | N/A | Switches entirely to the putting meter (Section 6) |
+| **Green** | N/A | N/A | Putts are aimed on the green (Section 6) |
 
 The distance penalty applies to your actual aimed-for distance, not an abstract tier ceiling — aim for 200 yards from rough and the shot flies at 160 (before the Form card's own multiplier/bonus lands on top). A Flop Shot card ignores this penalty entirely (Section 4). Bunker already stacks two penalties at once (forced bad card + a steep distance cut, on top of Driver/Woods being unplayable there at all) — a deliberate "hazards should feel bad" design. Rough currently only affects distance, not card count; **playtest whether rough also needs its own Form-draw penalty** (e.g. dropping the card count by one tier-step) before locking these numbers in.
 
@@ -776,7 +776,13 @@ The distance penalty applies to your actual aimed-for distance, not an abstract 
 
 ### Wind
 
-Each hole has a wind, drawn when the hole starts and **held for the whole hole** — shown on the map (an arrow and mph in the corner), in the shot panel ("Wind 22 mph · into you, from the left"), and in the log. Like everything else in the long game it's known before you commit — but reading it is the player's job. The map's guide shows only where you are aiming (Section 4, "The aim guide"); nothing on it works out where the wind will put the ball, before the aim or after it.
+**One wind a round (2026-11-24).** A round has one wind, blowing over the whole course: its strength and where it comes from are drawn once, from the round's seed. What changes from hole to hole is which way the hole points on the course (the routing the title screen draws, `Course.to_hole()`), so the same wind is into you on one hole and behind you on the next, as on a real course. It sways a little from hole to hole (1 mph and 12 degrees either way: `Wind.SWAY_MPH`, `SWAY_DEG`) and still freshens through the round (below, now about a mile an hour a hole at most). Until this date every hole drew a wind of its own, so a 4 mph hole could follow a 30 mph one. What a round now has is a kind of day: a calm one, a breezy one, or a gale all the way round, with the terrain's old odds (below) now the odds of the day rather than of each hole. Alastair's call; the sizes of the sway are mine. **Not re-measured:** the rivals' typical scores and the front-nine/back-nine figures in "The course pushes back" were taken with a wind per hole.
+
+**Gusts (2026-11-25).** On a hole blowing 8 mph or more the wind gusts in real time. A lull of 4 to 11 seconds, then a gust that builds over 0.8 s, blows 2.5 to 4.5 s in all and dies over a second, at up to 1.6 times the wind's strength (`Wind.GUST_LULL`, `GUST_LAST`, `GUST_RISE`, `GUST_FALL`, `GUST_TIMES`, `GUST_FROM`). You can see one coming and going: the dial's needle lengthens, its number climbs and goes claret ("14 mph · gusts to 22"), and pale streaks cross the hole the way the wind blows. **A shot flies in the wind that is blowing at the moment its Form card is played**, part-gust included, so a shot can be held for a lull, or for a gust at your back. The shot report says when a shot was struck in one. High shots suffer most, as with the wind itself.
+
+This is the one place in the long game where *when* you act matters, beside putting. Alastair's call, in his words: "it happens on time at random intervals, you can sort of see it, but you might have to time your shot to it" — replacing a first version (one day old) in which one shot in five was rolled a gust, so nothing about a gust is rolled now. The sizes are mine. As built: the clock is each machine's own (`CourseMapView.gust`), the level at the click travels with the pick online (`{"index", "gust"}`, trusted as the putt meter's result was), a computer golfer takes whatever is blowing when it plays, and the flow harnesses and BotSim, which run no frames, never see a gust — so nothing here has been measured.
+
+Each hole's wind is set when the hole starts and **held for the whole hole** — shown on the map (an arrow and mph in the corner), in the shot panel ("Wind 22 mph · into you, from the left"), and in the log. Like everything else in the long game it's known before you commit — but reading it is the player's job. The map's guide shows only where you are aiming (Section 4, "The aim guide"); nothing on it works out where the wind will put the ball, before the aim or after it.
 
 - **Strength**: 0-35 mph, skewed toward calm — about one hole in five is calm, the median is ~10 mph, and roughly one in six blows 26+. Those are the parkland numbers; a course's terrain can change the range (Section 8) — a links blows harder, a desert barely at all.
 - **It gets up as the round goes on (2026-11-16)**: nothing changes through the first quarter of a round (holes 1-5 of 18), then each hole's draw is lifted, by up to 26% of the terrain's ceiling on the last hole (`Wind.LATE_LIFT`, on the ramp `Course.late()`: 0.2 at the turn, 0.5 on the 12th, 0.9 on the 16th), the lift fading to nothing as the draw nears the ceiling. So it is the quiet holes that go: on parkland a dead calm has become a 9 mph breeze by the 18th, one hole in five is calm on the 1st and none is from the 12th on, and the mean goes from 13.5 mph to 17.7 — while a 30+ mph hole stays one in ten all round. That last part is deliberate: the first version wore the calm skew down instead, which also made gales half as common again on the closing holes, and on Bogey Links those are the two water holes — the simulations showed it buying its difficulty with more 10s and 12s rather than more bogeys. See "The course pushes back" below.
@@ -831,43 +837,27 @@ Every hole has ground: a long profile (heights in feet at stations along the hol
 
 ---
 
-## 6. Putting — The Putting Meter (Timing)
+## 6. Putting — Aimed on the Green
 
-Putting is the one place in the game that asks for a timing input rather than a read. The long game is about *decisions under known information*; putting is about *nerve over a short one*, which is exactly how the real sport divides. Making the green feel different in kind from the fairway is the point — you stop calculating and start holding your breath.
+**Since 2026-11-24 a putt is aimed like every other shot, and nothing in the game is timed.** Until then putting was a timing meter (a marker swept a bar and you stopped it); Alastair's verdict was that the QTE was the weakest part of the game. The green now asks for the same thing the fairway does: read what is shown, and aim.
 
-**How it works**: a marker sweeps back and forth across a bar. Stop it (Space, or the Strike button) and where it lands decides the putt:
+**How it works**: on the green the map closes in on the ball and the hole. You click the green to set an **aim point**, and it means one thing: *where the ball would stop if the green were dead flat*. Its direction is the line, its distance the weight. Click again to move it; **Strike** (the button, or its key) plays it. The ball then rolls over the green's real slope:
 
-| Band | Result |
-|---|---|
-| **Sunk** (centre) | Holed out |
-| **Close** (flanking) | Missed, but the ball finishes near the hole — a short one left |
-| **Miss** (outside) | Pushed off line; how far it finishes depends on how wild the timing was |
+- **It breaks toward the low side.** A 2.5% fall across a 10-yard putt moves it about 2 feet; the break grows with the grade and the length.
+- **It runs on downhill and dies uphill.** Straight up a 2.5% slope a 10-yard putt needs about 5 feet more weight; straight down it, about 2 feet less.
+- **Too much pace and it will not drop.** The cup takes a ball that passes within 4 inches of its middle (about twice a real cup) with no more than 1.5 yards of roll left in it dead centre, less toward the lip. A putt dying at the hole has the whole cup to fall into; a firm one needs the middle.
 
-**Distance drives difficulty** — the single lever that makes the mini-game a real decision. As distance to the pin grows, the sunk band narrows *and* the marker sweeps faster:
+The map shows **where you are aiming, never where the ball will finish** (Section 4, "The aim guide"): a straight aim line and a readout against the hole ("1.7 ft left · 1.3 ft past"). The green's grades on your line are given exactly ("Falls 2.5% to the left · 1.0% uphill"), and the chevrons on the green point down the fall line. How far that moves the ball is the player's read, and the skill of putting is learning it. Watching a putt roll and take the break is the feedback: a miss shows by how much, and on which side.
 
-| Distance | Sunk band | Marker speed | Window on the band |
-|---|---|---|---|
-| 6 ft (tap-in) | 40% of the bar | 0.55 sweeps/sec | ~730 ms |
-| 15 ft | 31% | 0.78 | ~400 ms |
-| 12 yds | 23% | 0.97 | ~240 ms |
-| 25 yds | 15% | 1.18 | ~120 ms |
-| 30 yds+ | 12% (floor) | 1.25 (floor) | ~95 ms |
+**Distance still drives difficulty**, with no rule saying so: a longer putt breaks more, so the same misjudgement of the slope misses by more, and on the longest the aim is finer than the cursor. Leaving 25 yards is meaningfully worse than leaving 10 feet, so approach play keeps its target.
 
-The curve is eased so difficulty ramps hardest over the first stretch — the step up from a 3-footer to a 12-footer bites more than the step from 25 to 34 yards, where it's already a lag putt either way. Both ends are **floored deliberately**: at maximum difficulty the marker is still inside the sunk band for roughly six frames at 60fps, so the hardest putt in the game is a demanding read rather than a coin flip the player can't actually hit.
+**What the bag does**: everything that used to widen or narrow the meter's bands now makes **the cup play bigger or smaller** by the same amount, and the cup is drawn the size it plays: Steady Hands (+60%), a worn-in putter (+8% a level), Twitchy (a fifth smaller), and the Callowell and Slazinger putters' riders. The Blade Putter's second attempt is unchanged (the miss is shown, and the ball is back where it was). **The Yips** jab the putt 12 to 24 degrees off the line and up to 15% out on the weight, and the cup takes nothing: it misses however well it was read.
 
-**Why this shapes the long game**: because a putt's difficulty is set purely by where you land, approach play now has a real target rather than just "the green." Leaving yourself 25 yards on the green is meaningfully worse than leaving 10 feet — so laying up to a good distance, or reaching for the club that gets you close rather than merely on, becomes a live decision on the shot before.
+**Termination**: a putt can now finish further out than it started, if you send it there, but it never leaves the green (it stops at the edge), inside ~2 feet it is **conceded as a gimme**, and a hole is capped at triple par.
 
-**Termination**: every miss finishes at most as far out as it started, so a putting sequence always walks toward the hole. Inside ~2 feet the putt is **conceded as a gimme** — no drama left to play for, and it guarantees the loop can't grind forever on a short one. In practice a competent player averages 1.1-2.0 putts and even a badly struggling one tops out around 7.
+**The rules are a pure function** of the green, the ball and the aim (`ShotResolver.roll_putt`), so every machine in an online round rolls the same putt; the only roll is the Yips' jab. The computer golfers putt by the same rule: they work out the aim that would hole it and misread it a little on line and weight, set so that they score as they did on the meter. **Measured (2026-11-24)**: BotSim at Coley Niblick's settings (`aim=13,putt=185`), 24 rounds on each of the four courses per arm on seeds 101-124, the meter and the aimed putt from the same tree: +2.50 ± 0.50 against par on the meter, +2.51 ± 0.51 aimed (first numbers for the misread gave +1.12 ± 0.50, so it was loosened by a tenth).
 
-### Reading the green
-
-Every green has a tilt (Section 5, "Elevation & roll"), resolved against the putt line and shown three ways — the chevrons on the green, a one-line read above the meter ("Breaks left to right · downhill — quick, tighter window"), and the meter itself:
-
-- **Break moves the sweet spot.** Side slope shifts the sunk and close bands off centre toward the high side — you aim above the hole. The shift grows with the grade and the length of the putt (bar fraction = grade % × yards ÷ 120, capped at 28% of the bar), so a 3-footer on a tilted green is still nearly straight and a 12-yarder across one is a real read. A faint tick marks where "straight at it" would have been, so the size of the read is visible.
-- **Pace scales the bands.** Downhill putts tighten both bands (6% per 1% of grade, floor 0.7x); uphill putts loosen them slightly (cap 1.15x).
-- **Misses fall to the low side.** How far a miss leaves you is unchanged; which side of the hole it finishes on is now the green's doing, not a coin flip.
-
-Nothing here is hidden: the read is a pure function of the green and the ball's position, so every machine in an online round shows the same meter.
+**To settle in play**: the size of the cup (`PUTT_CUP_RADIUS`) and how hard the slope pulls (`PUTT_SLOPE_PULL`) are first numbers, tuned to the computer golfers and not yet to a person; and whether the grades should be shown as figures at all, or left to the chevrons.
 
 ---
 
@@ -940,11 +930,38 @@ Deck shuffles are deliberately **not** made deterministic. Doing so would need e
 
 **Disconnects:** a departed player's seat is retired, their hole conceded, and the round continues. Turn order skips them — necessary, since they would otherwise stay "furthest from the pin" forever and the hole would never end. If the host leaves, the round ends; there is no migration, which would be weeks of work against a problem friends solve socially.
 
-**One accepted cheat surface:** the putting meter is a real-time timing check on the putting player's own machine, and the host cannot verify the reported result. Trusting the client is the right call for a friends-only game; the alternative makes the one timing moment in the game feel laggy. Hardening it later means the host owning the meter clock.
+**The putt is no longer a cheat surface (2026-11-24).** While putting was a timing meter the client reported its own result and the host had to trust it. A putt is now an aim point like any other shot: the client sends where it aimed and the host rolls it.
+
+---
+
+## 7A. The Guided Round (2026-11-25)
+
+A new player's first solo round brings the game in a piece at a time. Nothing is cut; pieces are held back by hole, and Charlie says what each one is the first time it turns up (`scripts/Lessons.gd`). Why: the first tee showed about ten ideas at once and the first pro shop five more, and the systems had outrun what a new player could take in.
+
+| When | What arrives |
+|---|---|
+| Hole 1 | Club, aim, Form card, putt. Then straight to the pro shop: three plain clubs, keep one |
+| Hole 2 | What the dots on a club mean. At the shop: makers and sets |
+| Holes 1-2 | Light air only (wind capped at 5 mph, so no gusts to time) |
+| After hole 3 | The fork: a choice of stops. The maker rack over the bag |
+| Hole 4 | Trouble can leave a fault on a club. Staff, limited and second-hand clubs can be on the rack |
+| Hole 5 | Calling the hole |
+| After hole 6 | Dig and trade in. Everything is now in play |
+
+Lessons tied to an event (a miss joining the deck, a club wearing in, a gusting hole, a Staff or second-hand club on the rack) are said the first time the event happens, whichever hole that is.
+
+- A guided round is **not played for strokes in hand**, so a first round can't be cut short. The end page says the next one is.
+- It applies to a **solo round started from the title's Play** only: not hot-seat, rivals, the tour, online or editor test rounds, and no test script.
+- The "guided" setting starts on, switches itself off once a guided round passes hole 6, and can be switched back on in Settings.
+- On the shot screen a lesson is Charlie's bubble, which stays until the step it is about is taken (or it is clicked away). Between holes, where he can't be seen, it is a note on the page.
+
+The schedule (which hole each piece opens on) and every line are in `Lessons.gd`; the sizes are first guesses to tune by watching new players.
 
 ---
 
 ## 8. Course & Expansion Structure
+
+**The ladder (2026-11-24).** The game's courses open one at a time, in the picker's order: Bogey Links is open from the start, and each course after it is locked until a finished round on the one before came in at **5 over par or better** (`CourseLibrary.QUALIFY`; any round recorded on this machine counts, see Records). The tour waits until every course is open. The title screen shows a locked course faintly, says what would open it, and on an open course says what a round there would open; the end-of-round page says when a course has just opened. Courses saved from the editor are never locked, and Settings has a switch that opens everything. Alastair's calls: something to unlock, a target score as the key, and that difficulty should climb through the courses themselves and not through a separate ascension level or modifiers (harder courses are to be added later; the four that ship play about equally hard today). Mine: the figure of 5, one figure for every course, locking the tour, and the settings switch.
 
 - **Base game**: 1 full 18-hole course with a fixed, designed layout (yardages and hazard placement fixed), plus the base hazard/bad-card set and the shared club deck (standards + limited editions).
 - **Custom courses (built 2026-10-16)**: an in-game course editor builds courses of 1-18 holes in the same format the base course uses — fairway centreline, green, bunkers, water, elevation and green tilt — and saves them as JSON. Any course can be picked for solo, hot-seat or online play; the host's course travels in the round payload and is sanitised on arrival. Shorter courses simply mean fewer holes and fewer drafts, so the Bag never fills: brand sets are much harder to complete on a 3- or 9-hole course, which is fine for quick games but is not the balance the design targets.
@@ -976,7 +993,7 @@ These are the game's actual feel — everything else is dressing:
 1. **Full Form card list** (currently a first draft of 6 bad / 8 good) — needs expansion to a real deck-sized set.
 2. **Swing-tier draw-bias percentages** — exact numbers for how much full swing vs. finesse shifts your odds.
 3. **Created card sources and exhaust economy** — how often players should realistically have a Pure Strike/Big Strike available. *Sources and spending are now decided (Section 4, "As built"); how often a typical bag actually gets one is still to measure.*
-4. **Putting meter difficulty curve** — band widths and marker speed across the distance range. Distance is currently the only input.
+4. **Putting difficulty** — the size of the cup and how hard the slope pulls (Section 6). Tuned to the computer golfers so far, not to a person.
 5. **Whether brand sets actually get completed** — the single riskiest new assumption. If a typical 18-draft run never reaches a 4-set, the whole synergy layer is decoration. Measure this before tuning any individual bonus.
 6. **The coverage-vs-sets budget** — how many of the 14 slots a course's distance spread genuinely demands. Target ~8-9 for coverage, leaving 5-6 discretionary (Section 3A). Measure it on a real layout rather than guessing, but **keep the set bonuses themselves course-independent** so the measurement only tunes the budget, never the bonuses.
 7. **Whether the Bogey-Mart arc lands** — the starter set should feel bad enough that replacing it is a goal, without making the first three holes miserable.

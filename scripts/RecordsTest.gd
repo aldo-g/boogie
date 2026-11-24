@@ -38,6 +38,7 @@ func _initialize() -> void:
 	_check_holes()
 	_check_rounds()
 	_check_course_identity()
+	_check_ladder()
 	_check_settings()
 
 	_wipe()
@@ -112,6 +113,28 @@ func _check_course_identity() -> void:
 	Course.use(custom)
 	_expect(int(Records.best_round().strokes) == 3, "and the original keeps its record")
 	Course.use_builtin()
+
+
+# The ladder: a course opens when the one before it has a finished round
+# at CourseLibrary.QUALIFY over par or better.
+func _check_ladder() -> void:
+	var ids: Array = CourseLibrary.all().map(func(c): return str(c.id))
+	_expect(CourseLibrary.lock_on(ids[0]).is_empty(), "the first course is open")
+	Records.clear_course("builtin")
+	var lock := CourseLibrary.lock_on(ids[1])
+	_expect(not lock.is_empty() and str(lock.id) == ids[0], "the second course is locked behind the first")
+	_expect(not CourseLibrary.first_lock().is_empty(), "so the tour is locked too")
+	Course.use_builtin()
+	Records.record_round("You", 71 + CourseLibrary.QUALIFY + 1, 71, "solo")
+	_expect(not CourseLibrary.lock_on(ids[1]).is_empty(), "a round one over the target doesn't open it")
+	Records.record_round("You", 71 + CourseLibrary.QUALIFY, 71, "solo")
+	_expect(CourseLibrary.lock_on(ids[1]).is_empty(), "a round on the target opens it")
+	_expect(not CourseLibrary.lock_on(ids[2]).is_empty(), "the third course is still locked")
+	Settings.set_value("open_all", true)
+	_expect(CourseLibrary.lock_on(ids[2]).is_empty() and CourseLibrary.first_lock().is_empty(), "the setting opens every course")
+	Settings.set_value("open_all", false)
+	_expect(CourseLibrary.target_text(5) == "5 over par or better", "the target reads (%s)" % CourseLibrary.target_text(5))
+	Records.clear_course("builtin")
 
 
 func _check_settings() -> void:

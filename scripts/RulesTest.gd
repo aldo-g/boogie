@@ -339,17 +339,41 @@ func _check_settle() -> void:
 
 
 func _check_putting() -> void:
-	for start in [1.0, 3.0, 8.0, 20.0, 40.0]:
-		for result in ["close", "miss"]:
-			for acc in [0.0, 0.5, 1.0]:
-				var leave := ShotRules.putt_leave(result, acc, start)
-				_expect(leave <= start + 0.001, "a %s putt from %.0f never finishes further out (%.2f)" % [result, start, leave])
-				# A close one may finish inside the gimme (and is conceded); a
-				# miss always leaves something to play.
-				_expect(result == "close" or leave >= ShotRules.GIMME_YARDS - 0.001,
-					"a miss leaves at least a gimme (%.2f)" % leave)
-				_expect(leave > 0.0, "a %s putt stays out of the hole" % result)
-		_expect(ShotRules.yips_putt_leave(start) >= 1.0, "the Yips always leaves a putt")
+	# A putt is aimed and rolled over the green's own slope. From all round
+	# the hole on three tilted greens: a perfect read drops, and the slope is
+	# real (aimed straight at the hole from 10 yards, it stays out).
+	for n in [1, 2, 5]:
+		var hole := HoleData.hole(n)
+		var pin: Vector2 = hole.pin_pos
+		for deg in [0, 90, 180, 270]:
+			for d in [2.0, 6.0, 12.0]:
+				var ball: Vector2 = pin + Vector2(0, -d).rotated(deg_to_rad(deg))
+				if hole.terrain_at(ball) != "green":
+					continue
+				var what := "hole %d, %.0f yds at %d deg" % [n, d, deg]
+				var aim := ShotResolver.solve_putt(hole, ball)
+				var good := ShotResolver.roll_putt(hole, ball, aim)
+				_expect(good.holed and good.rest == pin, "a perfect read is holed (%s)" % what)
+				_expect(not ShotResolver.roll_putt(hole, ball, aim, 0.0).holed, "a Yips putt never drops (%s)" % what)
+				var yipped := ShotRules.yips_putt_aim(ball, aim, Vector2(0.0, 0.0))
+				_expect(not ShotResolver.roll_putt(hole, ball, yipped, 4.0).holed, "the Yips jab misses a cup four times the size (%s)" % what)
+				var hot := ShotResolver.roll_putt(hole, ball, ball + (pin - ball) * 2.5)
+				_expect(not hot.holed and hot.rest.distance_to(ball) > d, "a putt hit far too hard runs through (%s)" % what)
+				_expect(hole.terrain_at(hot.rest) == "green", "a putt never leaves the green (%s)" % what)
+				if d >= 12.0 and absf(ShotResolver.putt_read(hole, ball).fall) >= 0.01:
+					_expect(not ShotResolver.roll_putt(hole, ball, pin).holed, "aimed at the hole, a long breaking putt stays out (%s)" % what)
+	# A bigger cup takes a putt that just misses the plain one.
+	var flat := HoleData.hole(1)
+	var from: Vector2 = flat.pin_pos + Vector2(0, -6.0)
+	var read := ShotResolver.solve_putt(flat, from)
+	var wide: Vector2 = read + Vector2(ShotResolver.PUTT_CUP_RADIUS * 1.3, 0)
+	_expect(not ShotResolver.roll_putt(flat, from, wide).holed and ShotResolver.roll_putt(flat, from, wide, 1.6).holed,
+		"Steady Hands' cup takes a putt the plain cup lips out")
+	_expect(ShotResolver.cup_takes(0.0, ShotResolver.PUTT_CUP_PACE * 0.9, 1.0)
+		and not ShotResolver.cup_takes(ShotResolver.PUTT_CUP_RADIUS * 0.9, ShotResolver.PUTT_CUP_PACE * 0.9, 1.0),
+		"a firm putt drops dead centre and lips out at the edge")
+	_expect(ShotResolver.putt_aim_text(Vector2.ZERO, Vector2(0, 10), Vector2(-1, 10.5)) == "3 ft left · 1.5 ft past",
+		"the aim reads against the hole")
 	_expect(ShotRules.is_gimme(0.5) and not ShotRules.is_gimme(1.0), "the gimme is about 2 feet")
 	_expect(ShotRules.yips_effect([], FormCard.make("Yips")) == ShotRules.Yips.TAINTS_PUTT, "the Yips taints a putt")
 	_expect(ShotRules.yips_effect(_brand_bag("callowell", Brands.top_tier), FormCard.make("Yips")) == ShotRules.Yips.BLOCKED,
@@ -658,6 +682,18 @@ func _check_breakdown() -> void:
 	var into_out := ShotResolver.shot_outcome(hole, from, aim, result, club)
 	var into := ShotRules.shot_breakdown(hole, from, aim, result, club, into_out)
 	_expect(into.wind_along < -1.0, "a headwind costs carry (%.1f)" % into.wind_along)
+	# A gust is the same wind blowing harder: half a gust costs carry, a
+	# whole one more, and a light air doesn't gust at all.
+	var half := ShotResolver.shot_outcome(hole, from, aim, result, club, true, 0.5)
+	var gusted := ShotResolver.shot_outcome(hole, from, aim, result, club, true, 1.0)
+	_expect(gusted.carry < half.carry - 0.5 and half.carry < into_out.carry - 0.5,
+		"a gust into you costs carry by its strength (%.1f, %.1f, %.1f)" % [into_out.carry, half.carry, gusted.carry])
+	_expect(Wind.gust_mph(hole.wind) == 32 and Wind.gust_mph(-aim * 6.0) == 0, "a 20 mph wind gusts 32 and a 6 mph one doesn't gust")
+	_expect(Wind.gusted(-aim * 6.0, 1.0) == -aim * 6.0, "a wind that doesn't gust is the same wind at any level")
+	# In time: nothing through the lull, building, full, dying, then nothing.
+	_expect(Wind.gust_level(3.0, 5.0, 3.0) == 0.0 and Wind.gust_level(8.5, 5.0, 3.0) == 0.0, "no gust before it comes or after it has gone")
+	_expect(is_equal_approx(Wind.gust_level(5.0 + Wind.GUST_RISE * 0.5, 5.0, 3.0), 0.5) and Wind.gust_level(6.5, 5.0, 3.0) == 1.0,
+		"a gust builds and then blows at full strength")
 	# Wind from the left, blowing right.
 	hole.wind = Vector2(aim.y, -aim.x) * 20.0
 	var cross := ShotRules.shot_breakdown(hole, from, aim, result, club,
@@ -665,6 +701,16 @@ func _check_breakdown() -> void:
 	_expect(cross.wind_across > 1.0, "a left-to-right wind pushes it right (%.1f)" % cross.wind_across)
 	var text := ShotRules.breakdown_text(cross)
 	_expect(text.begins_with("Carried") and text.contains("right"), "the breakdown reads (%s)" % text)
+	# Two cards from 5 shots and 3 misses: 3/8 x 2/7, one hand in nine.
+	_expect(ShotRules.all_miss_odds(5, 3, 2) == "1 hand in 9" and ShotRules.all_miss_odds(5, 1, 2) == "never",
+		"the odds of a hand of nothing but misses (%s)" % ShotRules.all_miss_odds(5, 3, 2))
+	# The same shot as rows: aimed 130, finished 10 right and 5 long of it.
+	var mark := from + aim * 130.0
+	var rows := ShotRules.breakdown_rows(cross, from, mark, mark + aim * 5.0 + Vector2(aim.y, -aim.x) * 10.0)
+	_expect(rows[0] == ["Aimed", "130 yds"] and rows[1] == ["Finished", "10 right · 5 long"],
+		"the shot report says where it finished against the aim (%s)" % str(rows))
+	_expect(rows.any(func(r): return r[0] == "Wind" and str(r[1]).contains("right")),
+		"the shot report gives the wind its own row (%s)" % str(rows))
 
 
 # --- Staff clubs (Section 3C) --------------------------------------------
@@ -970,7 +1016,7 @@ func _check_growth() -> void:
 	var blade_putter := _club("Putter")
 	var band := ClubAbilities.putt_band_mult([blade_putter], 6.0, false)
 	blade_putter["level"] = 1
-	_expect(ClubAbilities.putt_band_mult([blade_putter], 6.0, false) > band, "a worn-in putter widens the meter's bands")
+	_expect(ClubAbilities.putt_band_mult([blade_putter], 6.0, false) > band, "a worn-in putter makes the cup play bigger")
 	blade_putter["curse"] = "twitchy"
 	_expect(ClubAbilities.putt_band_mult([blade_putter], 6.0, false) < band * (1.0 + ClubAbilities.PUTTER_WEAR_BAND),
 		"a twitchy one narrows them")

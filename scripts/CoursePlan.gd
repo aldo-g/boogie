@@ -34,6 +34,12 @@ const WATER_SHOWN := 16.0   # yards past the ground in play that a hole's water 
 # Terrains that lie by the sea: pixels of the sheet's left side, and of
 # its foot, given to it.
 const COAST := {"links": 84.0}
+# The sheet a routing is fitted to, as width over height: the title's plan
+# at the game's own window size, inland and by the sea. Fixed, so a course
+# lies the same way in a window of any shape — the wind is read off where
+# its holes point (Course.to_hole), and that must not move with the window.
+const ASPECT := 1.25
+const ASPECT_COASTAL := 1.28
 const HEADLAND := 190.0     # yards from the corner of the land to the first seaside hole either way
 const OPEN_WATER := 230.0   # yards off the line: water authored out this far, on one side, is the sea
 const COAST_START := 330.0  # yards in from the shore that a seaside course's first tee stands
@@ -47,6 +53,7 @@ const COAST_REACH := 110.0  # yards from the shore within which a seaside hole's
 const SNOWS := {"alpine": 112.0}
 
 var _holes: Array = []      # HoleData, in playing order
+var _name := ""             # the course's name: one called a links lies by the sea
 var _places: Array = []     # Transform2D each: that hole's yards -> the sheet's (y down)
 var _m := Transform2D()     # yards -> pixels for whatever is being painted
 
@@ -62,6 +69,7 @@ func show_course() -> void:
 	_holes = []
 	for n in range(1, Course.hole_count() + 1):
 		_holes.append(HoleData.hole(n))
+	_name = Course.active_name
 	_places = []
 	queue_redraw()
 
@@ -88,6 +96,19 @@ func _to_px(yard_pt: Vector2) -> Vector2:
 # water to the sea. The rest are then routed between them as above, except
 # that the round has to get from each of them to the next.
 # The same course always routes the same way.
+# The same course always routes the same way.
+static func lie(holes: Array, theme: String, course_name: String) -> Array:
+	var coastal := coast_of(theme, course_name) > 0.0
+	return route(holes, ASPECT_COASTAL if coastal else ASPECT, coastal)
+
+
+# Pixels of sea down the sheet's left and along its foot, or 0 inland. A
+# links is by the sea — the terrain, and any course that calls itself one
+# whatever ground it is built on (Bogey Links plays as parkland).
+static func coast_of(theme: String, course_name: String) -> float:
+	return COAST.get(theme, COAST.links if course_name.to_lower().contains("links") else 0.0)
+
+
 static func route(holes: Array, aspect: float = 1.0, coastal: bool = false) -> Array:
 	var out: Array = []
 	out.resize(holes.size())
@@ -366,13 +387,13 @@ func _draw() -> void:
 	var t: Dictionary = CourseTheme.get_theme((_holes[0] as HoleData).theme)
 
 	# Fit the routing to the sheet — against the sea, if the terrain has one.
-	var sea: float = COAST.get((_holes[0] as HoleData).theme, 0.0)
+	var sea: float = coast_of((_holes[0] as HoleData).theme, _name)
 	var snow: float = SNOWS.get((_holes[0] as HoleData).theme, 0.0)
 	var coastal := sea > 0.0
 	var room := Rect2(Vector2(sea if coastal else SHEET_EDGE, SHEET_EDGE + snow), Vector2.ZERO)
 	room.end = size - Vector2(SHEET_EDGE, sea if coastal else SHEET_EDGE)
 	if _places.is_empty():
-		_places = route(_holes, room.size.x / room.size.y, coastal)
+		_places = lie(_holes, (_holes[0] as HoleData).theme, _name)
 	var extent := Rect2()
 	for i in _holes.size():
 		var box := _rect_of((_places[i] as Transform2D) * footprint(_holes[i], i == 0, coastal))

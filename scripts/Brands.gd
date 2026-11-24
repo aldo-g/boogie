@@ -109,7 +109,7 @@ const DRAFTABLE := ["titanist", "callowell", "pingwell", "macgregorian", "slazin
 # the club takes the card out again. So the draft builds the deck you draw
 # from as well as the bag — a Titanist bag swings Knockdowns.
 #
-# Putters bring nothing: they are played on the meter, and their little
+# Putters bring nothing: they are aimed on the green, and their little
 # pile of chips is too small to take a card without changing its nature.
 const SIGNATURE := {
 	"titanist": "Knockdown",

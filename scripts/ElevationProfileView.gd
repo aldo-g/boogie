@@ -12,6 +12,9 @@ extends Control
 # ---------------------------------------------------------
 
 var map: CourseMapView
+# Set before it enters the tree: a 24px strip with no words of its own —
+# the caller says what it shows (the yardage book's game screen).
+var compact: bool = false
 
 var _hole: HoleData = null
 var _ball: Vector2 = Vector2.INF
@@ -34,7 +37,7 @@ const LIE_ROLE := {"fairway": "fairway", "green": "green", "rough": "rough",
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(0, 74)
+	custom_minimum_size.y = 24.0 if compact else 74.0
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
@@ -72,11 +75,14 @@ func _resample() -> void:
 
 func _to_px(yards_out: float, height: float) -> Vector2:
 	var end_y: float = _samples[_samples.size() - 1].x
-	var w: float = size.x - PAD_X * 2.0
-	var h: float = size.y - PAD_TOP - PAD_BOTTOM
+	var pad_x: float = 4.0 if compact else PAD_X
+	var top: float = 4.0 if compact else PAD_TOP
+	var bottom: float = 2.0 if compact else PAD_BOTTOM
+	var w: float = size.x - pad_x * 2.0
+	var h: float = size.y - top - bottom
 	return Vector2(
-		PAD_X + yards_out / max(end_y, 1.0) * w,
-		PAD_TOP + (1.0 - (height - _lo) / max(_hi - _lo, 0.001)) * h)
+		pad_x + yards_out / max(end_y, 1.0) * w,
+		top + (1.0 - (height - _lo) / max(_hi - _lo, 0.001)) * h)
 
 
 func _draw() -> void:
@@ -92,7 +98,7 @@ func _draw() -> void:
 	var line := PackedVector2Array()
 	for p in _samples:
 		line.append(_to_px(p.x, p.y))
-	var floor_y: float = size.y - PAD_BOTTOM + 4
+	var floor_y: float = size.y if compact else size.y - PAD_BOTTOM + 4
 	for i in line.size() - 1:
 		var mid_y: float = (_samples[i].x + _samples[i + 1].x) * 0.5
 		var lie := _hole.terrain_at(Vector2(_hole.centre_x_at(mid_y), mid_y))
@@ -106,15 +112,19 @@ func _draw() -> void:
 
 	# Flag.
 	var pin_px := _to_px(_hole.pin_pos.y, _hole.height_at(_hole.pin_pos))
-	draw_line(pin_px, pin_px + Vector2(0, -14), COLOR_PIN, 1.5)
-	draw_colored_polygon(PackedVector2Array([
-		pin_px + Vector2(0, -14), pin_px + Vector2(8, -11), pin_px + Vector2(0, -8)]), COLOR_PIN)
+	var pole: float = 10.0 if compact else 14.0
+	draw_line(pin_px, pin_px + Vector2(0, -pole), COLOR_PIN, 1.5)
+	if not compact:
+		draw_colored_polygon(PackedVector2Array([
+			pin_px + Vector2(0, -14), pin_px + Vector2(8, -11), pin_px + Vector2(0, -8)]), COLOR_PIN)
 
 	# Ball, at its real height (it may be off the centreline).
 	if _ball != Vector2.INF:
 		var ball_px := _to_px(clampf(_ball.y, 0.0, _samples[_samples.size() - 1].x), _hole.height_at(_ball))
 		draw_circle(ball_px, 4.0, Color(0.98, 0.98, 0.97))
 		draw_arc(ball_px, 4.0, 0, TAU, 14, BogeyTheme.INK, 1.2)
+		if compact:
+			return
 
 		# How far the flag sits above or below the ball, in feet.
 		var ft: int = int(round((_hole.height_at(_hole.pin_pos) - _hole.height_at(_ball)) * HoleData.FEET_PER_YARD))

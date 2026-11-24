@@ -6,7 +6,7 @@ extends RefCounted
 #
 # The page is white stock and black ink. Colour is rationed to three jobs
 # and never used for decoration:
-#   green — good news: good Form, under par, the sunk band
+#   green — good news: good Form, under par
 #   claret — bad news: bad Form, over par, warnings, the flag
 #   gilt  — Limited editions, and nothing else
 # Everything else — labels, rules, cards, buttons — is ink at some

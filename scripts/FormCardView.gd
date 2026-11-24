@@ -40,10 +40,16 @@ const SHOT_LENGTH := 50.0
 
 var form_card: FormCard
 var interactive: bool = true
+# Set before setup(): the card stood upright, 176 x 188, as dealt into the
+# bag strip under the hole — header, name, the shot drawn large, its
+# figures at the foot. Lifts up out of the row rather than sideways.
+var portrait: bool = false
+const PORTRAIT_SIZE := Vector2(176, 188)
+var _shot_length: float = SHOT_LENGTH
 
 var _style: StyleBoxFlat
 var _hover_tween: Tween
-var _layout_x: float = INF    # resting x from the column, captured on first hover
+var _layout_x: float = INF    # resting x (or y, upright) from the container, captured on first hover
 var _hovered: bool = false
 var _selected: bool = false
 
@@ -59,6 +65,9 @@ func setup(p_card: FormCard, p_interactive: bool = true) -> void:
 
 
 func _build() -> void:
+	if portrait:
+		_build_portrait()
+		return
 	custom_minimum_size = Vector2(0, MIN_HEIGHT)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	resized.connect(func(): pivot_offset = size / 2.0)
@@ -119,6 +128,55 @@ func _build() -> void:
 		gui_input.connect(_on_panel_input)
 
 
+func _build_portrait() -> void:
+	custom_minimum_size = PORTRAIT_SIZE
+	size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	resized.connect(func(): pivot_offset = size / 2.0)
+	_shot_length = 78.0
+	var accent := accent_color(form_card)
+	var deep: Color = BogeyTheme.FAIRWAY_DEEP if form_card.good else BogeyTheme.FLAG
+	_style = BogeyUI.card_style(12, 10)
+	CardFace.apply_state(_style, BogeyTheme.NEUTRAL_300, false, false)
+	add_theme_stylebox_override("panel", _style)
+	mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 0)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(col)
+	col.add_child(CardFace.header(accent, "Good" if form_card.good else "Bad", deep,
+		"Created" if form_card.created else str(FormCard.FAMILY_LABEL.get(form_card.family, "Any club"))))
+	var name_l := CardFace.name_label(form_card.name, 24, 0.0)
+	col.add_child(name_l)
+	var art := Control.new()
+	art.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	art.custom_minimum_size = Vector2(0, 40)
+	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	art.draw.connect(_draw_shot.bind(art))
+	col.add_child(art)
+	col.add_child(BogeyUI.hairline(0.12))
+	var foot := BogeyUI.body(_portrait_foot(), 11, BogeyTheme.INK)
+	foot.max_lines_visible = 2
+	foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(BogeyUI.margin(foot, 0, 6, 0, 0))
+	var detail := form_card.detail_text()
+	tooltip_text = form_card.effect_text() if detail == "" else detail
+	if interactive:
+		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		mouse_entered.connect(_on_hover_start)
+		mouse_exited.connect(_on_hover_end)
+		gui_input.connect(_on_panel_input)
+
+
+# The foot of an upright card: how straight · how far, in plain words.
+func _portrait_foot() -> String:
+	var parts := PackedStringArray()
+	for f in [form_card.line_figure(), form_card.distance_figure()]:
+		parts.append(" ".join(PackedStringArray((f as Array).map(func(x): return str(x)))) if f is Array else str(f))
+	return " · ".join(parts)
+
+
 # The shot in plan, to one scale on every card: the ball at the foot, the
 # target ringed at the head, the line between them dotted. The flight is
 # drawn in the card's colour — bending off the line by its degrees, as
@@ -127,15 +185,16 @@ func _build() -> void:
 func _draw_shot(d: Control) -> void:
 	var c := form_card
 	var accent := accent_color(c)
-	var ball := Vector2(d.size.x / 2.0, (d.size.y + SHOT_LENGTH) / 2.0)
-	var pin := ball - Vector2(0, SHOT_LENGTH)
+	var shot_len := minf(_shot_length, d.size.y - 14.0) if portrait else _shot_length
+	var ball := Vector2(d.size.x / 2.0, (d.size.y + shot_len) / 2.0)
+	var pin := ball - Vector2(0, shot_len)
 
 	d.draw_dashed_line(ball, pin + Vector2(0, 4.5), BogeyTheme.NEUTRAL_400, 1.0, 2.0)
 	d.draw_arc(pin, 4.0, 0.0, TAU, 24, BogeyTheme.NEUTRAL_600, 1.0, true)
 
 	var share: float = 1.14 if c.to_max_band else clampf(c.distance_mult, 0.2, 1.14)
 	var angle: float = deg_to_rad(c.degrees) * c.side
-	var length: float = SHOT_LENGTH * share
+	var length: float = shot_len * share
 	var finish := ball + Vector2(sin(angle), -cos(angle)) * length
 	# It starts on the line and bends away, as a hook or a slice does.
 	var bend := ball + Vector2(0, -length * 0.5)
@@ -171,7 +230,7 @@ func _draw_shot(d: Control) -> void:
 # chosen, shown before it is played: a full ink edge, as on the club in hand.
 func set_selected(on: bool) -> void:
 	_selected = on
-	CardFace.apply_state(_style, BogeyTheme.NEUTRAL_300, _hovered, _selected, STRIPE)
+	CardFace.apply_state(_style, BogeyTheme.NEUTRAL_300, _hovered, _selected, 0 if portrait else STRIPE)
 
 
 # Steps the card back: the ones passed over.
@@ -183,7 +242,7 @@ func _on_hover_start() -> void:
 	if not interactive:
 		return
 	_hovered = true
-	CardFace.apply_state(_style, BogeyTheme.NEUTRAL_300, true, _selected, STRIPE)
+	CardFace.apply_state(_style, BogeyTheme.NEUTRAL_300, true, _selected, 0 if portrait else STRIPE)
 	_animate_draw(-CardFace.LIFT)
 	z_index = 5
 	hover_started.emit(self)
@@ -193,7 +252,7 @@ func _on_hover_end() -> void:
 	if not interactive:
 		return
 	_hovered = false
-	CardFace.apply_state(_style, BogeyTheme.NEUTRAL_300, false, _selected, STRIPE)
+	CardFace.apply_state(_style, BogeyTheme.NEUTRAL_300, false, _selected, 0 if portrait else STRIPE)
 	_animate_draw(0.0)
 	z_index = 0
 	hover_ended.emit(self)
@@ -215,10 +274,11 @@ func _on_panel_input(event: InputEvent) -> void:
 func _animate_draw(offset_x: float) -> void:
 	if _hover_tween:
 		_hover_tween.kill()
+	var axis := "position:y" if portrait else "position:x"
 	if _layout_x == INF:
-		_layout_x = position.x
+		_layout_x = position.y if portrait else position.x
 	_hover_tween = create_tween()
-	_hover_tween.tween_property(self, "position:x", _layout_x + offset_x, CardFace.HOVER_TIME) \
+	_hover_tween.tween_property(self, axis, _layout_x + offset_x, CardFace.HOVER_TIME) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 

@@ -314,7 +314,7 @@ static func make(card_name: String) -> FormCard:
 			return FormCard.new("Bump and Run", true).with_flight(0.5).with_run(0.5)
 		"Steady Hands":
 			# Created only, and on the green only (Old Reliable Putter): it
-			# widens the putt meter's sunk band rather than shaping a shot.
+			# makes the cup play bigger rather than shaping a shot.
 			return FormCard.new("Steady Hands", true)
 		"In the Zone":
 			var zone := FormCard.new("In the Zone", true)

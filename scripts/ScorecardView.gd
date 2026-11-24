@@ -20,7 +20,7 @@ extends Control
 
 const ROW_H := 24.0
 const LABEL_W := 96.0          # the row labels: HOLE, PAR, SCORE
-const NAME_W := 132.0          # ...or, in a group, the players' names
+const NAME_W := 110.0          # ...or the players' names
 const CELL_W := 32.0
 const SUM_W := 44.0
 const PAR_W := 52.0     # the to-par column, at the far right
@@ -37,9 +37,9 @@ func _ready() -> void:
 	_layout()
 
 
-# A solo round: one line, labelled SCORE.
+# A solo round: one line, yours.
 func set_round(scores: Array, current_hole: int, strokes: int) -> void:
-	set_card([{"name": "Score", "scores": scores, "live": strokes, "active": false, "plain": true}], current_hole)
+	set_card([{"name": "You", "color": BogeyTheme.INK, "scores": scores, "live": strokes, "active": false}], current_hole)
 
 
 func set_card(rows: Array, current_hole: int) -> void:
@@ -106,7 +106,9 @@ func _draw() -> void:
 	# The hole in play, tinted top to bottom.
 	for c in _cols:
 		if c.kind == "hole" and c.n == _current_hole:
-			draw_rect(Rect2(c.x, 0, c.w, size.y), Color(BogeyTheme.INK, 0.055))
+			draw_rect(Rect2(c.x, ROW_H, c.w, size.y - ROW_H), Color(BogeyTheme.INK, 0.055))
+			# The hole in play, its number set white on an ink block.
+			draw_rect(Rect2(c.x + 2.0, 3.0, c.w - 4.0, ROW_H - 6.0), BogeyTheme.INK)
 
 	# --- HOLE -----------------------------------------------------------
 	var y := 0.0
@@ -116,7 +118,7 @@ func _draw() -> void:
 			"hole":
 				var here: bool = c.n == _current_hole
 				_text(BogeyUI.sans(700) if here else num_font, str(c.n), c.x, y, c.w, 12,
-					BogeyTheme.INK if here else faint)
+					BogeyTheme.NEUTRAL_100 if here else faint)
 			"out": _text(label_font, "OUT", c.x, y, c.w, 9, soft)
 			"in": _text(label_font, "IN", c.x, y, c.w, 9, soft)
 			"tot": _text(label_font, "TOT", c.x, y, c.w, 9, soft)

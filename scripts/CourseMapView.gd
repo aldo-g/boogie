@@ -43,6 +43,45 @@ var show_last_aim: bool = false:
 		if v != show_last_aim:
 			show_last_aim = v
 			queue_redraw()
+# The shot just played, as [struck from, aimed at] in yards, or empty. Drawn
+# after the ball has stopped, so the player can see how far the finish is
+# from the aim. It is a record of the last shot, never a forecast of the next.
+var last_aim: Array = []:
+	set(v):
+		if v != last_aim:
+			last_aim = v
+			queue_redraw()
+# On the green the aim is a putt's. `putt_cup` is the radius the cup plays
+# at, in yards (0 off the green): it is drawn that size, a click sets the
+# aim down without ending the aiming, and the aim reads in feet against the
+# hole. `aim_set` is true once it has been set down: it then stays put
+# under a passing cursor until the next click moves it.
+var putt_cup: float = 0.0:
+	set(value):
+		putt_cup = value
+		queue_redraw()
+var aim_set: bool = false
+# Gusts (Wind.gd): the wind in real time. `gust` is how much of one is
+# blowing now, 0 to 1; Main reads it as a Form card is played. `gusting`
+# is whether the clock runs at all: Main turns it on while a shot is being
+# chosen on a hole whose wind gusts.
+var gust: float = 0.0
+var gusting: bool = false:
+	set(v):
+		if v == gusting:
+			return
+		gusting = v
+		if v:
+			_gust_t = 0.0
+			_gust_lull = randf_range(Wind.GUST_LULL.x, Wind.GUST_LULL.y) * 0.5   # the first comes sooner
+			_gust_last = randf_range(Wind.GUST_LAST.x, Wind.GUST_LAST.y)
+			set_process(true)
+		else:
+			gust = 0.0
+		queue_redraw()
+var _gust_t := 0.0      # seconds into this lull-then-gust
+var _gust_lull := 0.0
+var _gust_last := 0.0
 var aim_min_range: float = 0.0     # yards — the selected club's min_yard
 var aim_max_range: float = 999.0   # yards — the selected club's max_yard
 var aim_club: Dictionary = {}      # the selected club dict, for drawing per-tier bands
@@ -146,9 +185,11 @@ const SPLASH_HOLD := 0.38
 const FX_LIFE := {"thump": 0.30, "rough": 0.38, "sand": 0.55, "splash": 0.80, "cup": 0.45}
 # A putt: yards rolled per second of animation (within the limits), then
 # the drop into the cup, then a beat before the fanfare.
-const PUTT_YARDS_PER_SEC := 11.0
-const PUTT_ROLL_MIN := 0.22
-const PUTT_ROLL_MAX := 0.85
+# A putt slows all the way, so its time goes with the root of its length:
+# a 10-yard putt takes about 1.7 seconds to get there.
+const PUTT_SEC_PER_ROOT_YARD := 0.55
+const PUTT_ROLL_MIN := 0.3
+const PUTT_ROLL_MAX := 2.6
 const PUTT_DROP_TIME := 0.20
 const PUTT_BEAT := 0.28
 const COLOR_BALL_SHADOW := Color(0.106, 0.129, 0.110, 0.35)
@@ -420,12 +461,13 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		aim_target = _clamp_to_range(_px_to_yard(event.position))
-		aiming = false
-		_hovering = false
+		if putt_cup <= 0.0:
+			aiming = false
+			_hovering = false
 		aim_picked.emit(aim_target)
 		queue_redraw()
 		accept_event()
-	elif event is InputEventMouseMotion:
+	elif event is InputEventMouseMotion and not aim_set:
 		_hovering = true
 		aim_target = _clamp_to_range(_px_to_yard(event.position))
 		aim_changed.emit(aim_target)
@@ -603,7 +645,8 @@ func _spawn_fx(kind: String, at: Vector2) -> void:
 	queue_redraw()
 
 
-# Only running while an effect is in the air (see _spawn_fx).
+# Only running while an effect is in the air (see _spawn_fx) or the wind
+# is gusting.
 func _process(delta: float) -> void:
 	var live: Array = []
 	for fx in _fx:
@@ -611,7 +654,14 @@ func _process(delta: float) -> void:
 		if fx.age < fx.life:
 			live.append(fx)
 	_fx = live
-	if _fx.is_empty():
+	if gusting:
+		_gust_t += delta
+		if _gust_t >= _gust_lull + _gust_last:
+			_gust_t = 0.0
+			_gust_lull = randf_range(Wind.GUST_LULL.x, Wind.GUST_LULL.y)
+			_gust_last = randf_range(Wind.GUST_LAST.x, Wind.GUST_LAST.y)
+		gust = Wind.gust_level(_gust_t, _gust_lull, _gust_last)
+	if _fx.is_empty() and not gusting:
 		set_process(false)
 	queue_redraw()
 
@@ -619,18 +669,21 @@ func _process(delta: float) -> void:
 # --- Putts ------------------------------------------------------------
 # The game decides a putt the moment it's struck and moves the ball there
 # and then. The map shows it happening: the ball rolls from where it was to
-# where it finished, and if that's the hole it drops — the cup's rattle on
+# where it finished along `path` (the line it took over the slope; straight
+# there without one), and if that's the hole it drops — the cup's rattle on
 # the drop, not before. Purely a picture: nothing waits on it except the
-# fanfare, which asks putt_beat() how long to hold off.
-func play_putt(from: Vector2, to: Vector2, holed: bool) -> void:
+# fanfare and the green's framing, which ask putt_beat() how long to hold off.
+func play_putt(from: Vector2, to: Vector2, holed: bool, path: Array = []) -> void:
 	if skip_animation or Settings.instant_shots() or hole == null or not is_inside_tree():
 		if holed:
 			_sound_play("cup")
 		return
+	var line: Array = path if path.size() >= 2 else [from, to]
+	var length: float = _path_length(line)
 	var roll: float = 0.0
-	if from.distance_to(to) > 0.05:
-		roll = clampf(from.distance_to(to) / PUTT_YARDS_PER_SEC, PUTT_ROLL_MIN, PUTT_ROLL_MAX)
-	_putts.append({"from": from, "to": to, "holed": holed, "roll": roll})
+	if length > 0.05:
+		roll = clampf(PUTT_SEC_PER_ROOT_YARD * sqrt(length), PUTT_ROLL_MIN, PUTT_ROLL_MAX)
+	_putts.append({"from": from, "to": to, "holed": holed, "roll": roll, "line": line, "length": length})
 	var takes: float = (roll + (PUTT_DROP_TIME + PUTT_BEAT if holed else 0.0)) / maxf(Settings.shot_speed_scale(), 0.01)
 	_putt_busy_until = maxi(_putt_busy_until, Time.get_ticks_msec()) + int(takes * 1000.0)
 	if _putts.size() == 1:
@@ -691,8 +744,10 @@ func _set_putt_drop(d: float) -> void:
 func _marker_hidden(at: Vector2) -> bool:
 	if hole and at.distance_to(hole.pin_pos) < 0.05:
 		return true
+	# ...nor where one is rolling from: a putt taken again (the Blade
+	# Putter) rolls away and the ball is then back where it was.
 	for p in _putts:
-		if at.distance_to(p.to) < 0.05:
+		if at.distance_to(p.to) < 0.05 or at.distance_to(p.from) < 0.05:
 			return true
 	return false
 
@@ -813,7 +868,15 @@ func _draw() -> void:
 	# rather than a solid line competing with the live flight trail.
 	if shot_path.size() >= 2:
 		for i in range(shot_path.size() - 1):
+			# Not to where a putt is still rolling to: the ball gets there first.
+			if _putts.any(func(p): return (p.to as Vector2).distance_to(shot_path[i + 1]) < 0.05):
+				break
 			_draw_dashed_line(_to_px(shot_path[i]), _to_px(shot_path[i + 1]), COLOR_TRAIL, 2.0, 6.0, 5.0)
+
+	if last_aim.size() == 2 and not aiming and not _aim_active and not _flight_active:
+		var mark := _to_px(last_aim[1])
+		_draw_aim_mark(_to_px(last_aim[0]), mark, Color(ARC_INK, 0.75), true)
+		_yardage_slip(mark + Vector2(0, 17), "aimed %d" % roundi((last_aim[1] as Vector2).distance_to(last_aim[0])), BogeyTheme.INK)
 
 	# --- Club yardages: hovering a bag card, and while aiming -----------
 	# The same arcs, drawn by the same function, so hovering a club and
@@ -831,7 +894,8 @@ func _draw() -> void:
 	# The guide shows where you are aiming and nothing more. Wind, slope,
 	# run-out and the Form card all act on the shot, but reading them is the
 	# player's job: nothing on the map works out where the ball will finish.
-	if aiming and (_hovering or input_locked):
+	# (Nor while a putt is rolling: the aim it was struck at has been played.)
+	if aiming and (_hovering or input_locked or aim_set) and _putts.is_empty():
 		# Live crosshair: follows the cursor; a click commits at this spot.
 		# Claret below the club's shortest yardage (Extreme Finesse, where the
 		# Form draw is forced bad), paper-white otherwise.
@@ -840,7 +904,8 @@ func _draw() -> void:
 		var col: Color = BogeyTheme.FLAG if out_of_band else ARC_INK
 		var target_px := _to_px(aim_target)
 		_draw_aim_mark(_to_px(ball_pos), target_px, col, false)
-		_yardage_slip(target_px + Vector2(0, 17), "%d yds" % roundi(dist_now),
+		_yardage_slip(target_px + Vector2(0, 17),
+			ShotResolver.putt_aim_text(ball_pos, hole.pin_pos, aim_target) if putt_cup > 0.0 else "%d yds" % roundi(dist_now),
 			BogeyTheme.FLAG if out_of_band else BogeyTheme.INK)
 	elif show_last_aim and not aiming and not _aim_active and not _flight_active and aim_target.distance_to(ball_pos) > 0.5:
 		# Last-committed aim, shown while the Form hand is read.
@@ -865,7 +930,14 @@ func _draw() -> void:
 		draw_line(origin_px, end_px, ARC_INK, 1.6, true)
 		draw_circle(end_px, 3.5, ARC_INK)
 
-	if hole.wind != Vector2.ZERO or aiming:
+	# On the green the cup is drawn the size it plays.
+	if putt_cup > 0.0:
+		draw_circle(_to_px(hole.pin_pos), maxf(putt_cup * _px_scale(), 4.0), BogeyTheme.INK)
+
+	# No wind dial on the green: a putt takes no notice of it.
+	if (hole.wind != Vector2.ZERO or aiming) and putt_cup <= 0.0:
+		if gust > 0.0:
+			_draw_gust_streaks()
 		_draw_wind_dial()
 	if hole.pin_name != "":
 		_draw_pin_note()
@@ -908,12 +980,33 @@ func _draw() -> void:
 			draw_arc(ball_px, ball_r, 0, TAU, 24, COLOR_BALL_OUTLINE, 1.5)
 	elif not _marker_hidden(ball_pos):
 		# Ball marker at its current resting position.
-		var ball_px := _to_px(ball_pos)
-		draw_circle(ball_px + Vector2(0, 2), 3.5, COLOR_BALL_SHADOW)
-		draw_circle(ball_px, BALL_RADIUS, COLOR_BALL)
-		draw_arc(ball_px, BALL_RADIUS, 0, TAU, 16, COLOR_BALL_OUTLINE, 1.5)
+		_draw_ball_at(_to_px(ball_pos))
 
 	_draw_putt()
+
+
+# Smaller once the map has closed in on a putt, where the cup is drawn to
+# scale and the ball has to look as if it fits.
+func _ball_radius() -> float:
+	return BALL_RADIUS * (0.7 if putt_cup > 0.0 else 1.0)
+
+
+# The ball at rest or rolling.
+func _draw_ball_at(px: Vector2) -> void:
+	var r: float = _ball_radius()
+	draw_circle(px + Vector2(0, 2), r * 0.7, COLOR_BALL_SHADOW)
+	draw_circle(px, r, COLOR_BALL)
+	draw_arc(px, r, 0, TAU, 16, COLOR_BALL_OUTLINE, 1.5)
+
+
+# The point `dist` yards along a line of points.
+static func _point_along(line: Array, dist: float) -> Vector2:
+	for i in range(1, line.size()):
+		var seg: float = (line[i] as Vector2).distance_to(line[i - 1])
+		if dist <= seg and seg > 0.0:
+			return (line[i - 1] as Vector2).lerp(line[i], dist / seg)
+		dist -= seg
+	return line[line.size() - 1]
 
 
 # A putt on its way (see play_putt): the ball rolling to where it finished
@@ -922,18 +1015,16 @@ func _draw_putt() -> void:
 	if _putts.is_empty():
 		return
 	var p: Dictionary = _putts[0]
-	var px := _to_px((p.from as Vector2).lerp(p.to, _putt_t))
+	var px := _to_px(_point_along(p.line, float(p.length) * _putt_t))
 	if bool(p.holed) and _putt_drop > 0.0:
 		# Over the lip: the cup shows dark, and the ball sinks into it,
 		# shrinking and losing the light.
-		draw_circle(px, 3.6, Color(BogeyTheme.INK, 0.9))
+		draw_circle(px, maxf(putt_cup * _px_scale(), 4.0), Color(BogeyTheme.INK, 0.9))
 		if _putt_drop < 1.0:
-			var r: float = BALL_RADIUS * lerpf(1.0, 0.4, _putt_drop)
+			var r: float = _ball_radius() * lerpf(1.0, 0.4, _putt_drop)
 			draw_circle(px + Vector2(0, 1.4 * _putt_drop), r, COLOR_BALL.darkened(0.55 * _putt_drop))
 		return
-	draw_circle(px + Vector2(0, 2), 3.5, COLOR_BALL_SHADOW)
-	draw_circle(px, BALL_RADIUS, COLOR_BALL)
-	draw_arc(px, BALL_RADIUS, 0, TAU, 16, COLOR_BALL_OUTLINE, 1.5)
+	_draw_ball_at(px)
 
 
 # The mark a landing leaves, for the fraction of a second it lasts. Sizes
@@ -995,33 +1086,55 @@ func _draw_fx() -> void:
 				draw_arc(c, lerpf(4.0, 13.0, out), 0, TAU, 28, Color(1.0, 1.0, 0.96, 0.7 * fade), 1.6)
 
 
+# A gust crossing the hole: pale streaks running the way the wind blows,
+# fading in as it builds and out as it dies. They show that one is on and
+# roughly how hard; the dial has the number.
+func _draw_gust_streaks() -> void:
+	var dir_px := Vector2(hole.wind.x, -hole.wind.y).normalized()
+	var across := Vector2(-dir_px.y, dir_px.x)
+	var span: float = size.length()
+	var t: float = Time.get_ticks_msec() / 1000.0
+	for i in 28:
+		# Each streak has its own lane across the wind and its own place along it.
+		var lane: float = (fposmod(float(i) * 0.618, 1.0) - 0.5) * span
+		var along: float = (fposmod(float(i) * 0.37 + t * (0.45 + 0.05 * float(i % 4)), 1.0) - 0.5) * span
+		var at: Vector2 = size * 0.5 + across * lane + dir_px * along
+		var length: float = 26.0 + 22.0 * gust
+		draw_line(at, at + dir_px * length, Color(1.0, 1.0, 0.96, 0.5 * gust), 1.6, true)
+
+
 # Wind dial in the top-left corner: an arrow the way it blows, and the
 # speed. Screen-up is toward the pin, so the arrow reads straight off the map.
 func _draw_wind_dial() -> void:
-	var speed := Wind.mph(hole.wind)
-	var c := Vector2(MARGIN + 22, MARGIN + 22)
-	draw_circle(c, 18.0, Color(BogeyTheme.CARD_BG, 0.88))
-	draw_arc(c, 18.0, 0, TAU, 28, Color(BogeyTheme.INK, 0.35), 1.0)
-	var font := get_theme_default_font()
+	# Live: in a gust the needle grows, the number climbs and both go claret.
+	var blowing := Wind.gusted(hole.wind, gust)
+	var speed := Wind.mph(blowing)
+	var r := 26.0
+	var c := Vector2(MARGIN + r + 4.0, MARGIN + r + 4.0)
+	draw_circle(c, r, Color(BogeyTheme.CARD_BG, 0.94))
+	draw_arc(c, r, 0, TAU, 36, Color(BogeyTheme.INK, 0.45), 1.2, true)
+	var font := BogeyUI.sans(600)
 	if speed < Wind.CALM_MPH:
-		draw_string(font, c + Vector2(-18, 4), "Calm", HORIZONTAL_ALIGNMENT_CENTER, 36, 10, BogeyTheme.INK_SOFT)
+		draw_string(font, c + Vector2(-r, 5), "Calm", HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, 13, BogeyTheme.INK)
 		return
 	var dir_px := Vector2(hole.wind.x, -hole.wind.y).normalized()
-	var col: Color = BogeyTheme.INK if speed < 18 else BogeyTheme.FLAG
-	var tail := c - dir_px * 11.0
-	var tip := c + dir_px * 11.0
-	draw_line(tail, tip, col, 2.0)
+	var col: Color = BogeyTheme.INK if speed < 18 and gust < 0.15 else BogeyTheme.FLAG
+	var reach := 16.0 + 6.0 * gust
+	var tail := c - dir_px * reach
+	var tip := c + dir_px * reach
+	draw_line(tail, tip, col, 2.6, true)
 	var side := Vector2(-dir_px.y, dir_px.x)
-	draw_colored_polygon(PackedVector2Array([tip + dir_px * 2.0, tip - dir_px * 6.0 + side * 4.5,
-		tip - dir_px * 6.0 - side * 4.5]), col)
+	draw_colored_polygon(PackedVector2Array([tip + dir_px * 3.0, tip - dir_px * 8.0 + side * 6.0,
+		tip - dir_px * 8.0 - side * 6.0]), col)
+	# The speed on its own slip of card under the dial: the dial sits over
+	# whatever country the course is cut through, and ink on forest can't be read.
 	var label := "%d mph" % speed
-	# On its own slip of card: the dial sits over whatever country the
-	# course is cut through, and ink on dark forest can't be read.
-	var slip := Rect2(c + Vector2(-19, 22), Vector2(38, 15))
-	draw_circle(slip.position + Vector2(0, 7.5), 7.5, Color(BogeyTheme.CARD_BG, 0.88))
-	draw_circle(slip.position + Vector2(slip.size.x, 7.5), 7.5, Color(BogeyTheme.CARD_BG, 0.88))
-	draw_rect(slip, Color(BogeyTheme.CARD_BG, 0.88))
-	draw_string(font, c + Vector2(-26, 33), label, HORIZONTAL_ALIGNMENT_CENTER, 52, 11, col)
+	if Wind.gust_mph(hole.wind) > 0:
+		label += " · gusts to %d" % Wind.gust_mph(hole.wind)
+	var w: float = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	var slip := Rect2(Vector2(maxf(MARGIN, c.x - w * 0.5 - 8.0), c.y + r + 5.0), Vector2(w + 16.0, 20))
+	draw_rect(slip, Color(BogeyTheme.CARD_BG, 0.94))
+	draw_string(font, slip.position + Vector2(8.0, 15.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, col)
 
 
 # Where today's pin is cut, in words, under the wind dial: the flag shows
@@ -1031,7 +1144,7 @@ func _draw_pin_note() -> void:
 	var font := get_theme_default_font()
 	var label := "Pin · %s" % hole.pin_name
 	var w: float = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-	var slip := Rect2(Vector2(MARGIN + 3 + 7.5, MARGIN + 64), Vector2(w - 3.0, 15))
+	var slip := Rect2(Vector2(MARGIN + 3 + 7.5, MARGIN + 90), Vector2(w - 3.0, 15))
 	draw_circle(slip.position + Vector2(0, 7.5), 7.5, Color(BogeyTheme.CARD_BG, 0.88))
 	draw_circle(slip.position + Vector2(slip.size.x, 7.5), 7.5, Color(BogeyTheme.CARD_BG, 0.88))
 	draw_rect(slip, Color(BogeyTheme.CARD_BG, 0.88))

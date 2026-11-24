@@ -80,6 +80,7 @@ var _bubble: PanelContainer
 var _text: Label
 var _tween: Tween
 var _showing: bool = false
+var _teaching: bool = false   # the line up is a lesson: it stays until dismissed
 var _hide_at: float = 0.0
 var _last_spoke: float = -1000.0
 var _current_forced: bool = false
@@ -160,6 +161,8 @@ func _process(delta: float) -> void:
 # that line is still having its time, this one is held and follows it
 # rather than being dropped.
 func react(kind: String, ctx: Dictionary, wait: bool = false) -> void:
+	if is_teaching():
+		return
 	_held = ""  # a newer event overtakes a line that was still waiting
 	var key := situation(kind, ctx, _rng)
 	var options := lines_for(key)
@@ -190,7 +193,23 @@ func react(kind: String, ctx: Dictionary, wait: bool = false) -> void:
 	say(text)
 
 
+# A lesson (Lessons.gd): said like any line, but it stays up until it is
+# clicked away, replaced, or Main dismisses it, and nothing he might
+# otherwise remark on talks over it.
+func teach(text: String) -> void:
+	_held = ""
+	_current_forced = true
+	say(text)
+	_teaching = true
+	_hide_at = INF
+
+
+func is_teaching() -> bool:
+	return _teaching and _showing
+
+
 func say(text: String) -> void:
+	_teaching = false
 	_last_spoke = _clock
 	_text.text = text
 	# Long lines stay up longer; nothing lingers past ten seconds.
@@ -222,6 +241,7 @@ func dismiss() -> void:
 	if not _showing:
 		return
 	_showing = false
+	_teaching = false
 	_kill_tween()
 	_tween = create_tween()
 	_tween.tween_property(_bubble, "modulate:a", 0.0, 0.15)

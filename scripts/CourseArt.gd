@@ -385,19 +385,22 @@ func _draw_green(hole: HoleData, t: Dictionary, s: float) -> void:
 
 
 # Fall-line chevrons on the green: point downhill, and only where it's
-# steep enough to matter.
+# steep enough to matter. Closer together when the map has closed in on a
+# putt, so there are always some round the ball and the hole to read.
 func _draw_green_slope(hole: HoleData) -> void:
 	if hole.green_tilt == Vector2.ZERO:
 		return
 	var r: float = hole.green_radius
-	var step: float = max(6.0, r / 2.5)
+	var s: float = maxf(view._px_scale(), MIN_SCALE)
+	var step: float = minf(max(6.0, r / 2.5), 70.0 / s)
+	var clear: float = minf(3.0, 30.0 / s)   # kept off the hole itself
 	var col := Color(BogeyTheme.FAIRWAY_DEEP, 0.55)
 	var y := -r
 	while y <= r:
 		var x := -r
 		while x <= r:
 			var p: Vector2 = hole.green_pos + Vector2(x, y)
-			if Geometry2D.is_point_in_polygon(p, hole.green_polygon) and p.distance_to(hole.pin_pos) > 3.0:
+			if Rect2(Vector2.ZERO, size).has_point(_to_px(p)) and Geometry2D.is_point_in_polygon(p, hole.green_polygon) and p.distance_to(hole.pin_pos) > clear:
 				var g := hole.gradient_at(p)
 				if g.length() > 0.008:
 					var down := -g.normalized()

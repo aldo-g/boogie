@@ -6,7 +6,7 @@ extends RefCounted
 #
 # Class-level statics rather than an autoload, like GameSetup: plain
 # values that need no node, readable from anywhere (Sound, the map, the
-# putt meter's key) and loaded the first time anything asks.
+# putt's strike key) and loaded the first time anything asks.
 #
 #   volume     — master / music / sfx, 0..1 each
 #   shot_speed — how shots animate: normal, fast, or instant
@@ -26,6 +26,8 @@ const DEFAULTS := {
 	"sfx": 1.0,
 	"shot_speed": ShotSpeed.NORMAL,
 	"putt_key": KEY_SPACE,
+	"open_all": false,   # every course open, whatever has been scored (CourseLibrary.lock_on)
+	"guided": true,      # the next solo round is a guided one (Lessons.gd); off once one has been played
 }
 
 static var _values: Dictionary = {}

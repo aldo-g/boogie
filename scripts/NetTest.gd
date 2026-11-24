@@ -267,9 +267,8 @@ func _pick_action(g) -> Dictionary:
 				return {}
 			return {"kind": "discard", "payload": {"index": randi() % g.hand.size()}}
 		g.State.PUTTING:
-			return {"kind": "putt", "payload": {
-				"result": ["sunk", "close", "miss"][randi() % 3],
-				"accuracy": randf()}}
+			return {"kind": "putt", "payload": {"aim": ShotResolver.solve_putt(g.hole, g.ball_pos) \
+				+ (Vector2.ZERO if randi() % 3 == 0 else Vector2(randf_range(-2.0, 2.0), randf_range(-2.0, 2.0)))}}
 	return {}
 
 

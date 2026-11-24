@@ -42,6 +42,10 @@ static var round_payload: Dictionary = {}
 # button goes back to the editor instead of the title.
 static var return_to_editor: bool = false
 
+# A solo round that brings the game in a piece at a time (Lessons.gd).
+# Only the title's solo Play sets it, from the "guided" setting.
+static var guided: bool = false
+
 
 # --- The tour (Section 3G) ---------------------------------------------
 # The game's four courses played as one run, alone. `tour_leg` is which
@@ -64,6 +68,7 @@ static func start_tour() -> void:
 # previous online session can't leak settings into it.
 static func reset_to_local(count: int) -> void:
 	player_count = count
+	guided = false
 	tour = false
 	tour_leg = 0
 	tour_bag = []

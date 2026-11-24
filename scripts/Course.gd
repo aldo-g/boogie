@@ -78,6 +78,26 @@ static func late(n: int) -> float:
 	return smoothstep(0.25, 1.0, clampf(float(n - 1) / float(count - 1), 0.0, 1.0))
 
 
+# Where each hole of the active course lies on the property: the routing
+# the title screen draws (CoursePlan.lie), worked out once per course.
+static var _lie: Array = []
+
+
+# A direction over the course (on that plan: x right, y down) as hole `n`
+# has it, in the hole's own yards. How one wind over the whole course
+# becomes into you on one hole and behind you on the next (Wind.gd).
+static func to_hole(n: int, over_course: Vector2) -> Vector2:
+	if _lie.is_empty():
+		var holes: Array = []
+		for i in range(1, hole_count() + 1):
+			holes.append(HoleData.hole(i))
+		# By path: CoursePlan has no class_name, and names this class.
+		_lie = load("res://scripts/CoursePlan.gd").lie(holes, active_theme, active_name)
+	if n < 1 or n > _lie.size():
+		return over_course
+	return (_lie[n - 1] as Transform2D).basis_xform_inv(over_course)
+
+
 # 1-based, matching current_hole_index.
 static func hole_def(n: int) -> Dictionary:
 	if _active_holes.is_empty():
@@ -95,6 +115,7 @@ static func is_shipped() -> bool:
 
 
 static func use_builtin() -> void:
+	_lie = []
 	active_name = BUILTIN_NAME
 	active_theme = CourseTheme.DEFAULT
 	_active_holes = []
@@ -108,6 +129,7 @@ static func use(course: Dictionary) -> void:
 	if holes.is_empty():
 		use_builtin()
 		return
+	_lie = []
 	active_name = str(course.get("name", "Custom course"))
 	active_theme = CourseTheme.sanitise(course.get("theme", CourseTheme.DEFAULT))
 	_active_holes = holes.duplicate(true)

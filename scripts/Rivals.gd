@@ -5,13 +5,13 @@ extends RefCounted
 #
 # A rival is GreedyBot (the same player the balance harness uses) with a
 # human's two weaknesses dialled in: how badly it misjudges a line, and
-# how unsteady it is on the putt meter. It plays the real rules through
+# how far out its read of a putt is. It plays the real rules through
 # the same entry points as a person — its own bag, its own draft, its own
 # Form deck — so it can be beaten the same way a person can, and it never
 # sees anything the screen doesn't show.
 #
 # `typical` is what each one shoots on the built-in course (par 71),
-# measured with BotSim: BOTSIM_VARIANT="aim=<aim>,putt=<putt ms>". Re-run
+# measured with BotSim: BOTSIM_VARIANT="aim=<aim>,putt=<putt x 1000>". Re-run
 # that after changing a number here, or the title screen will be lying.
 # As measured late on 2026-11-16 (48 rounds each, seeds 101-148): 85.8,
 # 74.5 and 66.6 — after the holes were reshaped, the course began to push
@@ -38,7 +38,7 @@ const SKILLS := {
 		"name": "Dory Mulligan",
 		"blurb": "Weekend hacker",
 		"aim": 19.0,     # yards of misjudgement per 100 yards of shot (sd)
-		"putt": 0.225,   # putt-meter timing error, seconds (sd)
+		"putt": 0.225,   # how far out its read of a putt is (GreedyBot.putt_error)
 		"typical": 17,   # strokes against par on the built-in course
 	},
 	"medium": {
@@ -85,5 +85,5 @@ static func make_bot(skill: String, seed_value: int) -> GreedyBot:
 	# Set the same way BotSim sets them, so the measured scores above are
 	# the scores this bot shoots.
 	bot.aim_error = float(s.aim)
-	bot.putt_timing_sd = float(s.putt)
+	bot.putt_error = float(s.putt)
 	return bot

@@ -23,8 +23,9 @@ extends RefCounted
 #   Hunt   — the draft's other moves (DraftRules.gd): it calls birdie on a
 #            hole it fancies, trades in a club the bag would not miss, and
 #            digs when the rack offers next to nothing.
-#   Putt   — the meter's real bands (PuttMeter.bands) against a human-ish
-#            timing error, so putting is neither perfect nor random.
+#   Putt   — the aim that would hole it (ShotResolver.solve_putt), misread
+#            a little on line and weight, so putting is neither perfect
+#            nor random.
 #
 # Abilities are spent greedily: when the saving on this shot clears a small
 # threshold.
@@ -34,10 +35,9 @@ const Tier := ShotResolver.Tier
 const DraftRules := preload("res://scripts/DraftRules.gd")
 const Route := preload("res://scripts/Route.gd")
 
-# A human stopping the putt marker: timing error, standard deviation in
-# seconds. 100 ms averages ~1.2 putts from 10 yds and ~1.6 from 30 — a
-# steady amateur, inside the 1.1-2.0 Section 6 expects of a competent player.
-var putt_timing_sd: float = 0.10
+# How far out its read of a putt is (see _misread): 0.10 is a steady
+# amateur, the rivals run 0.15 to 0.225.
+var putt_error: float = 0.10
 # Range session once the Form deck holds this many bad cards (it starts
 # with 12)...
 var range_bad_at: int = 15
@@ -222,8 +222,7 @@ func act(main) -> bool:
 			main.on_discard_pick(cut)
 		main.State.PUTTING:
 			_arm_putt_abilities(main)
-			var r := putt(main)
-			main.on_putt_stopped(r[0], r[1])
+			main.on_putt(putt(main))
 		_:
 			return false
 	return true
@@ -604,44 +603,59 @@ func _arm_putt_abilities(main) -> void:
 
 # --- Putting ----------------------------------------------------------------
 
-# [result, accuracy] for the putt in hand, as a human with a steady but
-# imperfect stroke would stop the meter.
-func putt(main) -> Array:
-	var read := ShotResolver.putt_read(main.hole, main.ball_pos)
-	var mult: float = read.band_mult * ShotRules.putt_band_mult(main.hand, main.putt_dist, main.me.armed)
-	return _stroke(main.putt_dist, mult)
+# Where it aims the putt in hand: the aim that would hole it, as well as
+# it can read it.
+func putt(main) -> Vector2:
+	var ball: Vector2 = main.ball_pos
+	return _misread(ball, main.hole.pin_pos, ShotResolver.solve_putt(main.hole, ball))
 
 
-func _stroke(dist: float, band_mult: float) -> Array:
-	var b := PuttMeter.bands(dist, band_mult)
-	var offset: float = absf(rng.randfn(0.0, putt_timing_sd) * float(b.speed))
-	offset = minf(offset, 0.5)
-	var accuracy := clampf(1.0 - offset / 0.5, 0.0, 1.0)
-	if offset <= b.sunk_half:
-		return ["sunk", accuracy]
-	if offset <= b.close_half:
-		return ["close", accuracy]
-	return ["miss", accuracy]
+# A read is out three ways, each scaled by putt_error: a wobble on any
+# putt, a line that drifts with the length of it, and a misjudged share of
+# the break; and the weight is out by a share of the length.
+const READ_WOBBLE := 0.37   # yards
+const READ_LINE := 0.011    # yards per yard of putt
+const READ_BREAK := 0.44    # share of the break allowed for
+const READ_WEIGHT := 0.26   # yards per yard of putt
+# The break a putt has on a typical green, per yard: what the putt table
+# below assumes, having no green to read.
+const TYPICAL_BREAK := 0.04
+
+func _misread(ball: Vector2, pin: Vector2, ideal: Vector2, typical: bool = false) -> Vector2:
+	var d: float = ball.distance_to(pin)
+	var line: Vector2 = (ideal - ball).normalized()
+	var across := Vector2(line.y, -line.x)
+	var to_pin: Vector2 = (pin - ball).normalized()
+	var allowed: float = TYPICAL_BREAK * d if typical \
+		else absf((ideal - pin).dot(Vector2(to_pin.y, -to_pin.x)))
+	return ideal \
+		+ across * rng.randfn(0.0, putt_error * (READ_WOBBLE + READ_LINE * d + READ_BREAK * allowed)) \
+		+ line * rng.randfn(0.0, putt_error * READ_WEIGHT * d)
 
 
-# Expected putts from each distance on flat ground under the same stroke
-# model, built bottom up: every leave is shorter than the putt it came from.
+# Expected putts from each distance under the same misread, built bottom
+# up on a flat green: there the ball goes straight to the aim and stops,
+# so no roll has to be run.
 func _build_putt_table() -> void:
 	var n := 81  # 0 .. 40 yards in half yards
 	_putts.resize(n)
 	var samples := 300
+	var pin := Vector2.ZERO
 	for i in range(n):
 		var d := i * 0.5
 		if ShotRules.is_gimme(d):
 			_putts[i] = 1.0
 			continue
+		var ball := Vector2(0, -d)
+		var ideal := Vector2(0, ShotResolver.PUTT_IDEAL_PAST)
 		var total := 0.0
 		for s in samples:
-			var r := _stroke(d, 1.0)
+			var aim := _misread(ball, pin, ideal, true)
 			total += 1.0
-			if r[0] == "sunk":
+			var near: Vector2 = Geometry2D.get_closest_point_to_segment(pin, ball, aim)
+			if ShotResolver.cup_takes(near.length(), near.distance_to(aim), 1.0):
 				continue
-			var leave := ShotRules.putt_leave(r[0], r[1], d)
+			var leave: float = aim.length()
 			if ShotRules.is_gimme(leave):
 				total += 1.0
 			else:
@@ -908,7 +922,7 @@ func _dead_club(bag: Array) -> int:
 # two on a par 5 with a full bag).
 func birdie_chance(main) -> float:
 	var expected := _lerp_table(OFF_GREEN, main.hole.tee_pos.distance_to(main.hole.pin_pos))
-	var skill := 0.50 - 0.016 * aim_error - 1.1 * (putt_timing_sd - 0.10)
+	var skill := 0.50 - 0.016 * aim_error - 1.1 * (putt_error - 0.10)
 	var bag := 0.012 * float(maxi(main.hand.size() - 3, 0))
 	return clampf(skill + bag + 0.3 * (float(main.hole_par) - expected), 0.0, 0.9)
 

@@ -88,11 +88,14 @@ static func _save() -> void:
 # game's own, else a hash of a custom course's holes so an edited course
 # doesn't inherit the old one's records.
 static func course_key() -> String:
-	if Course.active_id == Course.BUILTIN_ID:
-		return "builtin"
 	if Course.active_id != "":
-		return "course:%s" % Course.active_id
+		return key_for(Course.active_id)
 	return "custom:%x" % hash(JSON.stringify(Course.active().get("holes", [])))
+
+
+# The key of one of the game's own courses, by its CourseLibrary id.
+static func key_for(id: String) -> String:
+	return "builtin" if id == Course.BUILTIN_ID else "course:%s" % id
 
 
 static func course(key: String = "") -> Dictionary:

@@ -48,7 +48,7 @@ const EVENTS := {
 	"cart": {"title": "The drinks cart", "take": "Have one", "keeps": true,
 		"text": "Two strokes in hand. A Top joins your wood form."},
 	"hustler": {"title": "The hustler", "take": "Play him", "keeps": true,
-		"text": "One putt on the practice green, from five yards, on the real meter. Hole it and it is three strokes in hand. Miss and it is two gone."},
+		"text": "One putt on the practice green, from five yards. Hole it and it is three strokes in hand. Miss and it is two gone."},
 }
 const CART_STROKES := 2
 const HUSTLER_WIN := 3

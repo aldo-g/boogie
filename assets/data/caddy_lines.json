@@ -327,19 +327,19 @@
 	"putt_long": [
 		"Long one. Just get it close. Two putts is fine from here.",
 		"Lag it up. Nobody holes these, so leave yourself a tap-in.",
-		"{dist}. Hard to hit the marker on this one, so just aim to get close.",
+		"{dist}. Hard to hole from here, so just aim to get close.",
 		"Big putt. Don't be a hero, be a two-putter."
 	],
 	"putt_mid": [
 		"Read it, trust it, stroke it.",
-		"Nice and smooth. Stop the marker in the green and it drops.",
-		"{dist}. Makeable. Watch the marker and time it.",
+		"Nice and smooth. Pick your line, give it enough, and it drops.",
+		"{dist}. Makeable. Read the slope and trust it.",
 		"Steady hands. The fish in me believes in you."
 	],
 	"putt_short": [
 		"Short one. Firm and straight, no wobbling.",
 		"You've holed a thousand of these. Make it a thousand and one.",
-		"{dist}. Wide green band, nice and slow. You've got this.",
+		"{dist}. Not much break in that. You've got this.",
 		"Easy does it. Don't let the minnow-sized putts get in your head."
 	],
 	"putt_close": [
@@ -348,7 +348,7 @@
 		"So near. Good effort, short one left."
 	],
 	"putt_miss": [
-		"Mishit. Still, it's walked closer. Go again.",
+		"Misread. Still, it's walked closer. Go again.",
 		"Off line. Shake it off. The next one's shorter.",
 		"That one floundered. Reset and roll it."
 	],

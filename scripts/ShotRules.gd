@@ -160,6 +160,16 @@ static func form_choice_count(bag: Array, tier: int, lie: String, created: int =
 	return maxi(1, FormDeck.TIER_DRAW_COUNT.get(tier, 3) + draw_bonus(bag, club, lie)) + created
 
 
+# How often a hand of `seen` cards from a pile of `good` shots and `bad`
+# misses is nothing but misses, in words: "never" or "1 hand in 9". The
+# pile's own odds; the deal itself comes from the cards not yet drawn.
+static func all_miss_odds(good: int, bad: int, seen: int) -> String:
+	var p := 1.0
+	for i in range(seen):
+		p *= maxf(0.0, bad - i) / maxf(1.0, good + bad - i)
+	return "never" if p <= 0.0 else "1 hand in %d" % maxi(1, roundi(1.0 / p))
+
+
 # Cards added to (or taken from) the tier's draw: the bag's set bonuses,
 # and the club's own. Never enough taken to leave no card at all — see
 # FormDeck.draw_for_shot().
@@ -369,30 +379,25 @@ static func is_gimme(putt_dist: float) -> bool:
 	return putt_dist <= GIMME_YARDS
 
 
-# How much wider than the green alone the putt meter's bands are: putter
-# riders in the bag, and Steady Hands when it's switched on.
+# How much bigger than its own size the cup plays: putter riders in the
+# bag, and Steady Hands when it's switched on.
 static func putt_band_mult(bag: Array, putt_dist: float, armed: Dictionary = {}) -> float:
 	return ClubAbilities.putt_band_mult(bag, putt_dist, armed.has("old_reliable"))
 
 
-# How far a putt the Yips has tainted leaves the ball, regardless of the
-# strike.
+# Where a putt the Yips has tainted is really struck: jabbed 12 to 24
+# degrees off the line and up to 15% out on the weight. `jerk` is the roll,
+# each part -1..1. (The cup takes nothing on that putt either, so it
+# misses however it was aimed.)
+static func yips_putt_aim(ball: Vector2, aim: Vector2, jerk: Vector2) -> Vector2:
+	var side: float = 1.0 if jerk.x >= 0.0 else -1.0
+	var turn: float = deg_to_rad(side * lerpf(12.0, 24.0, absf(jerk.x)))
+	return ball + (aim - ball).rotated(turn) * (1.0 + 0.15 * jerk.y)
+
+
+# About how far a Yips putt leaves the ball, for a golfer weighing the risk.
 static func yips_putt_leave(putt_dist: float) -> float:
 	return maxf(1.0, putt_dist * 0.35)
-
-
-# How far a putt that stayed out leaves the ball. `result` is the meter's
-# "close" or "miss"; `accuracy` is 0..1. A miss never finishes further out
-# than it started, so a putting sequence always walks toward the hole.
-static func putt_leave(result: String, accuracy: float, putt_dist: float) -> float:
-	if result == "close":
-		# The better the timing, the closer it finishes.
-		return minf(lerpf(2.2, 0.6, accuracy), maxf(putt_dist * 0.5, GIMME_YARDS))
-	# A miss scales with how wild the timing was, and with how long the
-	# putt was to begin with: badly struck lag putts can race well past,
-	# short ones only ever dribble off line.
-	var leave: float = lerpf(0.25, 0.06, accuracy) * maxf(putt_dist, 3.0)
-	return clampf(leave, GIMME_YARDS, minf(putt_dist, 12.0))
 
 
 # --- What the ball actually did ------------------------------------------
@@ -456,3 +461,35 @@ static func breakdown_text(b: Dictionary) -> String:
 		bits.append("the card bent it %d° %s" % [int(b.degree),
 			"left" if int(b.side) == ShotResolver.Side.DRAW else "right"])
 	return " · ".join(PackedStringArray(bits)) + " (yds)"
+
+
+# The same shot told as a story, for the shot panel: what you aimed, where
+# it finished against that aim, and what the wind and the ground each did.
+# [label, value] rows, with the causes that did nothing left out.
+static func breakdown_rows(b: Dictionary, from_pos: Vector2, aim_point: Vector2, rest: Vector2) -> Array:
+	var rows: Array = [["Aimed", "%d yds" % roundi(from_pos.distance_to(aim_point))]]
+	var dir := (aim_point - from_pos).normalized()
+	var miss := rest - aim_point
+	var long := miss.dot(dir)
+	var right := miss.dot(Vector2(dir.y, -dir.x))  # as in shot_breakdown()
+	var off: Array = []
+	if absf(right) >= 1.0:
+		off.append("%d %s" % [roundi(absf(right)), "right" if right > 0.0 else "left"])
+	if absf(long) >= 1.0:
+		off.append("%d %s" % [roundi(absf(long)), "long" if long > 0.0 else "short"])
+	rows.append(["Finished", "on your mark" if off.is_empty() else " · ".join(PackedStringArray(off))])
+	var wind: Array = []
+	if absf(b.wind_along) >= 1.0:
+		wind.append(("added %d" if b.wind_along > 0.0 else "cost %d") % roundi(absf(b.wind_along)))
+	if absf(b.wind_across) >= 1.0:
+		wind.append("%d %s" % [roundi(absf(b.wind_across)), "right" if b.wind_across > 0.0 else "left"])
+	if not wind.is_empty():
+		rows.append(["Wind", " · ".join(PackedStringArray(wind))])
+	var ground: Array = []
+	if absf(b.elevation) >= 1.0:
+		ground.append("%s %d" % ["uphill cost" if b.elevation < 0.0 else "downhill added", roundi(absf(b.elevation))])
+	if b.roll >= 1.0:
+		ground.append("rolled %d" % roundi(b.roll))
+	if not ground.is_empty():
+		rows.append(["Ground", " · ".join(PackedStringArray(ground))])
+	return rows

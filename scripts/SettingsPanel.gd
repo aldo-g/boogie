@@ -70,6 +70,36 @@ func _build() -> void:
 	_refresh_key_button()
 
 	add_child(BogeyUI.hairline(0.12))
+	add_child(BogeyUI.kicker("Courses"))
+	var open_all := Button.new()
+	open_all.focus_mode = Control.FOCUS_NONE
+	var show_open := func():
+		var on: bool = bool(Settings.get_value("open_all"))
+		open_all.text = "Every course open" if on else "Courses open as you qualify"
+		BogeyUI.style_button(open_all, on, 14)
+	open_all.pressed.connect(func():
+		Settings.set_value("open_all", not bool(Settings.get_value("open_all")))
+		show_open.call())
+	show_open.call()
+	add_child(open_all)
+	add_child(BogeyUI.body("A course opens when you score %s on the one before it. Press to open them all." % CourseLibrary.target_text(CourseLibrary.QUALIFY), 12, BogeyTheme.NEUTRAL_600))
+
+	add_child(BogeyUI.hairline(0.12))
+	add_child(BogeyUI.kicker("Learning the game"))
+	var guided := Button.new()
+	guided.focus_mode = Control.FOCUS_NONE
+	var show_guided := func():
+		var on: bool = bool(Settings.get_value("guided"))
+		guided.text = "Next solo round is guided" if on else "Guided round off"
+		BogeyUI.style_button(guided, on, 14)
+	guided.pressed.connect(func():
+		Settings.set_value("guided", not bool(Settings.get_value("guided")))
+		show_guided.call())
+	show_guided.call()
+	add_child(guided)
+	add_child(BogeyUI.body("A guided round brings the game in a piece at a time over six holes, with your caddy explaining each, and is not played for strokes in hand. It switches itself off once you have played one.", 12, BogeyTheme.NEUTRAL_600))
+
+	add_child(BogeyUI.hairline(0.12))
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", 10)
 	add_child(footer)

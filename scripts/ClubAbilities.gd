@@ -33,7 +33,7 @@ enum Period { HOLE, ROUND, SIX_HOLES }
 
 const HAZARD_LIES := ["rough", "bunker"]
 
-# Steady Hands: how much wider the putt meter's bands get.
+# Steady Hands: how much bigger the cup plays.
 const STEADY_HANDS_WIDEN := 0.6
 
 
@@ -178,7 +178,7 @@ static func severity(bag: Array, club: Dictionary) -> float:
 # A club is built as well as drafted. All of it is kept on the club's own
 # Dictionary (`marks`, `level`, `boosts`, `curse`, and the `shots` it
 # brings), so it travels with the bag online and leaves with the club.
-# Putters take no part: they bring no shots and are played on the meter.
+# Putters take no part: they bring no shots and are aimed on the green.
 
 static func grows(club: Dictionary) -> bool:
 	return not (club.get("shots", []) as Array).is_empty()
@@ -312,7 +312,7 @@ static func curse_info(id: String) -> Dictionary:
 # --- The putter (Section 3E "The putter") -------------------------------
 # It brings no shots, so it wears its own way: a putt holed in one from
 # PUTT_MARK_YARDS or more leaves a mark, a level comes with no choice to
-# make (the putt meter's bands are wider), and three putts on a green can
+# make (the cup plays bigger), and three putts on a green can
 # leave it twitchy. Regrip mends that.
 
 static func is_putter(club: Dictionary) -> bool:
@@ -324,7 +324,7 @@ static func is_putter(club: Dictionary) -> bool:
 const PUTT_MARK_YARDS := 5.0
 const PUTTER_WEAR_BAND := 0.08   # wider bands, a level
 const PUTTER_CURSES := {
-	"twitchy": {"name": "Twitchy", "does": "The putt meter's bands are a fifth narrower"},
+	"twitchy": {"name": "Twitchy", "does": "The cup plays a fifth smaller"},
 }
 const TWITCHY_BAND := 0.8
 const TWITCHY_PUTTS := 3         # putts on one green that can leave it

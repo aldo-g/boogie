@@ -44,16 +44,15 @@ func _initialize() -> void:
 			m.state == m.State.CLUB_SELECT and m.hand.size() == bag_before and m.me.draft_stop == "")
 
 	# --- Actions sent in the wrong phase ---
-	m.on_putt_stopped("sunk", 1.0)
+	m.on_putt(m.hole.pin_pos)
 	_check("putt in CLUB_SELECT refused", m.state == m.State.CLUB_SELECT and m.strokes == 0)
 
-	# --- A garbage putt result, in the right phase ---
 	m.on_club_select(0)
 	_check("legit club_select advanced to AIM", m.state == m.State.AIM)
 	m._on_aim_picked(m.map_view.aim_target)
 	_check("legit aim advanced to FORM_DRAW", m.state == m.State.FORM_DRAW)
 	# Wrong-phase putt again, now from FORM_DRAW.
-	m.on_putt_stopped("sunk", 1.0)
+	m.on_putt(m.hole.pin_pos)
 	_check("putt in FORM_DRAW refused", m.state == m.State.FORM_DRAW)
 	# A legit form pick must be ACCEPTED (not refused). Check the shooter's
 	# own stroke count, not m.strokes — the turn passes after the shot, so

@@ -72,6 +72,9 @@ const NARROW_SPECIMEN := 400.0
 # differently once four of its maker's clubs are in it (ClubAbilities
 # .is_awake), and the card shows it as it plays there. Empty: on its own.
 var bag: Array = []
+# A bag tile only: {good, bad}, the cards the club is dealt from (see
+# _form_pips). Empty everywhere else.
+var form: Dictionary = {}
 
 var _panel: PanelContainer
 var _size: Vector2 = CARD_SIZE
@@ -179,6 +182,8 @@ func _build_tile(limited: bool) -> void:
 	var with_unit: bool = CardFace.figure_width(WIDEST_CARRY) <= avail
 	var carry: Array = _carry_figure()
 	vbox.add_child(CardFace.figure([carry if with_unit else [carry[0], ""]]))
+	if int(form.get("good", 0)) + int(form.get("bad", 0)) > 0:
+		vbox.add_child(_form_pips())
 
 	# "LIMITED · WEDGE" where a tile has room for the longest of them; on a
 	# narrower one the gilt frame says Limited and the label keeps to the type.
@@ -214,6 +219,22 @@ func _build_tile(limited: bool) -> void:
 	kind.clip_text = true
 	kind.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(kind)
+
+
+# The cards this club is dealt from right now, a dot each: green for a shot,
+# claret for a miss. What picking the club puts at stake, without a hover.
+func _form_pips() -> Control:
+	var good := int(form.get("good", 0))
+	var n := good + int(form.get("bad", 0))
+	var c := Control.new()
+	c.custom_minimum_size = Vector2(0, 8)
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	c.draw.connect(func():
+		var step := minf(9.0, c.size.x / n)
+		for i in range(n):
+			c.draw_circle(Vector2(step * (i + 0.5), 4.0), minf(2.8, step * 0.38),
+				BogeyTheme.FAIRWAY_DEEP if i < good else BogeyTheme.FLAG))
+	return c
 
 
 # The draft specimen: the engraving, the club in full, and what taking it
@@ -353,7 +374,7 @@ func _club_column(avail: float, room: float, spell_out: bool) -> VBoxContainer:
 		+ fig.custom_minimum_size.y + sep * 2
 
 	if spell_out and ctype == "putter":
-		var putt := CardFace.words("Playable anywhere. On the green, switches to the putt meter.")
+		var putt := CardFace.words("Playable anywhere. On the green, you aim the putt.")
 		putt.custom_minimum_size = Vector2(avail, 0)
 		col.add_child(putt)
 

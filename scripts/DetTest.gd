@@ -123,7 +123,6 @@ func _serialize_player(p) -> Dictionary:
 		"aim_target": p.aim_target,
 		"holed_out": p.holed_out,
 		"putt_dist": p.putt_dist,
-		"putt_dir": p.putt_dir,
 		"yips_pending": p.yips_pending,
 		"round_scores": p.round_scores.duplicate(true),
 	}
@@ -144,7 +143,6 @@ func _apply_player(p, d: Dictionary) -> void:
 	p.aim_target = d.aim_target
 	p.holed_out = d.holed_out
 	p.putt_dist = d.putt_dist
-	p.putt_dir = d.putt_dir
 	p.yips_pending = d.yips_pending
 	p.round_scores = d.round_scores.duplicate(true)
 
@@ -292,12 +290,10 @@ func _choose_action() -> Array:
 				return []
 			return ["discard", randi() % a.hand.size()]
 		a.State.PUTTING:
-			# The accuracy travels WITH the action (it's the player's
-			# timing, not a roll), so both instances get the same pair.
-			return ["putt", {
-				"result": ["sunk", "close", "miss"][randi() % 3],
-				"accuracy": randf(),
-			}]
+			# The aim travels WITH the action (it's the player's read, not a
+			# roll), so both instances get the same point.
+			return ["putt", ShotResolver.solve_putt(a.hole, a.ball_pos) \
+				+ (Vector2.ZERO if randi() % 3 == 0 else Vector2(randf_range(-2.0, 2.0), randf_range(-2.0, 2.0)))]
 	return []
 
 
@@ -333,7 +329,7 @@ func _apply_action(m, kind: String, arg) -> void:
 		"form": m.on_form_pick(arg)
 		"draft": m.on_draft_pick(arg)
 		"discard": m.on_discard_pick(arg)
-		"putt": m.on_putt_stopped(arg.result, arg.accuracy)
+		"putt": m.on_putt(arg)
 		"ability": m.on_ability(arg)
 		"call": m.on_call_hole()
 		"dig": m.on_dig()

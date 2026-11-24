@@ -247,10 +247,15 @@ func family_form() -> Dictionary:
 # and its own shots.
 func club_form(club: Dictionary) -> Dictionary:
 	var out := {"good": 0, "bad": 0}
-	for c in deck + discard:
-		if _in_family(c, FormCard.family_of(club), str(club.get("name", ""))):
-			out["good" if c.good else "bad"] += 1
+	for c in club_cards(club):
+		out["good" if c.good else "bad"] += 1
 	return out
+
+
+# The cards themselves: every card `club` can be dealt, drawn or discarded.
+func club_cards(club: Dictionary) -> Array:
+	return (deck + discard).filter(func(c):
+		return _in_family(c, FormCard.family_of(club), str(club.get("name", ""))))
 
 
 # --- Cards a club brings (Section 4 "Clubs bring their shots") -----------

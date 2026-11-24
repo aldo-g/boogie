@@ -39,7 +39,7 @@
 			{"name": "Callowell 9-Iron", "min_yard": 70, "max_yard": 115, "type": "iron", "ability": "Wide band"},
 			{"name": "Callowell Gap Wedge", "min_yard": 40, "max_yard": 85, "type": "wedge", "ability": "A Shank played with this club cannot downgrade your lie", "effects": {"no_lie_downgrade": true}},
 			{"name": "Callowell Sand Wedge", "min_yard": 20, "max_yard": 65, "type": "wedge", "ability": "Wide band"},
-			{"name": "Callowell Mallet Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "Putts of 10+ yds get a 20% wider band", "effects": {"putt_long_band": 1.2}},
+			{"name": "Callowell Mallet Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "On putts of 10+ yds the cup plays 20% bigger", "effects": {"putt_long_band": 1.2}},
 			{"name": "Callowell Fairway Wood", "min_yard": 150, "max_yard": 200, "type": "wood", "ability": "Mishits (Top, Thin, Chunk, Skied) played with this club hit at half severity", "effects": {"soft_mishits": true}},
 			{"name": "Callowell Staff Hybrid", "min_yard": 140, "max_yard": 190, "type": "iron", "ability": "Staff club: a bad card played with it goes back on top of your Form deck. In a bag with 4 Callowell clubs: it leaves your Form deck for good", "effects": {"bad_fate": "top"}, "staff": {"bad_fate": "gone"}},
 			{"name": "Callowell Staff Wedge", "min_yard": 30, "max_yard": 80, "type": "wedge", "ability": "Staff club: a bad card played with it goes back on top of your Form deck. In a bag with 4 Callowell clubs: it leaves your Form deck for good", "effects": {"bad_fate": "top"}, "staff": {"bad_fate": "gone"}}
@@ -51,7 +51,7 @@
 			{"name": "Ping-Well Driver", "min_yard": 175, "max_yard": 220, "type": "wood", "ability": "Widened Mid tier: the middle half of the band, not the middle third", "effects": {"mid_span": 0.5}},
 			{"name": "Ping-Well Lob Wedge", "min_yard": 15, "max_yard": 55, "type": "wedge", "ability": "Played from rough or sand, adds a Flop Shot to your Form draw", "effects": {"power": "lob_flop"}},
 			{"name": "Ping-Well Gap Wedge", "min_yard": 45, "max_yard": 90, "type": "wedge", "ability": "Widened Mid tier: the middle half of the band, not the middle third", "effects": {"mid_span": 0.5}},
-			{"name": "Ping-Well Mallet Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "Steady Hands widens the sunk band twice as much", "effects": {"steady_mult": 2.0}},
+			{"name": "Ping-Well Mallet Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "Steady Hands counts double", "effects": {"steady_mult": 2.0}},
 			{"name": "Ping-Well i-Series 6", "min_yard": 115, "max_yard": 160, "type": "iron", "ability": "Widened Mid tier: the middle half of the band, not the middle third", "effects": {"mid_span": 0.5}},
 			{"name": "Ping-Well Staff 4-Wood", "min_yard": 160, "max_yard": 205, "type": "wood", "ability": "Staff club: it has no Mid tier, so every swing draws two. In a bag with 4 Ping-Well clubs: every swing is Mid, even below its range", "effects": {"no_mid": true}, "staff": {"no_mid": false, "all_mid": true}},
 			{"name": "Ping-Well Staff 7-Iron", "min_yard": 100, "max_yard": 145, "type": "iron", "ability": "Staff club: it has no Mid tier, so every swing draws two. In a bag with 4 Ping-Well clubs: every swing is Mid, even below its range", "effects": {"no_mid": true}, "staff": {"no_mid": false, "all_mid": true}}
@@ -75,7 +75,7 @@
 			{"name": "Slazinger Deep Iron", "min_yard": 120, "max_yard": 165, "type": "iron", "ability": "Buffers 20% worse", "effects": {"buffer": 1.2}},
 			{"name": "Slazinger Blast Wedge", "min_yard": 35, "max_yard": 90, "type": "wedge", "ability": "Flies 75% of the aim out of sand, not 50%", "effects": {"bunker_cap": 0.75}},
 			{"name": "Slazinger Long Iron", "min_yard": 165, "max_yard": 215, "type": "iron", "ability": "Buffers 20% worse", "effects": {"buffer": 1.2}},
-			{"name": "Slazinger Heavy Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "Putts of 10+ yds: 25% wider band. Under 4 yds: 20% narrower", "effects": {"putt_long_band": 1.25, "putt_short_band": 0.8}},
+			{"name": "Slazinger Heavy Putter", "min_yard": 0, "max_yard": 35, "type": "putter", "ability": "On putts of 10+ yds the cup plays 25% bigger. Under 4 yds: 20% smaller", "effects": {"putt_long_band": 1.25, "putt_short_band": 0.8}},
 			{"name": "Slazinger Short Iron", "min_yard": 90, "max_yard": 135, "type": "iron", "ability": "Buffers 20% worse", "effects": {"buffer": 1.2}},
 			{"name": "Slazinger Staff Driver", "min_yard": 195, "max_yard": 260, "type": "wood", "ability": "Staff club: the longest there is, and bad cards played with it hit 50% harder. In a bag with 4 Slazinger clubs: they hit no harder than anyone else's", "effects": {"severity": 1.5}, "staff": {"severity": 0.8}},
 			{"name": "Slazinger Staff Iron", "min_yard": 150, "max_yard": 200, "type": "iron", "ability": "Staff club: bad cards played with it hit 50% harder. In a bag with 4 Slazinger clubs: they hit no harder than anyone else's", "effects": {"severity": 1.5}, "staff": {"severity": 0.8}}

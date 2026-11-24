@@ -168,7 +168,7 @@ func _check_input_is_ignored() -> void:
 		_main.State.DISCARD_FOR_DRAFT, _main.State.DISCARD_FOR_HAZARD:
 			_main.submit("discard", {"index": 0})
 		_main.State.PUTTING:
-			_main.submit("putt", {"result": "sunk", "accuracy": 1.0})
+			_main.submit("putt", {"aim": ShotResolver.solve_putt(_main.hole, _main.ball_pos)})
 			_main._on_strike_pressed()
 		_:
 			return

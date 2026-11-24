@@ -20,7 +20,7 @@ Play a round of golf across a **fixed 18-hole course** (a designed layout —
 no random hole generation; four ship with the game, each on its own
 terrain). Grow a bag of club cards as you go, resolve each
 shot by picking from a hand of Form cards whose effects are fully visible, and
-finish on the green with a timing-based putting meter. Solo play is against
+finish on the green by aiming the putt over its slope. Solo play is against
 par; **2-4 players** can share a screen in hot-seat, and you can take on a
 **computer golfer** at one of three skill levels.
 
@@ -66,8 +66,8 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
   fitting bay a club you hold takes a **boost**: Regrip, Custom fit, New
   shaft, Fresh grooves or Lead tape.
 - **The putter grows too**: a putt holed in one from fifteen feet or more is a
-  mark, and each level widens the putt meter's bands. Three putts on a
-  green can leave it twitchy (narrower bands) until a Regrip mends it.
+  mark, and each level makes the cup play bigger. Three putts on a
+  green can leave it twitchy (a smaller cup) until a Regrip mends it.
 - **Tempo and Pocket**: a Controlled Draw or Fade, once played, deals your
   next swing one more card; a Stinger or Punch Out passed over waits in
   your pocket and joins your next hand, once.
@@ -172,6 +172,15 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
   from the middle, never in it by the end, and more and more often on the
   side nearest sand or water. Your bag is fuller by then; so is the
   course's.
+- **One wind a round.** It blows over the whole course from one
+  direction, so it is into you on one hole and behind you on another
+  depending on which way the hole points, and it sways a mile an hour or
+  so between holes. A course called a links lies by the sea on the title's map.
+- **Gusts.** In a wind of 8 mph or more the wind gusts in real time, every
+  few seconds, to 1.6 times its strength. The dial and streaks across the
+  hole show a gust building and dying, and a shot flies in the wind that
+  is blowing when you play its Form card: wait for a lull, or use a gust
+  at your back. The sizes are in `scripts/Wind.gd`.
 - Both come from one seed per round, so everyone in an online round sees
   the same wind and the same pins.
 
@@ -183,11 +192,14 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
 - Anything short of 20 rattles the cup and leaves a short putt scaled by the
   roll, so the die is visible in where the ball ends up.
 
-**Putting — a timing meter**
-- The deliberate exception to "no timing checks": a marker sweeps a bar and you
-  stop it. Distance to the pin sets both the width of the sunk band and the
-  marker's speed, so a tap-in is nearly free and a long lag putt is a real
-  nerve test.
+**Putting — aimed on the green**
+- Nothing is timed. The map closes in on the green; you click to set an aim
+  point (where the ball would stop if the green were flat: its direction is
+  the line, its distance the weight) and strike. The ball then rolls over the
+  green's real slope: it breaks toward the low side, runs on downhill and
+  dies uphill, and with too much pace it will not drop.
+- The green's grades on your line are shown exactly; how far they move the
+  ball is your read.
 - Putts inside 0.7 yards (about 2 feet) are conceded as a gimme.
 
 ## Records and settings
@@ -259,7 +271,7 @@ A computer golfer is an ordinary seat in a hot-seat round, played by
 `GreedyBot` through the same functions the screen calls for a person. It
 plays the real rules with its own bag, draft pool and Form deck, and it
 sees nothing the screen doesn't show. What separates the three is only how
-badly each misjudges a line and how unsteady each is on the putt meter.
+badly each misjudges a line and how far out each one's read of a putt is.
 
 - You watch their turn: the club, the line on the map, the Form hand they
   drew, the card they keep (lit), then the
@@ -287,11 +299,8 @@ If a player drops, their seat is retired, the hole is conceded for them,
 and the round carries on. If the *host* drops the round ends — there is no
 host migration.
 
-One accepted limitation: the putting meter is a real-time timing check on
-the putting player's own machine, so the host takes their word for the
-result. For a game among friends that is the right trade; hardening it
-would mean the host owning the meter's clock, which would make the one
-timing-based moment in the game feel laggy.
+A putt is an aim point like any other shot: the client sends where it
+aimed and the host rolls it, so no result is taken on trust.
 
 ### Per-player state
 
@@ -350,6 +359,7 @@ Bogey/
     ├── DraftAdvisor.gd    What a draft pick would change, and what a cut would cost
     ├── DraftRules.gd      The rules of the draft: the call, the dig, the trade-in
     ├── Route.gd           The way round: the stop after each hole, and the hut
+    ├── Lessons.gd         The guided first round: what is held back until which hole, and what the caddy says
     ├── Settings.gd        Volume, shot speed and putt key, saved between sessions
     ├── SettingsPanel.gd   The settings controls (title page and in-game popup)
     ├── ClubRoster.gd      Loads the club roster; starter bag, draft pool, live brands
@@ -386,7 +396,7 @@ Bogey/
     ├── CourseArt.gd       The painted ground under it, drawn once per hole
     ├── CoursePlan.gd      The whole course on one sheet, for the title screen
     ├── ElevationProfileView.gd  Side-view elevation strip under the hole map
-    ├── Wind.gd            Per-hole wind from the round's seed, and how to describe it
+    ├── Wind.gd            The round's wind, as each hole lies to it, and how to describe it
     ├── Pins.gd            Where each green's hole is cut this round, from the same seed
     ├── PuttMeter.gd       The putting timing meter
     ├── CardFace.gd        The one card: the layout, type scale and states clubs and Form cards share
@@ -471,7 +481,10 @@ godot --headless --script res://scripts/CourseTest.gd
 
 ## Courses
 
-Four 18-hole courses ship with the game. Step through them with the
+Four 18-hole courses ship with the game. They open one at a time: each is
+locked until you finish a round on the one before it at 5 over par or
+better (`QUALIFY` in `scripts/CourseLibrary.gd`), and the tour opens with
+the last of them. Settings can open them all. Step through them with the
 arrows beside the course name on the title screen.
 
 | Course | Terrain | Par | Yards | What it's like |
@@ -493,7 +506,7 @@ Form deck — are the same everywhere.
 | Alpine | 0.8x — soft, the ball holds | about 13 mph | Pine forest, rock, snow |
 
 Both are known before you swing, like everything else in the long game:
-firmness is already in every run-out, and the wind is drawn per hole
+firmness is already in every run-out, and the wind is drawn once a round
 as before, just from that terrain's range (and, on any terrain, getting up
 as the round goes on). The title screen says what the
 selected course's terrain does. The whole table is `THEMES` in
@@ -592,7 +605,7 @@ takes a few seconds.
 
 ## Not in this version
 
-- A per-flight weather deck (wind is per hole and stays fixed for the hole)
+- A per-flight weather deck (one wind a round; it stays fixed for each hole)
 - Internet play without port forwarding (no relay — see above)
 - Host migration if the host leaves
 - Simultaneous/secret shot declaration

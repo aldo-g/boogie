@@ -37,7 +37,7 @@ var BotSimMain: GDScript
 #   starter=std          standard Driver / 7-Iron / Putter instead of Bogey-Mart
 #   fixed=<k>            no draft: a fixed bag of k brandless clubs chosen
 #                        for yardage coverage, plus a putter
-#   putt=<ms>            the bot's putting timing error (default 100)
+#   putt=<n>             how far out the bot's read of a putt is, in thousandths (default 100)
 #   aim=<sd>             the bot's aim error, yards per 100 yds (default 0)
 #   course=<id>          play one of the game's other courses (a CourseLibrary
 #                        id, e.g. course=mirage-mesa; default: Bogey Links)
@@ -128,7 +128,7 @@ func _play(round_seed: int, v: Dictionary) -> Dictionary:
 	if v.has("trade"):
 		bot.trade_below = float(v.trade)
 	if v.has("putt"):
-		bot.putt_timing_sd = float(v.putt) / 1000.0
+		bot.putt_error = float(v.putt) / 1000.0
 	if v.has("aim"):
 		bot.aim_error = float(v.aim)
 	var seen_holes := 1

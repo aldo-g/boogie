@@ -221,9 +221,9 @@ func _step(main) -> bool:
 				return false
 			main.on_discard_pick(randi() % main.hand.size())
 		main.State.PUTTING:
-			# Resolve the putt directly rather than driving the meter, which
-			# is a real-time sweep.
-			main.on_putt_stopped("sunk" if randf() < 0.45 else "miss", randf())
+			# A perfect read a little under half the time, a wild one otherwise.
+			main.on_putt(ShotResolver.solve_putt(main.hole, main.ball_pos) \
+				+ (Vector2.ZERO if randf() < 0.45 else Vector2(randf_range(-2.0, 2.0), randf_range(-2.0, 2.0))))
 		_:
 			return false
 	return true

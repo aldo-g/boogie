@@ -328,8 +328,9 @@ const ROLL_STOP_SPEED := 0.15
 # `with_wind` = false reads the shot as if it were calm — for the aim-time
 # guides, which must leave reading the wind to the player.
 static func shot_outcome(hole: HoleData, from_pos: Vector2, aim_dir: Vector2,
-		result: Dictionary, club: Dictionary, with_wind: bool = true) -> Dictionary:
-	var wind: Vector2 = hole.wind if with_wind else Vector2.ZERO
+		result: Dictionary, club: Dictionary, with_wind: bool = true, gust: float = 0.0) -> Dictionary:
+	# `gust` is how much of a gust was blowing as it was struck (Wind.gd).
+	var wind: Vector2 = Wind.gusted(hole.wind, gust) if with_wind else Vector2.ZERO
 	var dir := shot_direction(aim_dir, result)
 	var run_share: float = clampf(float(result.get("run_share", 0.0)), 0.0, 0.9)
 	if run_share > 0.0:
@@ -491,57 +492,193 @@ static func simulate_roll(hole: HoleData, start: Vector2, dir: Vector2, budget: 
 	return {"rest": pos, "path": path, "cup": false}
 
 
-# --- Reading a putt -----------------------------------------------------
+# --- Putting ------------------------------------------------------------
+# A putt is aimed like any other shot. The aim point is where the ball
+# would stop on a dead flat green: its direction is the line, its distance
+# the weight. The green is never flat, so the ball rolls on from there by
+# itself: the slope pulls it off the line and stretches or shortens the
+# roll. Nothing is timed and nothing is rolled for. A pure function of the
+# ground and the aim, so every machine rolls the same putt.
+
+# How hard the green's slope pulls against its friction, per unit of
+# grade. At 5, a 2% fall across a 10-yard putt moves it about a yard.
+const PUTT_SLOPE_PULL := 5.0
+# How near the middle of the cup the ball has to pass, in yards (about
+# twice a real cup), and how many yards it may still have had left in it
+# when it gets there: that much dead centre, less toward the lip.
+const PUTT_CUP_RADIUS := 0.11
+const PUTT_CUP_PACE := 1.5
+# The pace a putt is best holed at: enough to finish this far past.
+const PUTT_IDEAL_PAST := 0.4
+const PUTT_STEP := 0.05         # yards per step of the roll
+const PUTT_MAX_STEPS := 4000    # 200 yards of rolling: a safety net
+const PUTT_FLAT := 0.008        # below this grade a putt reads as straight / level
+
+
+# The furthest a putt of `putt_dist` yards can be aimed.
+static func putt_aim_reach(putt_dist: float) -> float:
+	return putt_dist * 1.6 + 3.0
+
+
+# Whether the cup takes a ball passing `off` yards from its middle with
+# `left` yards of roll still in it.
+static func cup_takes(off: float, left: float, cup_mult: float) -> bool:
+	return cup_mult > 0.0 and left < PUTT_CUP_PACE \
+		and off <= PUTT_CUP_RADIUS * cup_mult * sqrt(1.0 - left / PUTT_CUP_PACE)
+
+
+# Rolls a putt struck from `ball` at `aim`. Returns:
+#   holed — it dropped
+#   rest  — where it finished (the pin, if holed)
+#   path  — the line it took, for the map to roll it along
+#   near, left — the closest it came to the middle of the cup, and the
+#           yards of roll it still had there (what solve_putt() corrects by)
+# `cup_mult` scales the cup (the putter's riders, Steady Hands); 0 is a
+# cup that takes nothing.
+static func roll_putt(hole: HoleData, ball: Vector2, aim: Vector2, cup_mult: float = 1.0) -> Dictionary:
+	var pin: Vector2 = hole.pin_pos
+	var pos := ball
+	var path: Array = [ball]
+	var out := {"holed": false, "rest": ball, "path": path, "near": ball, "left": 0.0}
+	var weight: float = ball.distance_to(aim)
+	if weight < 0.01:
+		return out
+	var heading: Vector2 = (aim - ball) / weight
+	# Yards of flat roll left in the ball: friction takes one a yard.
+	var energy: float = weight
+	var nearest: float = ball.distance_to(pin)
+	var was_on: bool = hole.terrain_at(pos) == "green"
+	var since_point := 0.0
+
+	for i in PUTT_MAX_STEPS:
+		var pull: Vector2 = -hole.gradient_at(pos) * PUTT_SLOPE_PULL
+		var across: Vector2 = pull - heading * pull.dot(heading)
+		var drag: float = maxf(1.0 - pull.dot(heading), 0.05)
+		# Short enough steps that a dying ball turns downhill smoothly, and
+		# the last one is exactly as long as the pace it has left.
+		var ds: float = minf(PUTT_STEP, energy / drag)
+		if across.length() > 0.0001:
+			ds = minf(ds, maxf(0.2 * energy / across.length(), 0.002))
+		var next: Vector2 = pos + heading * ds
+		var left: float = maxf(energy - drag * ds, 0.0)
+
+		var close: Vector2 = Geometry2D.get_closest_point_to_segment(pin, pos, next)
+		var off: float = close.distance_to(pin)
+		if off < nearest:
+			nearest = off
+			out.near = close
+			out.left = left
+		if cup_takes(off, left, cup_mult):
+			path.append(pin)
+			out.holed = true
+			out.rest = pin
+			return out
+
+		# shortcut: a putt that reaches the edge of the green stops there
+		# instead of running off into the collar, sand or water; upgrade if
+		# putting off the green should be possible.
+		var on: bool = hole.terrain_at(next) == "green"
+		if was_on and not on:
+			break
+		was_on = on
+		pos = next
+		energy = left
+		since_point += ds
+		if since_point >= 0.25:
+			path.append(pos)
+			since_point = 0.0
+		if energy <= 0.0001:
+			break
+		heading = (heading + across * (ds / (2.0 * energy))).normalized()
+
+	if path[path.size() - 1] != pos:
+		path.append(pos)
+	out.rest = pos
+	return out
+
+
+# The aim that holes a putt from `ball` through the middle of the cup at
+# the ideal pace: what a perfect read of the green would say. Corrects the
+# aim by how the last roll missed, a few times over.
+static func solve_putt(hole: HoleData, ball: Vector2) -> Vector2:
+	var pin: Vector2 = hole.pin_pos
+	var to_pin: Vector2 = pin - ball
+	if to_pin.length() < 0.01:
+		return pin
+	var aim: Vector2 = pin + to_pin.normalized() * PUTT_IDEAL_PAST
+	for i in 8:
+		var r := roll_putt(hole, ball, aim, 0.0)
+		var along: Vector2 = (aim - ball).normalized()
+		var fix: Vector2 = (pin - r.near) + along * (PUTT_IDEAL_PAST - float(r.left))
+		aim += fix
+		if fix.length() < 0.005:
+			break
+	return aim
+
+
 # The green's tilt, resolved against the putt line and averaged along it.
-#   along  — grade toward the hole: + uphill (slower, more forgiving),
-#            - downhill (quick, the bands tighten)
+#   along  — grade toward the hole: + uphill (slower), - downhill (quick)
 #   fall   — grade falling to the RIGHT of the line, looking at the hole;
 #            the ball breaks toward the low side, so you aim at the high side
-#   shift  — where the meter's sweet spot sits, as a fraction of the bar
-#            from centre (- left, + right): the visible "aim here" of a read
-#   band_mult — scale on the meter's bands from pace
 # Pure function of the hole's ground: every machine reads the same putt.
-const PUTT_SHIFT_PER_PCT_YD := 1.0 / 120.0  # bar fraction per (% grade x yard)
-const PUTT_SHIFT_MAX := 0.28
-const PUTT_PACE_PER_PCT := 0.06
-const PUTT_FLAT := 0.008  # below this grade a putt reads as straight / level
-
 static func putt_read(hole: HoleData, ball: Vector2) -> Dictionary:
 	var to_hole: Vector2 = hole.pin_pos - ball
 	var dist: float = to_hole.length()
 	if dist < 0.01:
-		return {"along": 0.0, "fall": 0.0, "shift": 0.0, "band_mult": 1.0}
+		return {"along": 0.0, "fall": 0.0}
 	var d: Vector2 = to_hole / dist
 	var right := Vector2(d.y, -d.x)
 	var g := Vector2.ZERO
 	for i in 5:
 		g += hole.gradient_at(ball.lerp(hole.pin_pos, (float(i) + 0.5) / 5.0))
 	g /= 5.0
-	var along: float = g.dot(d)
-	var fall: float = -g.dot(right)
-	return {
-		"along": along,
-		"fall": fall,
-		# Falls right -> aim left of centre.
-		"shift": clampf(-fall * 100.0 * dist * PUTT_SHIFT_PER_PCT_YD, -PUTT_SHIFT_MAX, PUTT_SHIFT_MAX),
-		"band_mult": clampf(1.0 + along * 100.0 * PUTT_PACE_PER_PCT, 0.7, 1.15),
-	}
+	return {"along": g.dot(d), "fall": -g.dot(right)}
 
 
+# The read in words and figures. The grades are exact; how far that moves
+# the ball is the player's to judge.
 static func putt_read_text(read: Dictionary) -> String:
 	var bits: Array = []
 	var fall: float = read.fall
 	if absf(fall) < PUTT_FLAT:
-		bits.append("Straight putt")
+		bits.append("Straight")
 	else:
-		var how := "Breaks" if absf(fall) < 0.02 else "Big break"
-		bits.append("%s %s" % [how, "left to right" if fall > 0.0 else "right to left"])
+		bits.append("Falls %.1f%% to the %s" % [absf(fall) * 100.0, "right" if fall > 0.0 else "left"])
 	var along: float = read.along
 	if along < -PUTT_FLAT:
-		bits.append("downhill — quick, tighter window")
+		bits.append("%.1f%% downhill" % (-along * 100.0))
 	elif along > PUTT_FLAT:
-		bits.append("uphill — slower, a touch more forgiving")
+		bits.append("%.1f%% uphill" % (along * 100.0))
+	else:
+		bits.append("level")
 	return " · ".join(bits)
+
+
+# A length on the green, the way a golfer would call it.
+static func green_length_text(yards: float) -> String:
+	var feet: float = absf(yards) * 3.0
+	if feet < 0.95:
+		return "%d in" % roundi(feet * 12.0)
+	if feet < 9.95:
+		return ("%.1f ft" % feet).replace(".0 ft", " ft")
+	return "%d ft" % roundi(feet)
+
+
+# Where a putt is aimed, against the hole: "2 ft left · 1.5 ft past".
+static func putt_aim_text(ball: Vector2, pin: Vector2, aim: Vector2) -> String:
+	var to_pin: Vector2 = pin - ball
+	if to_pin.length() < 0.01:
+		return "At the hole"
+	var d: Vector2 = to_pin.normalized()
+	var off: Vector2 = aim - pin
+	var side: float = off.dot(Vector2(d.y, -d.x))
+	var deep: float = off.dot(d)
+	var bits: Array = []
+	if absf(side) >= 0.02:
+		bits.append("%s %s" % [green_length_text(side), "right" if side > 0.0 else "left"])
+	if absf(deep) >= 0.02:
+		bits.append("%s %s" % [green_length_text(deep), "past" if deep > 0.0 else "short"])
+	return "At the hole" if bits.is_empty() else " · ".join(bits)
 
 
 # The post-curve direction of a resolved shot.

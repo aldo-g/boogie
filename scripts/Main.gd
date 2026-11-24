@@ -8,7 +8,7 @@ extends Control
 #   -> declare shot: choose a club + target
 #   -> draw 3 Form cards, pick 1 (fully known effect, no hidden rolls)
 #   -> final aim adjustment -> resolve deterministically
-#   -> repeat until on the green -> putting QTE (timing meter, difficulty
+#   -> repeat until on the green -> putting (aimed on the green, difficulty
 #      scaled by distance to the pin)
 # ---------------------------------------------------------
 
@@ -20,9 +20,6 @@ enum State { AIM, FORM_DRAW, DRAFT, DISCARD_FOR_DRAFT, CLUB_SELECT, DISCARD_FOR_
 const HAND_CAP := 14
 
 
-# On-screen width of the putt meter. Deliberately wide: the hardest putt's
-# sunk band is 12% of the bar, which needs the room to stay aimable.
-const METER_WIDTH := 620
 
 const Palette := preload("res://scripts/BogeyTheme.gd")
 const Caddy := preload("res://scripts/Caddy.gd")
@@ -31,6 +28,7 @@ const HoleBanner := preload("res://scripts/HoleBanner.gd")
 const CardFace := preload("res://scripts/CardFace.gd")
 const DraftRules := preload("res://scripts/DraftRules.gd")
 const Route := preload("res://scripts/Route.gd")
+const Lessons := preload("res://scripts/Lessons.gd")
 
 # Parchment / fairway theme, shared with Title.gd via BogeyTheme.
 const COLOR_BG := Palette.PARCHMENT
@@ -112,6 +110,11 @@ const STROKES_IN_HAND := 10
 # Off for the flow harnesses, which play at random and must reach the 18th.
 var for_keeps: bool = true
 var _run_over: bool = false
+# Guided round (Lessons.gd): lesson key -> the hole it was said on.
+var _taught: Dictionary = {}
+var _lesson_fresh: bool = false   # a lesson has been said since the player last acted
+const GUST_TOLD := 0.2   # how much of a gust a shot must be struck in for the report to say so
+var _opened_course := ""   # the course this round's score opened (CourseLibrary's ladder), for the end page
 
 # --- The tour (Section 3G) -----------------------------------------------
 # The four courses as one run, alone and for keeps (GameSetup.tour). After
@@ -223,10 +226,6 @@ var putt_dist: float:
 	get: return me.putt_dist
 	set(v): me.putt_dist = v
 
-var _putt_dir: Vector2:
-	get: return me.putt_dir
-	set(v): me.putt_dir = v
-
 var yips_pending: bool:
 	get: return me.yips_pending
 	set(v): me.yips_pending = v
@@ -267,39 +266,53 @@ var hole: HoleData
 var hole_yardage: float = 380.0
 var hole_par: int = 4
 
-var putt_meter: PuttMeter
+# The putt being lined up on this screen: where its aim has been set down,
+# if it has. The game only hears of it when the putt is struck.
+var _putt_aim: Vector2 = Vector2.ZERO
+var _putt_aimed: bool = false
+var _reframe_due: bool = false   # a refresh is booked for when the putt on the map stops (_putt_rolling)
 
 # --- The sheet's fixed measures, in pixels at the 1600x1000 base size ---
-const LEFT_WIDTH := 316        # the hole-and-shot column
-const RIGHT_WIDTH := 372       # the Form hand and play-by-play column
-const SIDE_PAD := 28           # page margin, left and right
-const PLATE_WIDTH := 460       # the hole map's mount
-const STRIP_HEIGHT := 252      # the bag strip
-const BAG_GAP := 8             # between cards in the bag
+# The yardage book, v2: a 124px header (wordmark, card, the way out), then
+# three columns — the shot (300), the hole (540), the reads (632) — and
+# under them the bag strip, fourteen tiles across.
+const SIDE_PAD := 32           # page margin, left and right
+const COL_GAP := 32            # between the three columns
+const HEADER_HEIGHT := 124
+const LEFT_WIDTH := 300        # the hole-and-shot column
+const PLATE_WIDTH := 540       # the hole map's mount, square
+const RIGHT_WIDTH := 632       # the reads: reach, form, yardages, the call, abilities
+const STRIP_CARD_H := 188.0    # a card in the strip: bag tile, Form card
+const BAG_GAP := 6             # between cards in the bag
 const BAG_CARD_MAX := 136.0    # a bag card with room to spare...
-const BAG_CARD_MIN := 100.0    # ...and with all fourteen in the row
+const BAG_CARD_MIN := 96.0     # ...and with all fourteen in the row
 const DRAFT_CARD_WIDTH := 456.0  # a draft offer: the club, and what taking it changes
 const DRAFT_CARD_MIN := 236.0    # ...cut narrow, with five on the rack
-const DRAFT_SIDE_WIDTH := 150.0  # the draft's other moves, beside the offers
-const TRADE_BACK_WIDTH := 84.0   # the way back out of a trade-in
-const WEAR_CHOICE_WIDTH := 260.0 # what a worn-in club can gain
+const DRAFT_SIDE_WIDTH := 190.0  # the pro shop's other moves, beside the offers
+const PAGE_PAD_X := 88           # the between-holes pages' side margin
+const PAGE_PAD_Y := 64
 
 # --- UI node refs (built in code) ---
+var _rack: HBoxContainer                # the pro shop's rack, on its page
+var game_page: Control                 # the shot screen: header, three columns, the strip
+var interlude: PanelContainer          # a full page between holes: stops, pro shop, bay, hut, the card
 var map_view: CourseMapView
-var hand_label: Label
-var options_label: Label
-var options_container: HBoxContainer   # the strip's one row: the bag, the draft, the putt meter
+var hand_label: Label                  # the strip's kicker: YOUR BAG 3 / 14
+var options_label: Label               # ...and its italic caption
+var options_container: HBoxContainer   # the strip's one row: the bag, the Form hand, the putt
 var options_scroll: ScrollContainer
 
 var step_holder: HBoxContainer         # the step line over the map
-var form_label: Label
-var form_hint: Label
-var form_container: VBoxContainer      # the Form hand, a column beside the map
-var coverage_view: BagCoverageView     # the bag's yardages on a ruler, in the right column
+var form_container: BoxContainer       # where the Form hand is dealt (the strip, while drawing)
+var right_col: VBoxContainer           # the reads, rebuilt on each refresh
+var in_hand_box: VBoxContainer         # the club in hand — rebuilt as the aim moves
+var coverage_view: BagCoverageView     # the bag's yardages on a ruler
 var reach_title: Label                 # club choice: what the club passed over carries
 var reach_note: Label
 var _family_rows: Dictionary = {}      # the form table's rows, by club family
-var form_deck_holder: HBoxContainer    # the "Deck" link, right of the Form kicker
+var course_line: Label                 # under the wordmark: "Bogey Links · Hole 7 of 18"
+var elev_note: Label                   # beside the side view: "Flag level with you · 380 yds"
+var hole_plate: Control                # the map's mount, for the caddy to sit in
 
 # The hole's record, newest first — see log_msg(). Recorded, not shown.
 var log_entries: Array = []
@@ -307,11 +320,11 @@ var scorecard: ScorecardView
 var brand_rack: HBoxContainer          # brand swatches, in the bag header — hover for the set's clubs and bonuses
 var hole_title: Label
 var hole_caption: Label                # "Par 4 · 380 yards", under the hole title
-var turn_banner: PanelContainer        # "Player 2 to play" — hot-seat only
+var turn_banner: PanelContainer        # "Alex to play" — hot-seat and online only
 var turn_banner_label: Label
 var restart_link: Button
 var shot_outlook: VBoxContainer
-var ability_box: VBoxContainer         # club abilities and set powers for this moment — under the shot panel
+var ability_box: VBoxContainer         # club abilities and set powers for this moment — in the reads
 var form_deck_popup: PopupPanel
 var form_deck_list: VBoxContainer
 var caddy: Caddy                   # the arctic char who pops up with advice — see Caddy.gd
@@ -391,38 +404,44 @@ func build_ui() -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
+	game_page = Control.new()
+	game_page.set_anchors_preset(Control.PRESET_FULL_RECT)
+	game_page.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(game_page)
+
 	var root := VBoxContainer.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_theme_constant_override("separation", 0)
-	add_child(root)
+	game_page.add_child(root)
 
 	# --- Header: the wordmark, the card, the way out -----------------------
 	# The scorecard is the header. It answers "how am I doing" for the whole
-	# round in three printed rows, which leaves nothing else to say up here.
-	# The side cells are cut to the widths of the columns beneath them, so
-	# the card sits centred over the hole map rather than over the window.
+	# round, a line a player, which leaves nothing else to say up here.
 	var header_style := BogeyUI.ruled_panel(false, false, false, true, 0)
 	header_style.content_margin_left = SIDE_PAD
 	header_style.content_margin_right = SIDE_PAD
-	header_style.content_margin_top = 14
-	header_style.content_margin_bottom = 14
+	header_style.content_margin_top = 12
+	header_style.content_margin_bottom = 12
 	var header := BogeyUI.make_panel(header_style)
+	header.custom_minimum_size = Vector2(0, HEADER_HEIGHT)
 	root.add_child(header)
 
 	var header_row := HBoxContainer.new()
-	header_row.add_theme_constant_override("separation", 0)
+	header_row.add_theme_constant_override("separation", 32)
 	header.add_child(header_row)
 
 	var title_col := VBoxContainer.new()
-	title_col.add_theme_constant_override("separation", -4)
+	title_col.add_theme_constant_override("separation", 4)
 	title_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	title_col.custom_minimum_size = Vector2(LEFT_WIDTH - SIDE_PAD, 0)
+	title_col.custom_minimum_size = Vector2(280, 0)
 	header_row.add_child(title_col)
 	var wordmark := Label.new()
 	wordmark.text = "Pars and Chars"
-	BogeyUI.set_font(wordmark, BogeyUI.FONT_SCRIPT, 36, BogeyTheme.INK)
+	BogeyUI.set_font(wordmark, BogeyUI.FONT_SCRIPT, 40, BogeyTheme.INK)
 	title_col.add_child(wordmark)
-	title_col.add_child(BogeyUI.kicker(Course.active_name))
+	course_line = BogeyUI.kicker(Course.active_name, BogeyTheme.INK_SOFT, 10)
+	course_line.uppercase = false
+	title_col.add_child(course_line)
 
 	scorecard = ScorecardView.new()
 	scorecard.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_SHRINK_CENTER
@@ -430,11 +449,10 @@ func build_ui() -> void:
 	header_row.add_child(scorecard)
 
 	# Settings, Restart and the way out: reachable from every state, and
-	# quiet — three words in small capitals, not three boxes.
-	var nav := HBoxContainer.new()
-	nav.add_theme_constant_override("separation", 24)
-	nav.alignment = BoxContainer.ALIGNMENT_END
-	nav.custom_minimum_size = Vector2(RIGHT_WIDTH - SIDE_PAD, 0)
+	# quiet — three words in small capitals, stacked at the right.
+	var nav := VBoxContainer.new()
+	nav.add_theme_constant_override("separation", 2)
+	nav.custom_minimum_size = Vector2(200, 0)
 	nav.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	header_row.add_child(nav)
 	nav.add_child(_nav_link("Settings", "Volume, shot speed and the putt key",
@@ -447,41 +465,40 @@ func build_ui() -> void:
 	nav.add_child(_nav_link("Editor" if GameSetup.return_to_editor else "Menu", "Leave this round",
 		_on_header_menu_pressed))
 
-	# --- Middle: the shot | the hole | the Form hand ----------------------
+	# --- Middle: the shot | the hole | the reads ---------------------------
 	var mid_row := HBoxContainer.new()
-	mid_row.add_theme_constant_override("separation", 0)
-	mid_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_child(mid_row)
+	mid_row.add_theme_constant_override("separation", COL_GAP)
+	var mid := BogeyUI.margin(mid_row, SIDE_PAD, 20, SIDE_PAD, 0)
+	mid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(mid)
 
 	# Left: where you are and what the shot in front of you is. Scrolls
 	# rather than grows, so a long read can never push the bag off screen.
-	var left_panel := BogeyUI.make_panel(BogeyUI.ruled_panel(false, true, false, false, 0))
-	left_panel.custom_minimum_size = Vector2(LEFT_WIDTH, 0)
-	mid_row.add_child(left_panel)
-
 	var left_scroll := ScrollContainer.new()
 	left_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	left_panel.add_child(left_scroll)
+	left_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	left_scroll.custom_minimum_size = Vector2(LEFT_WIDTH, 0)
+	mid_row.add_child(left_scroll)
 
 	var this_shot_col := VBoxContainer.new()
-	this_shot_col.add_theme_constant_override("separation", 12)
-	var left_margin := BogeyUI.margin(this_shot_col, SIDE_PAD, 16, 24, 6)
-	left_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left_scroll.add_child(left_margin)
+	this_shot_col.add_theme_constant_override("separation", 0)
+	this_shot_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_scroll.add_child(this_shot_col)
 
 	# Whose turn it is. In a hot-seat round this is the single most
 	# important thing on screen — the wrong player taking a shot is
-	# unrecoverable — so it heads the column, ruled in that player's seat
+	# unrecoverable — so it heads the column, filled in that player's seat
 	# colour. Hidden entirely in a solo round.
 	turn_banner = BogeyUI.make_panel(_turn_banner_style(BogeyTheme.INK))
-	turn_banner_label = BogeyUI.heading("", 24)
+	turn_banner_label = BogeyUI.label("", 13, BogeyTheme.NEUTRAL_100, 600)
+	turn_banner_label.add_theme_font_override("font", BogeyUI.sans(600, 1))
 	turn_banner_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	turn_banner.add_child(turn_banner_label)
 	turn_banner.visible = false
 	this_shot_col.add_child(turn_banner)
 
 	var hole_head := VBoxContainer.new()
-	hole_head.add_theme_constant_override("separation", -2)
+	hole_head.add_theme_constant_override("separation", 6)
 	this_shot_col.add_child(hole_head)
 	hole_title = BogeyUI.heading("Hole 1", 40)
 	hole_head.add_child(hole_title)
@@ -489,112 +506,79 @@ func build_ui() -> void:
 	hole_head.add_child(hole_caption)
 
 	shot_outlook = VBoxContainer.new()
-	shot_outlook.add_theme_constant_override("separation", 12)
+	shot_outlook.add_theme_constant_override("separation", 0)
 	this_shot_col.add_child(shot_outlook)
-
-	# Kept apart from shot_outlook, which rebuilds on every mouse move
-	# while aiming — a button rebuilt under the cursor can't be clicked.
-	ability_box = VBoxContainer.new()
-	ability_box.add_theme_constant_override("separation", 6)
-	this_shot_col.add_child(ability_box)
 
 	# Centre: the hole, and nothing else. One line above it says what to
 	# do next; the side view sits beneath.
 	var plate_col := VBoxContainer.new()
-	plate_col.add_theme_constant_override("separation", 12)
-	var plate_margin := BogeyUI.margin(plate_col, 24, 16, 24, 12)
-	plate_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mid_row.add_child(plate_margin)
+	plate_col.add_theme_constant_override("separation", 6)
+	plate_col.custom_minimum_size = Vector2(PLATE_WIDTH, 0)
+	mid_row.add_child(plate_col)
 
 	step_holder = HBoxContainer.new()
 	step_holder.alignment = BoxContainer.ALIGNMENT_CENTER
-	step_holder.custom_minimum_size = Vector2(0, 28)
+	step_holder.custom_minimum_size = Vector2(0, 30)
 	plate_col.add_child(step_holder)
 
 	map_view = CourseMapView.new()
 	map_view.aim_picked.connect(_on_aim_committed)
 	map_view.aim_changed.connect(_on_aim_changed)
-	# Holes run tall and narrow (roughly 120-200 yds wide, 400-600 yds
-	# long), so the mount is a portrait plate, centred in the column, rather
-	# than a wide frame around a thin strip.
-	var hole_plate := BogeyUI.plate(map_view)
-	hole_plate.custom_minimum_size = Vector2(PLATE_WIDTH, 0)
+	hole_plate = BogeyUI.plate(map_view)
+	hole_plate.custom_minimum_size = Vector2(PLATE_WIDTH, PLATE_WIDTH)
 	hole_plate.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	hole_plate.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	plate_col.add_child(hole_plate)
 
-	# Side view of the same hole, matched to the plate's width.
+	# Side view of the same hole, short, with a word on what it shows.
+	var elev_row := HBoxContainer.new()
+	elev_row.add_theme_constant_override("separation", 12)
+	plate_col.add_child(elev_row)
 	var profile := ElevationProfileView.new()
 	profile.map = map_view
-	profile.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	plate_col.add_child(profile)
-	profile.custom_minimum_size.x = PLATE_WIDTH
-	hole_plate.resized.connect(func(): profile.custom_minimum_size.x = hole_plate.size.x)
+	profile.compact = true
+	profile.custom_minimum_size = Vector2(380, 24)
+	elev_row.add_child(profile)
+	elev_note = BogeyUI.label("", 11, BogeyTheme.INK_SOFT)
+	elev_note.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	elev_row.add_child(elev_note)
 
-	# Right: the Form hand, and nothing else. The Form cards live here,
-	# beside the map, because that is where you look while choosing one —
-	# each card previews its landing on the hole as you pass over it.
-	# Between draws the column is left as white space.
-	var right_panel := BogeyUI.make_panel(BogeyUI.ruled_panel(true, false, false, false, 0))
-	right_panel.custom_minimum_size = Vector2(RIGHT_WIDTH, 0)
-	mid_row.add_child(right_panel)
-
+	# Right: the reads — reach, form, yardages, the call, abilities. Rebuilt
+	# on each refresh; scrolls rather than grows.
 	var right_scroll := ScrollContainer.new()
 	right_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	right_panel.add_child(right_scroll)
-
-	var right_col := VBoxContainer.new()
-	right_col.add_theme_constant_override("separation", 10)
-	var right_margin := BogeyUI.margin(right_col, 24, 22, SIDE_PAD, 16)
-	right_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right_scroll.add_child(right_margin)
-
-	var form_head := HBoxContainer.new()
-	form_head.add_theme_constant_override("separation", 12)
-	right_col.add_child(form_head)
-	form_label = BogeyUI.kicker("Form hand", BogeyTheme.INK)
-	form_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	form_head.add_child(form_label)
-	form_deck_holder = HBoxContainer.new()
-	form_head.add_child(form_deck_holder)
-
-	form_hint = BogeyUI.body("", 13, BogeyTheme.NEUTRAL_600)
-	right_col.add_child(form_hint)
-
-	form_container = VBoxContainer.new()
-	form_container.add_theme_constant_override("separation", 8)
-	right_col.add_child(form_container)
+	right_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	right_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mid_row.add_child(right_scroll)
+	right_col = VBoxContainer.new()
+	right_col.add_theme_constant_override("separation", 18)
+	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_scroll.add_child(right_col)
 
 	# --- Bottom: the bag -----------------------------------------------------
 	# The whole width, so a full bag of fourteen sits in one row with no
-	# scrolling. The same row doubles as the surface for the draft, the
-	# "something has to go" cut, and the putt meter. Fixed in height: the
-	# hole above it never changes size between one state and the next.
-	var strip_style := BogeyUI.panel(BogeyTheme.PARCHMENT_RAISED, 0)
-	strip_style.border_color = BogeyTheme.RULE
-	strip_style.border_width_top = 1
-	strip_style.content_margin_left = SIDE_PAD
-	strip_style.content_margin_right = SIDE_PAD
-	strip_style.content_margin_top = 14
-	strip_style.content_margin_bottom = 14
-	var strip := BogeyUI.make_panel(strip_style)
-	strip.custom_minimum_size = Vector2(0, STRIP_HEIGHT)
-	root.add_child(strip)
-
+	# scrolling. The same row doubles as the surface for the Form hand and
+	# the putt's strip. Fixed in height: the hole above it never changes size.
 	var bag_col := VBoxContainer.new()
-	bag_col.add_theme_constant_override("separation", 8)
-	strip.add_child(bag_col)
+	bag_col.add_theme_constant_override("separation", 0)
+	var strip := BogeyUI.margin(bag_col, SIDE_PAD, 0, SIDE_PAD, 14)
+	strip.custom_minimum_size = Vector2(0, STRIP_CARD_H + 64.0)
+	root.add_child(strip)
+	bag_col.add_child(BogeyUI.hairline(0.12))
 
 	var bag_head := HBoxContainer.new()
-	bag_head.add_theme_constant_override("separation", 14)
-	bag_col.add_child(bag_head)
-	hand_label = BogeyUI.kicker("Your bag", BogeyTheme.INK)
+	bag_head.add_theme_constant_override("separation", 18)
+	bag_col.add_child(BogeyUI.margin(bag_head, 0, 9, 0, 8))
+	hand_label = BogeyUI.kicker("Your bag", BogeyTheme.INK, 10)
 	hand_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	bag_head.add_child(hand_label)
-	options_label = BogeyUI.label("", 13, BogeyTheme.NEUTRAL_600)
+	options_label = Label.new()
+	BogeyUI.set_font(options_label, BogeyUI.serif_italic(500), 18, BogeyTheme.INK)
 	options_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	# A one-line caption beside the kicker: it takes the rest of the row and
 	# ellipsizes rather than wrapping.
 	options_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	options_label.clip_text = true
 	options_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	bag_head.add_child(options_label)
 
@@ -603,7 +587,7 @@ func build_ui() -> void:
 	# clubs of that brand you actually hold and the bonus the next one
 	# unlocks — see brand_chip_tooltip().
 	brand_rack = HBoxContainer.new()
-	brand_rack.add_theme_constant_override("separation", 20)
+	brand_rack.add_theme_constant_override("separation", 14)
 	brand_rack.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	bag_head.add_child(brand_rack)
 
@@ -615,12 +599,10 @@ func build_ui() -> void:
 
 	options_container = HBoxContainer.new()
 	options_container.add_theme_constant_override("separation", BAG_GAP)
-	# Centred, so a three-club bag on the first tee sits under the hole
-	# rather than stranded at the left edge.
-	options_container.alignment = BoxContainer.ALIGNMENT_CENTER
 	options_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	options_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	options_scroll.add_child(options_container)
+	form_container = options_container
 
 	build_form_deck_popup()
 
@@ -629,12 +611,18 @@ func build_ui() -> void:
 	hole_banner.anchor = map_view
 	add_child(hole_banner)
 
-	# Added last so he swims over everything else. He sits on the bag
-	# strip, in the margin between the shot column and the hole.
+	# Added last so he swims over everything else. He surfaces at the foot
+	# of the hole map, in its bottom-left corner.
 	caddy = Caddy.new()
-	caddy.anchor_above = strip
-	caddy.left_inset = LEFT_WIDTH + 10.0
+	caddy.anchor_above = elev_row
+	caddy.left_inset = SIDE_PAD + LEFT_WIDTH + COL_GAP + 8.0
 	add_child(caddy)
+
+	# --- Between holes: a full page over everything, the caddy included ---
+	interlude = BogeyUI.make_panel(BogeyUI.panel(COLOR_BG, 0))
+	interlude.set_anchors_preset(Control.PRESET_FULL_RECT)
+	interlude.visible = false
+	add_child(interlude)
 
 
 # One of the header's text links.
@@ -643,20 +631,17 @@ func _nav_link(text: String, tip: String, on_press: Callable) -> Button:
 	b.text = text
 	b.tooltip_text = tip
 	b.focus_mode = Control.FOCUS_NONE
-	BogeyUI.style_link_button(b)
+	BogeyUI.style_link_button(b, 10)
+	b.add_theme_color_override("font_color", BogeyTheme.INK)
+	b.alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	b.pressed.connect(on_press)
 	return b
 
 
-# The turn line's rule, in the seat colour of whoever is up.
+# The turn line: filled in the seat colour of whoever is up, set in white.
 func _turn_banner_style(seat: Color) -> StyleBoxFlat:
-	var s := StyleBoxFlat.new()
-	s.bg_color = Color(0, 0, 0, 0)
-	s.border_color = seat
-	s.border_width_left = 4
-	s.content_margin_left = 12
-	s.content_margin_top = 2
-	s.content_margin_bottom = 4
+	var s := BogeyUI._box(seat, seat, 0, BogeyUI.RADIUS, 14, 9)
+	s.expand_margin_bottom = 0
 	return s
 
 
@@ -666,10 +651,10 @@ func _show_restart_armed(on: bool) -> void:
 	if restart_link == null:
 		return
 	restart_link.text = "PRESS AGAIN TO RESTART" if on else "RESTART"
-	var ink: Color = BogeyTheme.FLAG if on else BogeyTheme.NEUTRAL_600
+	var ink: Color = BogeyTheme.FLAG if on else BogeyTheme.INK
 	restart_link.add_theme_color_override("font_color", ink)
 	restart_link.add_theme_color_override("font_focus_color", ink)
-	restart_link.add_theme_color_override("font_hover_color", BogeyTheme.ACCENT_800 if on else BogeyTheme.INK)
+	restart_link.add_theme_color_override("font_hover_color", BogeyTheme.ACCENT_800 if on else BogeyTheme.NEUTRAL_700)
 
 
 # A browsable list of every Form card currently in the deck or discard
@@ -852,6 +837,7 @@ func init_game() -> void:
 	# A shot being planned reads the players about to be replaced.
 	_cpu_reset()
 	_run_over = false
+	_opened_course = ""
 	_hustle = false
 	players = []
 	_bots = {}
@@ -1060,6 +1046,10 @@ func start_hole() -> void:
 	hole = HoleData.for_round(current_hole_index, wind_seed)
 	hole_yardage = hole.yardage
 	hole_par = hole.par
+	# The first two holes of a guided round are played in light air: no
+	# gusts to time (Wind.GUST_FROM) while the three steps are being learnt.
+	if guided() and current_hole_index <= 2:
+		hole.wind = hole.wind.limit_length(Wind.GUST_FROM - 3.0)
 
 	# Every player starts the hole on the tee. Order of play off the tee is
 	# seating order (there are no distances to compare yet); from the
@@ -1077,6 +1067,7 @@ func start_hole() -> void:
 	if is_multiplayer():
 		log_msg("[i]%s to play.[/i]" % me.name)
 	var has_water := hole.hazards.any(func(h): return h.get("type", "") == "water")
+	_teach_tee()
 	caddy_says("tee", {"par": hole_par, "yards": hole_yardage, "wind": hole.wind,
 		"dir": hole.pin_pos - hole.tee_pos, "water": has_water,
 		"last_hole": current_hole_index >= Course.hole_count()}, true)
@@ -1163,6 +1154,7 @@ func begin_aim_for_shot() -> void:
 	aim_target = ShotResolver.clamp_aim(hole.pin_pos, ball_pos,
 		float(pending_club.max_yard), hole.bounds)
 	state = State.AIM
+	teach("aim")
 	refresh_ui()
 
 
@@ -1174,10 +1166,15 @@ func begin_aim_for_shot() -> void:
 # mouse-move event while aiming, so a full refresh_ui() would rebuild the
 # header chips every frame for no reason.
 func _on_aim_changed(target: Vector2) -> void:
+	# On the green the map has closed in, and the caddy would be standing
+	# on the line: he gets out of the way as soon as the putt is being aimed.
+	if state == State.PUTTING and caddy:
+		caddy.dismiss()
 	if state != State.AIM or is_cpu_turn():
 		return
 	aim_target = target
 	rebuild_shot_outlook()
+	rebuild_in_hand()
 
 
 # The player clicked to commit their aim — now draw the 3 Form cards for
@@ -1298,6 +1295,7 @@ func begin_form_draw() -> void:
 			log_msg("[i]Created for this draw: %s.[/i]" % ", ".join(PackedStringArray(created)))
 	state = State.FORM_DRAW
 	Sound.play("card_draw")
+	teach("form")
 	caddy_says("form_draw", {"forced": current_form_forced})
 	refresh_ui()
 
@@ -1332,7 +1330,7 @@ func _draw_draft_options() -> bool:
 	# The stop is still to choose (Route.gd). What a fitting bay would have
 	# on its bench is rolled now, through _roll(), so every machine agrees
 	# and the fork can say what is there before it is taken.
-	me.draft_stop = ""
+	me.draft_stop = "" if opens("fork") else Route.SHOP
 	me.draft_boosts = _roll("bench", func():
 		var ids: Array = ClubAbilities.BOOSTS.keys()
 		ids.shuffle()
@@ -1360,7 +1358,7 @@ func _deal_offers(count: int, taken: Dictionary) -> Array:
 		# Now and then a club on the rack is second-hand: worn in already,
 		# and carrying a curse (ClubAbilities.SECOND_HAND_CHANCE). A putter's
 		# is its own: worn in a level, and twitchy.
-		if ClubAbilities.curse(card) == "" \
+		if ClubAbilities.curse(card) == "" and opens("rare") \
 				and _roll("second_hand", func(): return randf()) < ClubAbilities.SECOND_HAND_CHANCE:
 			var curses: Array = ClubAbilities.CURSES.keys()
 			var rolled: String = _roll("curse", func(): return curses[randi_range(0, curses.size() - 1)])
@@ -1392,7 +1390,11 @@ func draw_unowned_club(owned_names: Dictionary) -> Dictionary:
 			# in set_aside. Stop here and let the fallback below put those
 			# cards back and draw a duplicate from them.
 			break
-		if not owned_names.has(card.name):
+		# Early in a guided round the rack is plain clubs only: Staff and
+		# limited editions are passed over like a club already owned.
+		var held_back: bool = not opens("rare") \
+			and (ClubAbilities.is_staff(card) or bool(card.get("limited", false)))
+		if not owned_names.has(card.name) and not held_back:
 			found = card
 			found_unowned = true
 			break
@@ -1462,11 +1464,17 @@ func inject_rolls(rolls: Array) -> void:
 # the round is local or online — they report what the player did, and
 # submit() decides whether that goes straight into the game or to the host.
 func _on_aim_committed(target: Vector2) -> void:
+	if state == State.PUTTING:
+		# On the green a click only sets the aim down; Strike plays it.
+		# Not while the last putt is still rolling: the green hasn't been
+		# re-framed round the ball yet.
+		if map_view.putt_beat() > 0.0:
+			return
+		_putt_aim = target
+		_putt_aimed = true
+		refresh_ui()
+		return
 	submit("aim", {"target": target})
-
-
-func _on_putt_meter_stopped(result: String, accuracy: float) -> void:
-	submit("putt", {"result": result, "accuracy": accuracy})
 
 
 # --- Online authority --------------------------------------------------
@@ -1670,7 +1678,7 @@ func _mark_club(club: Dictionary) -> void:
 # put it there. Both rolls go through _roll(), so every machine agrees.
 func maybe_curse_club(club: Dictionary) -> void:
 	var mine := _held(club)
-	if not ClubAbilities.grows(mine) or ClubAbilities.curse(mine) != "":
+	if not ClubAbilities.grows(mine) or ClubAbilities.curse(mine) != "" or not opens("curse"):
 		return
 	if _roll("curse_chance", func(): return randf()) >= ClubAbilities.CURSE_CHANCE:
 		return
@@ -1686,6 +1694,7 @@ func maybe_curse_club(club: Dictionary) -> void:
 	Sound.play("ui_error")
 	if _can_stamp():
 		hole_banner.stamp(str(what.name).to_upper(), _club_kicker(mine), what.does, HoleBanner.Tone.BAD)
+	teach("curse")
 
 
 # The first club in the bag owed a wear-in choice, or -1.
@@ -1877,8 +1886,16 @@ func on_event() -> void:
 			log_msg("[color=#%s]The drinks cart: %d strokes in hand, and a Top in your wood form.[/color]" % [
 				COLOR_ACCENT.to_html(false), Route.CART_STROKES])
 		"hustler":
-			# Settled on the putt meter (on_putt_stopped): one putt, holed or not.
+			# Settled by a real putt (on_putt): one putt, holed or not, on
+			# the green just played, from the hole toward its middle.
 			_hustle = true
+			var inward: Vector2 = hole.green_pos - hole.pin_pos
+			ball_pos = hole.pin_pos + (inward.normalized() if inward.length() > 0.5 else Vector2(1, 0)) \
+				* Route.HUSTLER_YARDS
+			shot_path = [ball_pos]
+			if map_view:
+				map_view.set_ball(ball_pos, shot_path)
+			_putt_aimed = false
 			putt_dist = Route.HUSTLER_YARDS
 			state = State.PUTTING
 			log_msg("[color=#%s]The hustler: one putt from %s. Hole it.[/color]" % [
@@ -1897,10 +1914,12 @@ func _settle_hustle(won: bool) -> void:
 	me.hand_bonus += paid
 	log_msg("[color=#%s]The hustler: %s.[/color]" % [(COLOR_ACCENT if won else COLOR_FLAG).to_html(false),
 		"you took him — %d strokes in hand" % paid if won else "he took you — %d strokes gone" % -paid])
-	Sound.play("ui_confirm" if won else "ui_error")
-	if _can_stamp():
-		hole_banner.stamp("TOOK HIM" if won else "HUSTLED", "The practice green",
-			"%+d strokes in hand" % paid, HoleBanner.Tone.GOOD if won else HoleBanner.Tone.BAD)
+	# The verdict waits for the ball, like any other putt's fanfare.
+	_after_putt_drops(func():
+		Sound.play("ui_confirm" if won else "ui_error")
+		if _can_stamp():
+			hole_banner.stamp("TOOK HIM" if won else "HUSTLED", "The practice green",
+				"%+d strokes in hand" % paid, HoleBanner.Tone.GOOD if won else HoleBanner.Tone.BAD))
 	begin_next_draft()
 	refresh_ui()
 
@@ -1937,7 +1956,82 @@ func _tip_club() -> Dictionary:
 # A round played for keeps: one person, on their own, not a course being
 # tested from the editor.
 func plays_for_keeps() -> bool:
-	return for_keeps and not online and player_count == 1 and not GameSetup.return_to_editor
+	return for_keeps and not online and player_count == 1 and not GameSetup.return_to_editor \
+		and not guided()
+
+
+# --- The guided round (Lessons.gd) ----------------------------------------
+
+# A new player's first solo round: the game's pieces arrive a hole at a
+# time and the caddy says what each one is. Only the title's solo Play
+# sets GameSetup.guided, so no harness or group round is ever one.
+func guided() -> bool:
+	return GameSetup.guided and player_count == 1 and not online \
+		and not GameSetup.tour and not GameSetup.return_to_editor
+
+
+# Whether a held-back piece of the game is in play yet. Always, outside a
+# guided round.
+func opens(feature: String) -> bool:
+	return not guided() or Lessons.opens(feature, current_hole_index)
+
+
+# The caddy says a lesson, once a round. True when it was said just now.
+func teach(key: String) -> bool:
+	if not guided() or _taught.has(key) or caddy == null:
+		return false
+	# Two lessons in one moment: the second keeps for its next occasion
+	# rather than talking over the first.
+	if _lesson_fresh and caddy.is_teaching():
+		return false
+	_taught[key] = current_hole_index
+	_lesson_fresh = true
+	caddy.teach(str(Lessons.LINES[key]))
+	return true
+
+
+# What a guided round has to say on the tee, by hole. Past the last
+# lesson hole the setting that starts rounds guided switches itself off.
+func _teach_tee() -> void:
+	if not guided():
+		return
+	match current_hole_index:
+		1:
+			teach("start")
+		2:
+			teach("dots")
+		_:
+			if not (opens("call") and teach("call")) and Wind.gust_mph(hole.wind) > 0:
+				teach("gust")
+	if current_hole_index > Lessons.LAST and bool(Settings.get_value("guided")):
+		Settings.set_value("guided", false)
+
+
+# A lesson as a note on a between-holes page, where the caddy can't be
+# seen: the first of `keys` not yet said, or said on this same page (the
+# page is rebuilt as it is used). Null when there is nothing new to say.
+func _lesson_note(keys: Array) -> Control:
+	if not guided():
+		return null
+	for key in keys:
+		if int(_taught.get(key, current_hole_index)) != current_hole_index:
+			continue
+		_taught[key] = current_hole_index
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 4)
+		col.add_child(BogeyUI.kicker("%s · new to you" % Caddy.CADDY_NAME, BogeyTheme.FAIRWAY_DEEP, 9))
+		var text := _italic(str(Lessons.LINES[key]), 19)
+		text.custom_minimum_size = Vector2(520, 0)
+		col.add_child(text)
+		var s := StyleBoxFlat.new()
+		s.bg_color = Color(0, 0, 0, 0)
+		s.border_color = BogeyTheme.FAIRWAY
+		s.border_width_left = 2
+		s.content_margin_left = 14
+		var note := BogeyUI.make_panel(s)
+		note.add_child(col)
+		return note
+	return null
 
 
 func strokes_in_hand() -> int:
@@ -2023,23 +2117,6 @@ func _on_tour_next() -> void:
 	get_tree().change_scene_to_file(MAIN_SCENE)
 
 
-# The bag, laid out to choose what stays behind: each tile with what
-# leaving it would cost. The last putter always travels.
-func build_pack_row() -> void:
-	var putters: int = hand.filter(func(c): return ClubAbilities.is_putter(c)).size()
-	var width := bag_card_width(hand.size())
-	for i in range(hand.size()):
-		var club: Dictionary = hand[i]
-		var stays: bool = ClubAbilities.is_putter(club) and putters <= 1
-		var cv := make_card_view(club, not stays, true, width, 116.0, false)
-		if stays:
-			cv.set_dimmed(true)
-		else:
-			cv.picked.connect(func(_cv): _on_pack_leave(i))
-		options_container.add_child(card_with_cost(cv,
-			[{"text": "Your only putter travels", "strong": false}] if stays else DraftAdvisor.losses(hand, club)))
-
-
 # What the bag became over the round, in a line.
 func bag_summary() -> String:
 	var levels := 0
@@ -2105,7 +2182,7 @@ func _celebrate_bag_change(was: Dictionary) -> void:
 func can_call_hole() -> bool:
 	return (state == State.CLUB_SELECT or state == State.AIM) and me.strokes == 0 \
 		and not me.holed_out and current_lie == "tee" \
-		and current_hole_index < Course.hole_count()
+		and current_hole_index < Course.hole_count() and opens("call")
 
 
 # Calls birdie on this hole, or takes the call back.
@@ -2132,7 +2209,7 @@ func on_dig() -> void:
 	if state != State.DRAFT or me.draft_stop != Route.SHOP:
 		_reject("dig", "not at the pro shop")
 		return
-	if not DraftRules.can_dig(hand, me.draft_taken, me.draft_digs, current_draft_options.size()):
+	if not opens("hunt") or not DraftRules.can_dig(hand, me.draft_taken, me.draft_digs, current_draft_options.size()):
 		_reject("dig", "no dig left in this draft")
 		return
 	var old: Array = current_draft_options.duplicate()
@@ -2172,7 +2249,7 @@ func on_trade_in(index: int) -> void:
 	if state != State.DRAFT or me.draft_stop != Route.SHOP:
 		_reject("trade in", "not at the pro shop")
 		return
-	if not DraftRules.can_trade(hand, me.draft_taken, me.draft_traded, current_draft_options.size()):
+	if not opens("hunt") or not DraftRules.can_trade(hand, me.draft_taken, me.draft_traded, current_draft_options.size()):
 		_reject("trade in", "no trade left in this draft")
 		return
 	if not _valid_index(index, hand):
@@ -2317,7 +2394,10 @@ func on_club_select(hand_index: int) -> void:
 # aim *is* the aim the player commits to knowing the card's effect (they
 # saw all 3 cards before choosing, so the choice among them already
 # encodes their read).
-func on_form_pick(index: int) -> void:
+# `gust` is how much of a gust was blowing as the card was played, 0 to 1
+# (Wind.gd): read off this machine's map by whoever plays the card, and
+# sent with the pick online so every machine flies the same shot.
+func on_form_pick(index: int, gust: float = 0.0) -> void:
 	if state != State.FORM_DRAW:
 		_reject("form pick", "not in the Form-draw phase")
 		return
@@ -2348,7 +2428,7 @@ func on_form_pick(index: int) -> void:
 	current_form_options = []
 	current_form_forced = false
 	Sound.play("card_place")
-	play_shot(pending_club, card)
+	play_shot(pending_club, card, clampf(gust, 0.0, 1.0))
 
 
 # Where a played Form card goes. The discard pile, to come round again —
@@ -2369,7 +2449,7 @@ func _file_played_card(club: Dictionary, card: FormCard) -> void:
 			form_deck.discard_played(card)
 
 
-func play_shot(club: Dictionary, card: FormCard) -> void:
+func play_shot(club: Dictionary, card: FormCard, gust: float = 0.0) -> void:
 	match ShotRules.yips_effect(hand, card):
 		ShotRules.Yips.BLOCKED:
 			log_msg("[color=#%s]Yips — shrugged off (Callowell).[/color]" % COLOR_TEXT_SOFT.to_html(false))
@@ -2410,18 +2490,26 @@ func play_shot(club: Dictionary, card: FormCard) -> void:
 	Sound.swing(club.type)
 
 	var aim_dir := ShotRules.aim_direction(before_pos, aim_target, hole.pin_pos)
+	var aim_point := aim_target
 
 	# Carry and run-out, decided now from the ground — the animation plays
 	# out exactly this, and the landing below acts on exactly this.
-	var outcome := ShotResolver.shot_outcome(hole, before_pos, aim_dir, result, club)
+	# The wind it flies in is the wind as it was struck, gust and all.
+	if Wind.gust_mph(hole.wind) == 0:
+		gust = 0.0
+	var outcome := ShotResolver.shot_outcome(hole, before_pos, aim_dir, result, club, true, gust)
+	outcome["gust"] = gust
+	if gust >= GUST_TOLD:
+		log_msg("[color=#%s]Struck in a gust: %d mph.[/color]" % [COLOR_FLAG.to_html(false), Wind.mph(Wind.gusted(hole.wind, gust))])
 
 	map_view.play_aim_animation(aim_dir, outcome.carry, float(result.degree), result.side, club.max_yard, func():
-		_resolve_shot_landing(before_pos, aim_dir, result, outcome, club)
+		_resolve_shot_landing(before_pos, aim_dir, result, outcome, club, played, aim_point)
 	, outcome.roll_path, ShotResolver.flight_height(club, result))
 
 
 func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictionary,
-		outcome: Dictionary, club: Dictionary = {}) -> void:
+		outcome: Dictionary, club: Dictionary = {}, card: FormCard = null,
+		aim_point: Vector2 = Vector2.ZERO) -> void:
 	_animating = false
 	# A peer may have dropped mid-flight; it is safe to act on that now
 	# that this closure has finished writing through `me`.
@@ -2448,6 +2536,12 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 		var breakdown := ShotRules.shot_breakdown(hole, before_pos, aim_dir, result, club, outcome)
 		me.last_shot = {"club": club.name, "text": ShotRules.breakdown_text(breakdown)}
 		log_msg("[color=#%s]%s[/color]" % [COLOR_TEXT_SOFT.to_html(false), me.last_shot.text])
+		# ...and told as a story: the card, where it finished against the
+		# aim, and why. The map marks the aim beside the ball (refresh_ui).
+		if card != null:
+			me.last_shot.merge({"card": card.name, "good": card.good, "effect": card.effect_text(),
+				"where": lie_result, "from": before_pos, "aim": aim_point, "gust": float(outcome.get("gust", 0.0)),
+				"rows": ShotRules.breakdown_rows(breakdown, before_pos, aim_point, landing_pos)})
 
 	# A shot that finishes on the cup earns a d20, and only a natural 20
 	# actually drops (see ShotResolver — the aim and the card are fully
@@ -2573,6 +2667,7 @@ func maybe_add_bad_card_to_form_deck(lie_result: String, chance: float, family: 
 		log_msg("[color=#%s](The %s left a %s card in your %s form.)[/color]" % [
 			COLOR_TEXT_SOFT.to_html(false), lie_result, card.name,
 			FormCard.FAMILY_LABEL.get(card.family, "")])
+		teach("bad_card")
 		caddy_says("bad_card")
 
 
@@ -2597,37 +2692,34 @@ func advance_after_shot() -> void:
 		start_putting()
 	else:
 		state = State.CLUB_SELECT
+		teach("result")
 	refresh_ui()
 
 
-# --- Putting phase (Section 7) ---
-# A timing check rather than a card draw: a marker sweeps the putt meter and
-# the player stops it. Distance to the pin sets both how wide the sunk band
-# is and how fast the marker travels, so a tap-in is nearly automatic and a
-# long lag putt is a genuine nerve test.
+# --- Putting phase (Section 6) ---
+# Aimed like any other shot, and nothing is timed: the player sets an aim
+# point on the green (the line, and the weight as where the ball would stop
+# were the green flat) and strikes. ShotResolver.roll_putt() then rolls it
+# over the real slope, and it drops or it doesn't.
 func start_putting() -> void:
 	state = State.PUTTING
+	_putt_aimed = false
 	putt_dist = ball_pos.distance_to(hole.pin_pos)
 	if me.putt_from < 0:
 		me.putt_from = strokes
 		me.putt_first = putt_dist
-	_putt_dir = (ball_pos - hole.pin_pos).normalized()
-	if _putt_dir == Vector2.ZERO:
-		_putt_dir = Vector2(0, 1)
 
-	# The same gimme on_putt_stopped() applies, enforced on arrival too: a
-	# shot can now finish inside tap-in range without ever going through
-	# the putt meter (a rattled hole-out does exactly that), and asking for
-	# a timing check on a 2-foot putt the game concedes everywhere else
-	# would be a check the player cannot meaningfully fail.
+	# The same gimme on_putt() applies, enforced on arrival too: a shot can
+	# finish inside tap-in range without ever being putted (a rattled
+	# hole-out does exactly that), and a 2-foot putt the game concedes
+	# everywhere else is not worth asking for.
 	if ShotRules.is_gimme(putt_dist):
 		strokes += 1
-		putt_dist = 0.0
-		sync_ball_to_putt()
+		_putt_rolled(hole.pin_pos, [], true)
 		log_msg("[color=#%s]Tap-in conceded.[/color]" % COLOR_TEXT_SOFT.to_html(false))
 		finish_hole()
 		return
-	log_msg("\n[b]On the green.[/b] %s to the pin — stop the marker in the green band to hole it." % putt_distance_text())
+	log_msg("\n[b]On the green.[/b] %s to the pin — set your line and weight, then strike." % putt_distance_text())
 	caddy_says("putt", {"dist": putt_dist, "dist_text": putt_distance_text()})
 	refresh_ui()
 
@@ -2640,26 +2732,34 @@ func putt_distance_text() -> String:
 	return "%d yds" % int(round(putt_dist))
 
 
-func on_putt_stopped(result: String, accuracy: float) -> void:
+# A putt struck at `aim`: the point the ball would stop at on a flat green.
+func on_putt(aim: Vector2) -> void:
 	if state != State.PUTTING:
-		_reject("putt result", "not in the putting phase")
+		_reject("putt", "not in the putting phase")
 		return
-	if result != "sunk" and result != "close" and result != "miss":
-		_reject("putt result", "unknown result '%s'" % result)
-		return
-	# Accuracy scales a miss's leave distance, so an out-of-range value
-	# would throw the ball to a nonsense spot rather than crash. Clamp it
-	# to the 0..1 the meter is documented to emit.
-	accuracy = clampf(accuracy, 0.0, 1.0)
+	_putt_aimed = false
+	# The aim can come from another machine: hold it to what a putt of this
+	# length may be aimed at, so a nonsense point is a wild putt, not a crash.
+	aim = ShotResolver.clamp_aim(aim, ball_pos, ShotResolver.putt_aim_reach(putt_dist), hole.bounds)
+	var cup: float = ShotRules.putt_band_mult(hand, putt_dist, me.armed)
+	if yips_pending:
+		# Jabbed off the line, and the cup takes nothing: it misses however
+		# well it was read.
+		aim = ShotRules.yips_putt_aim(ball_pos, aim, _roll("putt_yips",
+			func(): return Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0))))
+		cup = 0.0
+	var roll := ShotResolver.roll_putt(hole, ball_pos, aim, cup)
+	var holed: bool = roll.holed
 
 	# The hustler's putt at the hut is no stroke: it only settles the bet.
 	if _hustle:
-		_settle_hustle(result == "sunk")
+		_putt_rolled(roll.rest, roll.path, holed)
+		_settle_hustle(holed)
 		return
 
 	# The Titanist Blade Putter: a putt that stays out is taken again, no
 	# stroke added. Covers a Yips-tainted putt too — that's the mulligan.
-	if me.armed.has("putt_retry") and (result != "sunk" or yips_pending):
+	if me.armed.has("putt_retry") and not holed:
 		me.armed.erase("putt_retry")
 		ClubAbilities.record(me.ability_log, "putt_retry", current_hole_index)
 		if yips_pending:
@@ -2668,58 +2768,44 @@ func on_putt_stopped(result: String, accuracy: float) -> void:
 		else:
 			log_msg("[color=#%s]Missed — the Blade Putter takes it again, no stroke added.[/color]" % COLOR_TEXT_SOFT.to_html(false))
 		Sound.play("rim_out")
+		# The map shows the one that got away; the ball stays where it was.
+		if map_view:
+			map_view.play_putt(ball_pos, roll.rest, false, roll.path)
 		refresh_ui()
 		return
 
 	strokes += 1
+	me.last_shot = {}  # a putt has been struck since: the approach is old news
 	# Steady Hands is spent on the putt that actually counts.
 	if me.armed.has("old_reliable"):
 		me.armed.erase("old_reliable")
 		ClubAbilities.record(me.ability_log, "old_reliable", current_hole_index)
 		log_msg("[i]Steady Hands (Old Reliable Putter).[/i]")
-
 	if yips_pending:
 		yips_pending = false
-		log_msg("[color=#%s]The Yips strike — the putt misses regardless of how well you struck it.[/color]" % COLOR_FLAG.to_html(false))
+		log_msg("[color=#%s]The Yips strike — the putt is jabbed off line, however well you read it.[/color]" % COLOR_FLAG.to_html(false))
 		Sound.play("ui_error")
-		putt_dist = ShotRules.yips_putt_leave(putt_dist)
-		sync_ball_to_putt(_roll("putt_offline_yips", func(): return randf_range(-0.8, 0.8)))
-		continue_after_putt()
-		return
 
-	match result:
-		"sunk":
-			log_msg("[color=#%s]Dead centre — in the hole![/color]" % COLOR_ACCENT.to_html(false))
-			putt_dist = 0.0
-			sync_ball_to_putt()
-			finish_hole()
-			return
-		"close":
-			# A good-but-not-perfect strike leaves a short one.
-			putt_dist = ShotRules.putt_leave(result, accuracy, putt_dist)
-			sync_ball_to_putt(_roll("putt_offline_close", func(): return randf_range(-0.5, 0.5)))
-			log_msg("Good pace — slides by, leaving %s." % putt_distance_text())
-		_:
-			# Capped at the distance it came from, so a putt can never get
-			# longer — the sequence always walks toward the hole.
-			putt_dist = ShotRules.putt_leave(result, accuracy, putt_dist)
-			sync_ball_to_putt(_roll("putt_offline_miss", func(): return randf_range(-1.2, 1.2)))
-			log_msg("[color=#%s]Mishit — pushed off line, %s left.[/color]" % [
-				COLOR_FLAG.to_html(false), putt_distance_text()])
+	_putt_rolled(roll.rest, roll.path, holed)
+	if holed:
+		log_msg("[color=#%s]In the hole![/color]" % COLOR_ACCENT.to_html(false))
+		finish_hole()
+		return
+	log_msg("It stays out — %s left." % putt_distance_text())
 
 	# The gimme: once you're inside tap-in range there's no drama left to
-	# play for, so it's conceded rather than asking for another timing check
-	# the player cannot meaningfully fail. Also guarantees the putting loop
-	# terminates instead of grinding on a very short putt forever.
+	# play for, so it's conceded. Also keeps a putting sequence from
+	# grinding on a very short putt.
 	if ShotRules.is_gimme(putt_dist):
 		strokes += 1
-		putt_dist = 0.0
-		sync_ball_to_putt()
+		_putt_rolled(hole.pin_pos, [], true)
 		log_msg("[color=#%s]Tap-in conceded.[/color]" % COLOR_TEXT_SOFT.to_html(false))
 		finish_hole()
 		return
 
-	caddy_says("putt_result", {"result": result})
+	# He keeps his verdict until the ball has stopped.
+	var verdict := "close" if putt_dist < 2.0 else "miss"
+	_after_putt_drops(func(): caddy_says("putt_result", {"result": verdict}))
 	continue_after_putt()
 
 
@@ -2737,92 +2823,130 @@ func continue_after_putt() -> void:
 	if is_multiplayer() and not advance_turn():
 		begin_end_of_hole()
 		return
-	# Reads through to whoever is active now: still on the green means the
-	# putt meter, otherwise they are playing a normal shot.
+	# Reads through to whoever is active now: still on the green means
+	# putting, otherwise they are playing a normal shot.
 	if current_lie == "green":
 		state = State.PUTTING
-		# Re-derive the putt for the player now up, so the meter's
-		# difficulty matches THEIR distance rather than the last player's.
+		_putt_aimed = false
+		# Re-derive the putt for the player now up, so it is THEIR distance
+		# rather than the last player's.
 		putt_dist = ball_pos.distance_to(hole.pin_pos)
-		_putt_dir = (ball_pos - hole.pin_pos).normalized()
-		if _putt_dir == Vector2.ZERO:
-			_putt_dir = Vector2(0, 1)
 	else:
 		state = State.CLUB_SELECT
 	refresh_ui()
 
 
-# Moves the ball on the map to match the current putt distance. Each miss
-# leaves it a little offline rather than perfectly pin-high, so the trail
-# reads like a real putt that slid past instead of a number shrinking.
-func sync_ball_to_putt(offline: float = 0.0) -> void:
-	# A missed putt finishes on the green's low side. The size of the miss
-	# is still the rolled amount; only its side comes from the slope.
-	var fall: float = ShotResolver.putt_read(hole, ball_pos).fall
-	if absf(fall) >= ShotResolver.PUTT_FLAT:
-		offline = absf(offline) * signf(fall)
-	var dir := _putt_dir.rotated(offline)
-	var rolled_from := ball_pos
-	ball_pos = hole.pin_pos + dir * putt_dist
+# Moves the ball to where a putt finished, and has the map roll it there
+# along the line it took (and drop, if it's in).
+func _putt_rolled(rest: Vector2, path: Array, holed: bool) -> void:
+	var from := ball_pos
+	ball_pos = rest
+	putt_dist = 0.0 if holed else rest.distance_to(hole.pin_pos)
 	shot_path.append(ball_pos)
 	if map_view:
 		map_view.set_ball(ball_pos, shot_path)
 		map_view.set_aim_target(ball_pos)
-		# The map shows it rolling there — and dropping, if it's in.
-		map_view.play_putt(rolled_from, ball_pos, putt_dist == 0.0)
+		map_view.play_putt(from, ball_pos, holed, path)
 
 
-# Builds the putt meter plus its strike button into the options row, and
-# starts the marker sweeping for the current distance. Called on every
-# refresh while putting, since refresh_ui() clears the container.
+# On the green the map closes in on the putt: the ball, the hole and room
+# to aim round them.
+func _frame_green() -> void:
+	var want := Rect2()
+	if state == State.PUTTING:
+		var half: float = maxf(putt_dist * 0.5 + maxf(2.0, putt_dist * 0.35), 3.5)
+		want = Rect2((ball_pos + hole.pin_pos) * 0.5 - Vector2(half, half), Vector2(half, half) * 2.0)
+	if not want.is_equal_approx(map_view.fixed_extent):
+		map_view.fixed_extent = want
+
+
+# True while a putt is still rolling on the map. The screen holds as it
+# was until the ball stops (refresh_ui), so the card, the distance and the
+# page between holes can't give the result away before the ball does; one
+# refresh is booked for when it has stopped.
+# Cosmetic only: no game state waits, and with animations off nothing does.
+func _putt_rolling() -> bool:
+	var wait: float = map_view.putt_beat() if map_view and is_inside_tree() else 0.0
+	if wait <= 0.0:
+		return false
+	if not _reframe_due:
+		_reframe_due = true
+		get_tree().create_timer(wait + 0.05).timeout.connect(func():
+			_reframe_due = false
+			refresh_ui())
+	return true
+
+
+# The putt's strip: how far and what the green does, where the aim has been
+# set down, and the strike. Called on every refresh while putting, since
+# refresh_ui() clears the container.
 func build_putt_controls() -> void:
-	# The meter needs an explicit width — it has to be wide to be readable,
-	# since on a long putt the sunk band is only a few percent of it.
-	var col := VBoxContainer.new()
-	col.custom_minimum_size = Vector2(METER_WIDTH, 0)
-	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	col.add_theme_constant_override("separation", 10)
-
-	# The read: which way it breaks and how quick it is, in words, above
-	# the meter that shows it in numbers.
 	var read := ShotResolver.putt_read(hole, ball_pos)
-	var read_label := Label.new()
-	read_label.text = ShotResolver.putt_read_text(read)
-	BogeyUI.set_font(read_label, BogeyUI.serif_italic(500), 19, BogeyTheme.INK)
-	read_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(read_label)
+	var cpu := is_cpu_turn()
 
-	putt_meter = PuttMeter.new()
-	putt_meter.custom_minimum_size = Vector2(METER_WIDTH, 0)
-	putt_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	putt_meter.stopped.connect(_on_putt_meter_stopped)
-	col.add_child(putt_meter)
+	# Left: how far, in big figures, and the green's grades on this line.
+	var left := VBoxContainer.new()
+	left.add_theme_constant_override("separation", 6)
+	left.custom_minimum_size = Vector2(260, 0)
+	left.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	left.add_child(BogeyUI.heading(putt_distance_text(), 40))
+	left.add_child(BogeyUI.body(ShotResolver.putt_read_text(read), 12, BogeyTheme.INK_SOFT))
+	options_container.add_child(left)
 
+	# Middle: where the putt is aimed, against the hole.
+	var mid := VBoxContainer.new()
+	mid.add_theme_constant_override("separation", 6)
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	mid.add_child(BogeyUI.kicker("Your aim", BogeyTheme.INK_SOFT, 10))
+	var aim_text := "Click the green to set it"
+	if cpu:
+		aim_text = "%s is reading the green" % me.name
+	elif _putt_aimed:
+		aim_text = ShotResolver.putt_aim_text(ball_pos, hole.pin_pos, _putt_aim)
+	mid.add_child(BogeyUI.heading(aim_text, 26))
+	mid.add_child(BogeyUI.body("Aim where the ball would stop on a flat green. The slope bends it and changes how far it runs. Click again to move the aim.",
+		12, BogeyTheme.INK_SOFT))
+	var mid_margin := BogeyUI.margin(mid, 32, 0, 32, 0)
+	mid_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	options_container.add_child(mid_margin)
+
+	# Right: the strike, and where its key is set.
+	var right := VBoxContainer.new()
+	right.add_theme_constant_override("separation", 6)
+	right.custom_minimum_size = Vector2(260, 0)
+	right.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var strike_btn := Button.new()
-	strike_btn.text = "Strike  (%s)" % Settings.putt_key_name()
-	strike_btn.custom_minimum_size = Vector2(0, 44)
-	BogeyUI.style_button(strike_btn, true, 15)
+	strike_btn.text = ("Strike · %s" % Settings.putt_key_name()).to_upper()
+	strike_btn.custom_minimum_size = Vector2(0, 60)
+	BogeyUI.style_button(strike_btn, true, 13)
+	strike_btn.add_theme_font_override("font", BogeyUI.sans(600, 5))
 	strike_btn.pressed.connect(_on_strike_pressed)
-	if is_cpu_turn():
+	strike_btn.disabled = not _putt_aimed
+	right.add_child(strike_btn)
+	var key_note := BogeyUI.label("Strike key is set in Settings", 11, BogeyTheme.INK_SOFT)
+	key_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	right.add_child(key_note)
+	if cpu:
 		strike_btn.text = "%s is over the putt…" % me.name
+		strike_btn.add_theme_font_override("font", BogeyUI.sans(500))
 		strike_btn.disabled = true
-	col.add_child(strike_btn)
-
-	options_container.add_child(col)
-	putt_meter.begin(putt_dist, read.shift,
-		read.band_mult * ShotRules.putt_band_mult(hand, putt_dist, me.armed))
+		key_note.visible = false
+	options_container.add_child(right)
 
 
 func _on_strike_pressed() -> void:
-	if is_cpu_turn():
+	if is_cpu_turn() or state != State.PUTTING or not _putt_aimed:
 		return
-	if putt_meter and putt_meter.active:
-		Sound.play("putt")
-		putt_meter.stop_putt()
+	# Spent at once: online, the putt is not played until the host says so,
+	# and a second press must not send a second one.
+	_putt_aimed = false
+	Sound.play("putt")
+	submit("putt", {"aim": _putt_aim})
 
 
-# Space bar is the natural input for a timing check — the button stays for
-# mouse players, but nobody should have to chase a cursor to hit a beat.
+# The strike has a key as well as a button, so the hand that set the aim
+# with the mouse doesn't have to travel to play it.
 func _unhandled_key_input(event: InputEvent) -> void:
 	if state != State.PUTTING:
 		return
@@ -2894,6 +3018,9 @@ func _process(delta: float) -> void:
 		return
 	if _animating or not is_cpu_turn():
 		_cpu_reset()
+		return
+	# A computer golfer waits for the putt before it to stop, like anyone.
+	if map_view and map_view.putt_beat() > 0.0:
 		return
 	if not _cpu_beat:
 		_cpu_beat = true
@@ -2988,7 +3115,7 @@ func cpu_act() -> void:
 			if _cpu_form_pick >= 0:
 				var pick := _cpu_form_pick
 				_cpu_form_pick = -1
-				on_form_pick(pick)
+				on_form_pick(pick, live_gust())   # they take the wind as it comes
 				return
 			# An ability first, if it wants one (the hand is then redrawn
 			# and it reads it again); otherwise the card it will keep.
@@ -3216,8 +3343,8 @@ func _pick_up() -> bool:
 
 
 # What the hole did to the putter (ClubAbilities, "The putter"): a putt
-# holed in one from distance is a mark, and a level widens the meter's
-# bands at once; three putts can leave it twitchy.
+# holed in one from distance is a mark, and a level makes the cup play
+# bigger at once; three putts can leave it twitchy.
 func _putter_after_hole() -> void:
 	if me.putt_from < 0:
 		return
@@ -3233,10 +3360,10 @@ func _putter_after_hole() -> void:
 		var level: int = mini(ClubAbilities.MAX_LEVEL, int(putter.marks) / ClubAbilities.WEAR_MARKS)
 		if level > int(putter.get("level", 0)):
 			putter["level"] = level
-			log_msg("[color=#%s][b]%s is worn in.[/b] The putt meter's bands are wider.[/color]" % [
+			log_msg("[color=#%s][b]%s is worn in.[/b] The cup plays bigger.[/color]" % [
 				COLOR_ACCENT.to_html(false), putter.name])
 			if _can_stamp():
-				hole_banner.stamp("WORN IN", _club_kicker(putter), "The putt meter's bands are wider",
+				hole_banner.stamp("WORN IN", _club_kicker(putter), "The cup plays bigger",
 					HoleBanner.Tone.GOOD)
 	elif putts >= ClubAbilities.TWITCHY_PUTTS and ClubAbilities.curse(putter) == "" \
 			and _roll("twitchy", func(): return randf()) < ClubAbilities.CURSE_CHANCE:
@@ -3544,6 +3671,16 @@ func round_mode() -> String:
 
 # Saves each local player's finished round and says how it stands.
 func record_finished_round() -> void:
+	# The ladder: was the next course locked before this round went in?
+	var next: Dictionary = CourseLibrary.next_after(Course.active_id)
+	var was_locked: bool = not next.is_empty() and not CourseLibrary.lock_on(str(next.id)).is_empty()
+	_record_rounds()
+	if was_locked and CourseLibrary.lock_on(str(next.id)).is_empty():
+		_opened_course = str(next.name)
+		log_msg("[b]%s is now open.[/b]" % _opened_course)
+
+
+func _record_rounds() -> void:
 	for i in range(players.size()):
 		if not records_this_seat(i):
 			continue
@@ -3613,6 +3750,9 @@ func restart_round() -> void:
 	current_hole_index = 1
 	_restart_armed = false
 	_show_restart_armed(false)
+	# A fresh round: guided again only while the setting still asks for one.
+	GameSetup.guided = GameSetup.guided and bool(Settings.get_value("guided"))
+	_taught.clear()
 	init_game()
 	start_hole()
 
@@ -3697,6 +3837,8 @@ func rebuild_brand_rack() -> void:
 	if not brand_rack:
 		return
 	clear_container(brand_rack)
+	if not opens("makers"):
+		return
 
 	var counts := Brands.counts(hand)
 	var brands: Array = live_brands.duplicate()
@@ -3733,6 +3875,9 @@ func rebuild_brand_rack() -> void:
 
 
 func refresh_ui() -> void:
+	# A putt is still rolling: the screen waits for the ball (_putt_rolling).
+	if _putt_rolling():
+		return
 	refresh_turn_ui()
 
 	# A computer golfer's turn is watched, not played: the cards are shown
@@ -3743,9 +3888,27 @@ func refresh_ui() -> void:
 		# A computer golfer commits its aim without clicking the map, so the
 		# map is never told the aim is over; end it here once play moves on,
 		# or the crosshair follows the mouse through putting and the draft.
-		if map_view.aiming and state != State.AIM:
+		# On the green the aim is a putt's: the map closes in, a click sets
+		# the aim down and it stays there until the next click or the strike.
+		var putt_aiming: bool = state == State.PUTTING and not cpu and is_my_turn()
+		if map_view.aiming and state != State.AIM and not putt_aiming:
 			map_view.set_aiming(false)
+		_frame_green()
+		map_view.putt_cup = ShotResolver.PUTT_CUP_RADIUS * ShotRules.putt_band_mult(hand, putt_dist, me.armed) \
+			if state == State.PUTTING else 0.0
+		map_view.aim_set = putt_aiming and _putt_aimed
+		if putt_aiming:
+			map_view.set_aiming(true, 0.0, ShotResolver.putt_aim_reach(putt_dist))
+			if _putt_aimed:
+				map_view.set_aim_target(_putt_aim)
 		map_view.show_last_aim = state == State.FORM_DRAW
+		# Where the last shot was aimed, left on the map beside where it
+		# finished until the next club is in hand.
+		# The wind gusts while a shot is being chosen, wherever it gusts at all.
+		map_view.gusting = hole != null and Wind.gust_mph(hole.wind) > 0 \
+			and (state == State.CLUB_SELECT or state == State.AIM or state == State.FORM_DRAW)
+		var told: bool = state == State.CLUB_SELECT and me.last_shot.has("aim")
+		map_view.last_aim = [me.last_shot.from, me.last_shot.aim] if told else []
 	if state != State.DRAFT:
 		_trading = false
 		_boosting = false
@@ -3761,243 +3924,86 @@ func refresh_ui() -> void:
 			scorecard.set_card(rows, current_hole_index)
 		else:
 			scorecard.set_round(round_scores, current_hole_index, strokes)
+	if course_line:
+		course_line.text = "%s · Hole %d of %d" % [Course.active_name, current_hole_index, Course.hole_count()]
 	if hole_title and hole:
-		if state == State.DONE:
-			hole_title.text = "Final card"
-			hole_caption.text = Course.active_name
-		else:
-			hole_title.text = "Hole %d" % current_hole_index
-			hole_caption.text = "Par %d  ·  %d yards" % [hole_par, int(hole_yardage)]
-
-	if form_deck_holder:
-		clear_container(form_deck_holder)
-		if form_deck:
-			form_deck_holder.add_child(make_form_deck_chip_button())
+		hole_title.text = "Hole %d" % current_hole_index
+		hole_caption.text = "Par %d  ·  %d yards" % [hole_par, int(hole_yardage)]
+	if elev_note and hole:
+		elev_note.text = "%s · %d yds" % [_slope_word(), roundi(ball_pos.distance_to(hole.pin_pos))]
 
 	rebuild_brand_rack()
 
 	if _animating:
 		return
 
+	# Between holes the shot screen gives way to a page of its own.
+	var between := state == State.DRAFT or state == State.DISCARD_FOR_DRAFT \
+		or state == State.DISCARD_FOR_HAZARD or state == State.WAITING or state == State.DONE
+	if interlude:
+		interlude.visible = between
+		game_page.visible = not between
+	if between:
+		build_interlude()
+		return
+
 	rebuild_shot_outlook()
-	rebuild_ability_box()
 	clear_container(options_container)
-	clear_container(form_container)
-	form_hint.visible = true
+	form_container = options_container
 
 	# The step line: which numbered beat of the shot flow you're on, and
 	# the one instruction that goes with it.
 	var step_num := "1"
 	var step_hint := ""
-	var bag_text := "Your bag  %d / %d" % [hand.size(), HAND_CAP]
+	hand_label.text = "Your bag  %d / %d" % [hand.size(), HAND_CAP]
 
 	match state:
+		State.CLUB_SELECT:
+			step_num = "1"
+			step_hint = "Choose a club from your bag"
+			options_label.text = "Dots are the cards a club can deal you: green shots, claret misses. Hover one for its reach"
+			if current_lie == "bunker":
+				options_label.text = "In the bunker — no woods"
+			elif current_lie == "green":
+				options_label.text = "On the green — putters only"
+			rebuild_bag_row()
+
 		State.AIM:
 			step_num = "2"
 			step_hint = "Aim on the hole, then click to commit"
-			hand_label.text = bag_text
-			options_label.text = "Aiming with %s — it reaches %d–%d yds." % [
+			options_label.text = "Aiming with %s — it reaches %d–%d yds" % [
 				pending_club.name, int(pending_club.min_yard), int(pending_club.max_yard)]
 			rebuild_bag_row()
-			build_form_placeholders("Drawn the moment you commit your aim.")
 
 		State.FORM_DRAW:
 			step_num = "3"
-			if current_form_forced:
-				step_hint = "No choice — play the card the club created"
-				form_label.text = "%s form · forced" % FormCard.FAMILY_LABEL[FormCard.family_of(pending_club)]
-				form_hint.text = "This card was created for you. Tap it to play."
-			else:
-				step_hint = "Read all %d, then keep one" % current_form_options.size()
-				form_label.text = "%s form · draw %d, keep 1" % [
-					FormCard.FAMILY_LABEL[FormCard.family_of(pending_club)], current_form_options.size()]
-				form_hint.text = "Read the cards against the wind and the ground, then keep one."
-			hand_label.text = bag_text
-			options_label.text = "Playing %s." % pending_club.name
-			rebuild_bag_row()
-			for i in range(current_form_options.size()):
-				# As this swing plays it: a Stock Shot off the Mid tier is
-				# shown as the push it will be.
-				var fv := make_form_card_view(ShotRules.card_for_shot(hand, pending_club,
-					ball_pos.distance_to(aim_target), current_form_options[i], me.armed), not cpu)
-				fv.picked.connect(_make_form_pick_callback(i))
-				form_container.add_child(fv)
-
-		State.DRAFT:
-			step_num = "·"
-			var shown := current_draft_options.size()
-			var keeps: int = clampi(me.draft_keeps, 1, maxi(shown, 1))
-			if _trading and not cpu:
-				step_hint = "Trade in — give up a club for one more offer"
-				hand_label.text = "Trade in a club"
-				options_label.text = "Tap the club to give up. It is gone for good, and the shot it brought goes with it."
-				build_trade_row()
-			elif _boosting and not cpu and me.draft_stop == Route.FIT:
-				var boost: Dictionary = ClubAbilities.BOOSTS[_boost_pick]
-				step_hint = "The fitting bay — %s" % str(boost.name).to_lower()
-				hand_label.text = "%s: choose the club" % boost.name
-				options_label.text = "%s." % boost.does
-				build_boost_row()
-			elif not cpu and wear_due() >= 0:
-				var worn: Dictionary = hand[wear_due()]
-				step_hint = "Worn in — choose what the club gains"
-				hand_label.text = "%s is worn in" % worn.name
-				options_label.text = "It has found the fairway or the green often enough to be trusted. Choose one; the draft follows."
-				build_wear_row(wear_due())
-			elif me.draft_stop == "":
-				step_hint = "End of the hole — choose where to stop"
-				hand_label.text = "The way to the next tee"
-				var ahead := Route.ahead_text(wind_seed, current_hole_index + 1, Course.hole_count())
-				options_label.text = "One stop, and the other is passed by.%s" % (
-					"" if ahead == "" else " Beside the pro shop ahead: %s." % ahead)
-				build_stop_row(cpu)
-			elif me.draft_stop == Route.FIT:
-				step_hint = "The fitting bay — one boost, for a club you hold"
-				hand_label.text = "On the bench"
-				options_label.text = "Choose a boost, then the club it goes on. Only the right one mends a curse."
-				build_bench_row(cpu)
-			elif me.draft_stop == Route.HUT:
-				var what: Dictionary = Route.EVENTS[Route.event(wind_seed, current_hole_index, plays_for_keeps())]
-				step_hint = "The hut — %s" % str(what.title).to_lower()
-				hand_label.text = what.title
-				options_label.text = what.text
-				build_event_row(what, cpu)
-			else:
-				step_hint = "End of the hole — add %s to your bag" % (
-					"one club" if keeps == 1 else "%d clubs" % keeps)
-				# Three and keep one, unless the hole was called (DraftRules);
-				# a nearly-exhausted club deck can offer fewer.
-				hand_label.text = "Draw %d, keep %d" % [shown, keeps]
-				options_label.text = draft_caption()
-				var offer_width := draft_card_width(shown)
-				for i in range(shown):
-					var offer: Dictionary = current_draft_options[i]
-					var cv := make_draft_card(offer, not cpu,
-						DraftAdvisor.gains(hand, offer, HAND_CAP), offer_width)
-					cv.picked.connect(_make_draft_pick_callback(i))
-					# Passing over an offer slots it into the yardage chart.
-					cv.hover_started.connect(func(_v): _set_coverage_offer(offer))
-					cv.hover_ended.connect(func(_v): _set_coverage_offer({}))
-					options_container.add_child(cv)
-				options_container.add_child(make_draft_side(cpu))
-			build_form_placeholders("No Form draw between holes.")
-			if not (_trading or _boosting) or cpu:
-				add_coverage_chart("Pass over a club on offer to see where it slots in. Claret is yardage no club reaches.")
-
-		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
-			step_num = "·"
-			step_hint = "Bag is full — something has to go"
-			hand_label.text = "Bag full  %d / %d" % [hand.size(), HAND_CAP]
-			options_label.text = "Tap a club to drop it for %s." % pending_new_card.name
-			var cut_width := bag_card_width(hand.size())
-			for i in range(hand.size()):
-				# Cut short, with no engraving, to leave room beneath for
-				# what dropping it would cost.
-				var cv := make_card_view(hand[i], not cpu, true, cut_width, 116.0, false)
-				cv.picked.connect(_make_discard_callback(i))
-				var cut_club: Dictionary = hand[i]
-				cv.hover_started.connect(func(_v): _set_coverage_focus(cut_club))
-				cv.hover_ended.connect(func(_v): _set_coverage_focus({}))
-				# What cutting it would cost, so the cut is a read, not a guess.
-				options_container.add_child(card_with_cost(cv, DraftAdvisor.losses(hand, hand[i])))
-			build_form_placeholders("No Form draw while you're cutting the bag.")
-			add_coverage_chart("Pass over a club to see the yards it covers.")
-
-		State.WAITING:
-			step_num = "·"
-			step_hint = "Drafted — waiting for the others"
-			hand_label.text = bag_text
-			options_label.text = "Still drafting: %s." % ", ".join(PackedStringArray(waiting_on_names()))
-			build_form_placeholders("The next hole starts when the last pick is in.")
-
-		State.CLUB_SELECT:
-			step_num = "1"
-			step_hint = "Pick a club from your bag"
-			hand_label.text = bag_text
-			options_label.text = "Pass over a club to see its reach on the hole."
-			if current_lie == "bunker":
-				options_label.text = "In the bunker — no woods."
-			rebuild_bag_row()
-			build_form_placeholders("Drawn fresh for every shot, once you commit your aim.")
-			add_reach_readout()
-			add_coverage_chart("", ball_pos.distance_to(hole.pin_pos) if hole else -1.0)
+			step_hint = "No choice — play the card the club created" if current_form_forced \
+				else "Choose your Form card"
+			if Wind.gust_mph(hole.wind) > 0:
+				step_hint += " · the wind is gusting, pick your moment"
+			options_label.text = "Club chosen · play a card"
+			build_form_hand(cpu)
 
 		State.PUTTING:
 			step_num = "·"
-			step_hint = "On the green — stop the marker in the band"
-			hand_label.text = "Putting  ·  %s" % putt_distance_text()
-			options_label.text = "The further out you are, the tighter the band."
+			step_hint = "Set your line and weight on the green, then strike"
+			options_label.text = "On the green — putters only"
 			if _hustle:
 				step_hint = "The hustler — one putt, holed or not"
-				hand_label.text = "The hustler  ·  %s" % putt_distance_text()
 				options_label.text = "Hole it for %d strokes in hand. Anything else costs %d. It is no stroke on the card." % [
 					Route.HUSTLER_WIN, Route.HUSTLER_LOSS]
 			build_putt_controls()
-			build_form_placeholders("No Form draw on the green — a putt is a timing check.")
 
-		State.DONE:
-			var total_strokes := 0
-			var total_par := 0
-			for entry in round_scores:
-				total_strokes += entry.strokes
-				total_par += entry.par
-			var diff := total_strokes - total_par
-			step_num = "·"
-			step_hint = "Out of strokes in hand" if _run_over else "Round complete"
-			hand_label.text = "Out of strokes" if _run_over else "Round complete"
-			options_label.text = "%d strokes (%s). %s" % [total_strokes, score_diff_text(diff), bag_summary()]
-			if _run_over:
-				options_label.text = "The round ended after %d holes, %s. You had %d strokes in hand to spend. %s" % [
-					round_scores.size(), score_diff_text(diff), strokes_allowance() + me.hand_bonus, bag_summary()]
-			if on_tour():
-				options_label.text = "The tour, %s. %s" % [tour_total_text(), options_label.text]
-			var restart_btn := Button.new()
-			restart_btn.text = "Play another round"
-			restart_btn.custom_minimum_size = Vector2(220, 52)
-			restart_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			BogeyUI.style_button(restart_btn, true, 15)
-			restart_btn.pressed.connect(restart_round)
-			if tour_continues():
-				# Pack for the next course: the bag down to what travels, then on.
-				var next_course := tour_course_name(GameSetup.tour_leg + 1)
-				var over: int = hand.size() - TOUR_KEEP
-				step_hint = "Next on the tour: %s" % next_course
-				if over > 0:
-					hand_label.text = "Pack for %s: leave %d behind" % [next_course, over]
-					options_label.text = "The tour, %s. %d clubs travel, with everything they have gained. Tap a club to leave it behind." % [
-						tour_total_text(), TOUR_KEEP]
-					restart_btn.free()
-					build_pack_row()
-				else:
-					hand_label.text = "Packed for %s" % next_course
-					restart_btn.text = "Tee off at %s" % next_course
-					restart_btn.pressed.disconnect(restart_round)
-					restart_btn.pressed.connect(_on_tour_next)
-					options_container.add_child(restart_btn)
-			else:
-				if on_tour():
-					hand_label.text = "The tour is over" if _run_over else "Tour complete"
-					restart_btn.text = "Start the tour again"
-				options_container.add_child(restart_btn)
-			build_form_placeholders("")
+	rebuild_right_col()
 
 	if cpu:
-		# Same strip, but it's their bag and their move you're looking at.
+		# Same strip, but it's their move you're watching.
 		step_num = "·"
 		step_hint = "%s is %s" % [me.name, CPU_DOING.get(state, "thinking")]
-		var whose := possessive(me)
-		match state:
-			State.DRAFT:
-				hand_label.text = "%s draft" % whose
-			State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
-				hand_label.text = "%s bag is full" % whose
-			State.PUTTING:
-				hand_label.text = "%s putt  ·  %s" % [whose, putt_distance_text()]
-			_:
-				hand_label.text = "%s bag  %d / %d" % [whose, hand.size(), HAND_CAP]
-		options_label.text = "Computer golfer — %s." % Rivals.blurb_of(me.cpu_skill).to_lower()
-		if state == State.FORM_DRAW:
-			form_hint.text = "%s reads the same cards you would." % me.name
+		hand_label.text = "%s bag  %d / %d" % [possessive(me), hand.size(), HAND_CAP]
+		options_label.text = "Computer golfer — %s" % Rivals.blurb_of(me.cpu_skill).to_lower()
+		if state == State.CLUB_SELECT or state == State.AIM:
+			build_cpu_strip()
 
 	if step_holder:
 		clear_container(step_holder)
@@ -4005,112 +4011,80 @@ func refresh_ui() -> void:
 			step_holder.add_child(BogeyUI.step_pill(step_num, step_hint))
 
 
-# The Form hand at rest. Outside a draw the column holds one line saying
-# when the next draw comes — and, once a club is in hand, how many cards
-# this swing would earn, since that count is the read the aim turns on.
-func build_form_placeholders(note: String) -> void:
-	form_label.text = "Form hand"
-	form_hint.text = note
-	form_hint.visible = note != ""
+# One word on the side view: whether the flag sits above, below or level.
+func _slope_word() -> String:
+	var ft: int = roundi((hole.height_at(hole.pin_pos) - hole.height_at(ball_pos)) * HoleData.FEET_PER_YARD)
+	if absi(ft) < 3:
+		return "Flag level with you"
+	return "Flag %d ft %s you" % [absi(ft), "above" if ft > 0 else "below"]
 
-	var swinging := ""
-	if state == State.AIM and not pending_club.is_empty():
-		swinging = FormCard.family_of(pending_club)
-		var created: int = me.created_next.size() + ClubAbilities.draw_extras(pending_club, current_lie).size()
-		var count: int = ShotRules.form_choice_count(hand, swing_tier_for_shot(), play_lie(), created,
-			pending_club)
-		# Dealt from the family's pile and this club's own shots.
+
+# The Form hand, dealt into the strip under the hole: a line on what the
+# swing was dealt from at the left, then the cards standing upright.
+func build_form_hand(cpu: bool) -> void:
+	var lead := Label.new()
+	lead.custom_minimum_size = Vector2(260, 0)
+	lead.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lead.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	BogeyUI.set_font(lead, BogeyUI.serif_italic(500), 20, BogeyTheme.INK)
+	var fam := str(FormCard.FAMILY_LABEL[FormCard.family_of(pending_club)]).to_lower()
+	if current_form_forced:
+		lead.text = "No choice. The club created this card; play it."
+	else:
 		var pile := form_deck.club_form(pending_club)
-		form_hint.text = "This swing draws %d from the %s pile and the %s's own shots (%d good, %d bad) — %s." % [
-			count, str(FormCard.FAMILY_LABEL[swinging]).to_lower(), pending_club.name,
-			int(pile.good), int(pile.bad), "you keep one" if count > 1 else "no choice"]
-		form_hint.visible = true
-		form_container.add_child(make_form_placeholder(count))
-
-	# What the last swing left for the next one.
-	var owed := PackedStringArray()
-	if not me.pocket.is_empty():
-		owed.append("In your pocket: %s. It joins your next hand." % me.pocket[0].key())
-	if me.tempo > 0:
-		owed.append("Tempo: your next swing is dealt one more card.")
-	if not owed.is_empty() and state != State.PUTTING and state != State.DONE:
-		form_container.add_child(BogeyUI.body("\n".join(owed), 12, BogeyTheme.FAIRWAY_DEEP))
-
-	# Between draws the column shows what the next one will be dealt from.
-	_family_rows = {}
-	if state != State.PUTTING and state != State.DONE:
-		form_container.add_child(make_family_form_table(swinging))
-
-
-# Your form with each kind of club: a line a family, how many good cards
-# and how many bad it has in play. A swing is dealt only from the family
-# of the club in hand (Section 4 "Form by club family"), so this is the
-# read a club choice turns on — a cold driver is a reason to hit an iron.
-# `active` is the family being swung; the others step back. With none,
-# passing over a club in the bag picks its family out (light_family()).
-func make_family_form_table(active: String = "") -> Control:
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 0)
-	var form := form_deck.family_form()
-	for fam in FormCard.FAMILIES:
-		var good: int = form[fam].good
-		var bad: int = form[fam].bad
-		if good + bad == 0:
-			continue
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 10)
-		var name_label := BogeyUI.kicker(FormCard.FAMILY_LABEL[fam], BogeyTheme.INK)
-		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(name_label)
-		row.add_child(BogeyUI.label("%d good" % good, 13, BogeyTheme.NEUTRAL_700))
-		# Claret when two cards in five are bad, green when none are.
-		var bad_ink: Color = BogeyTheme.NEUTRAL_700
-		if bad == 0:
-			bad_ink = BogeyTheme.FAIRWAY_DEEP
-		elif float(bad) / float(good + bad) >= 0.4:
-			bad_ink = BogeyTheme.FLAG
-		var bad_label := BogeyUI.label("%d bad" % bad, 13, bad_ink, 500)
-		bad_label.custom_minimum_size = Vector2(46, 0)
-		bad_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		row.add_child(bad_label)
-		col.add_child(BogeyUI.hairline(0.1))
-		var line := BogeyUI.margin(row, 0, 6, 0, 6)
-		col.add_child(line)
-		_family_rows[fam] = line
-	col.add_child(BogeyUI.hairline(0.1))
-	light_family(active)
-	return BogeyUI.margin(col, 0, 8, 0, 0)
+		lead.text = "Drawn from the %s pile and the %s's own shots (%d good, %d bad). Keep one." % [
+			fam, pending_club.name, int(pile.good), int(pile.bad)]
+	if cpu:
+		lead.text = "%s reads the same cards you would." % me.name
+	options_container.add_child(BogeyUI.margin(lead, 0, 8, 10, 0))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	options_container.add_child(row)
+	form_container = row
+	for i in range(current_form_options.size()):
+		# As this swing plays it: a Stock Shot off the Mid tier is shown as
+		# the push it will be.
+		var fv := FormCardView.new()
+		fv.portrait = true
+		fv.setup(ShotRules.card_for_shot(hand, pending_club,
+			ball_pos.distance_to(aim_target), current_form_options[i], me.armed), not cpu)
+		fv.picked.connect(_make_form_pick_callback(i))
+		row.add_child(fv)
 
 
-# Picks one family out of the form table and steps the others back; ""
-# shows them all alike.
-func light_family(family: String) -> void:
-	for fam in _family_rows:
-		var row: Control = _family_rows[fam]
-		if is_instance_valid(row):
-			row.modulate.a = 1.0 if family == "" or fam == family else 0.4
-
-
-# The cards this swing would draw, face down: a row of small outlines,
-# one per card. Says "three" (or "two", or "one") without a word.
-func make_form_placeholder(count: int = 3) -> Control:
-	var c := Control.new()
-	c.custom_minimum_size = Vector2(0, 34)
-	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	c.draw.connect(func():
-		for i in count:
-			var r := Rect2(i * 30.0 + 0.5, 0.5, 22.0, 31.0)
-			c.draw_rect(r, BogeyTheme.CARD_BG)
-			c.draw_rect(r, BogeyTheme.NEUTRAL_400, false, 1.0))
-	return c
+# A computer golfer choosing a club: you watch, with their bag face down.
+func build_cpu_strip() -> void:
+	clear_container(options_container)
+	var lead := Label.new()
+	lead.text = "%s is choosing a club." % me.name
+	lead.custom_minimum_size = Vector2(260, 0)
+	lead.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lead.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	BogeyUI.set_font(lead, BogeyUI.serif_italic(500), 24, BogeyTheme.INK)
+	options_container.add_child(lead)
+	var seat := CourseMapView.seat_color(active_index)
+	for i in 3:
+		var back := Panel.new()
+		var s := BogeyUI._box(seat, seat, 0)
+		back.add_theme_stylebox_override("panel", s)
+		back.custom_minimum_size = Vector2(140, STRIP_CARD_H)
+		back.modulate.a = 1.0 - i * 0.15
+		back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		options_container.add_child(back)
+	var note := BogeyUI.body("You watch. Your turn comes back when the ball lands.", 13, BogeyTheme.INK_SOFT)
+	note.custom_minimum_size = Vector2(260, 0)
+	note.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	options_container.add_child(BogeyUI.margin(note, 10, 0, 0, 0))
 
 
 func make_card_view(card: Dictionary, interactive: bool = true, compact: bool = false,
-		width: float = 0.0, height: float = 0.0, show_art: bool = true) -> CardView:
+		width: float = 0.0, height: float = 0.0, show_art: bool = true, form: Dictionary = {}) -> CardView:
 	var cv := CardView.new()
 	cv.width = width
 	cv.height = height
 	cv.show_art = show_art
+	cv.form = form
 	# Read against the bag it is in: a Staff club shows as it plays there.
 	cv.bag = hand
 	cv.setup(card, interactive, compact)
@@ -4135,55 +4109,530 @@ func make_draft_card(card: Dictionary, interactive: bool, notes: Array,
 	return cv
 
 
+# ---------------------------------------------------------
+# BETWEEN HOLES — full pages over the shot screen (yardage book v2)
+#   the stops: the hole just played and where to go next (or a wear-in)
+#   the pro shop: the rack, dig / trade in / that'll do, the bag-full cut
+#   the fitting bay: the bench of boosts, then the club they go on
+#   the hut: what is there, take it or walk on
+#   the card: the round complete, and the tour's packing
+# ---------------------------------------------------------
+
+func build_interlude() -> void:
+	clear_container(interlude)
+	coverage_view = null
+	var cpu := is_cpu_turn()
+	match state:
+		State.DONE:
+			_page_end()
+		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
+			_page_shop("cut", cpu)
+		State.WAITING:
+			_page_stops("waiting", cpu)
+		State.DRAFT:
+			if _trading and not cpu:
+				_page_shop("trade", cpu)
+			elif _boosting and not cpu and me.draft_stop == Route.FIT:
+				_page_fit("club", cpu)
+			elif not cpu and wear_due() >= 0:
+				_page_stops("wear", cpu)
+			elif me.draft_stop == "":
+				_page_stops("choose", cpu)
+			elif me.draft_stop == Route.FIT:
+				_page_fit("bench", cpu)
+			elif me.draft_stop == Route.HUT:
+				_page_hut(cpu)
+			else:
+				_page_shop("offers", cpu)
+
+
+# A page's body, inside its margins.
+func _page(pad_x: int = PAGE_PAD_X, pad_y: int = PAGE_PAD_Y) -> VBoxContainer:
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 0)
+	interlude.add_child(BogeyUI.margin(col, pad_x, pad_y, pad_x, pad_y))
+	return col
+
+
+func _gap(h: int) -> Control:
+	var c := Control.new()
+	c.custom_minimum_size = Vector2(0, h)
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return c
+
+
+func _italic(text: String, size: int, ink: Color = BogeyTheme.INK) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	BogeyUI.set_font(l, BogeyUI.serif_italic(500), size, ink)
+	return l
+
+
+# A wide-set capitals button: TO THE 8TH TEE, WALK ON, PLAY AGAIN.
+func _caps_btn(text: String, primary: bool, on_press: Callable, height: int = 52, size: int = 12) -> Button:
+	var b := Button.new()
+	b.text = text.to_upper()
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, height)
+	BogeyUI.style_button(b, primary, size)
+	b.add_theme_font_override("font", BogeyUI.sans(600, 4))
+	b.pressed.connect(on_press)
+	return b
+
+
+# The next tee, as words: "the 8th tee".
+func _next_tee() -> String:
+	return "the %s tee" % _ordinal(current_hole_index + 1)
+
+
+# A white card to choose: a kicker in small capitals, a name, and words at
+# the foot. The whole card is the button; it edges in ink under the cursor.
+func _choice_card(kicker: String, kicker_ink: Color, title: String, title_size: int,
+		words: String, foot: String, min_size: Vector2, on_press: Callable,
+		disabled: bool = false, foot_size: int = 12) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = min_size
+	b.disabled = disabled
+	b.mouse_default_cursor_shape = Control.CURSOR_ARROW if disabled else Control.CURSOR_POINTING_HAND
+	var rest := BogeyUI._box(BogeyTheme.CARD_BG, BogeyTheme.NEUTRAL_300, 1, BogeyUI.RADIUS, 22, 20)
+	var over := BogeyUI._box(BogeyTheme.CARD_BG, BogeyTheme.INK, 2, BogeyUI.RADIUS, 22, 20)
+	over.shadow_color = BogeyTheme.SHADOW_MD
+	over.shadow_size = 18
+	over.shadow_offset = Vector2(0, 8)
+	b.add_theme_stylebox_override("normal", rest)
+	b.add_theme_stylebox_override("disabled", rest)
+	b.add_theme_stylebox_override("hover", over)
+	b.add_theme_stylebox_override("pressed", over)
+	b.add_theme_stylebox_override("hover_pressed", over)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if kicker != "":
+		col.add_child(BogeyUI.kicker(kicker, kicker_ink, 9))
+	var t := BogeyUI.heading(title, title_size)
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(t)
+	if words != "":
+		col.add_child(BogeyUI.body(words, 14, BogeyTheme.NEUTRAL_800))
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(spacer)
+	if foot != "":
+		col.add_child(BogeyUI.body(foot, foot_size, BogeyTheme.INK_SOFT if foot_size <= 12 else BogeyTheme.INK))
+	for c in col.get_children():
+		(c as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pad := BogeyUI.margin(col, 22, 20, 22, 20)
+	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	b.add_child(pad)
+	if disabled:
+		b.modulate.a = 0.55
+	b.pressed.connect(on_press)
+	return b
+
+
+# A small club tile for the pages' bag grids: the maker's dot, the name, the
+# carry, and at the foot a line on what choosing it would do.
+func _club_tile(club: Dictionary, foot: String, foot_ink: Color, on_press: Callable,
+		enabled: bool = true, hover_ink: Color = BogeyTheme.INK) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(196, 150)
+	b.disabled = not enabled
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if enabled else Control.CURSOR_ARROW
+	var rest := BogeyUI._box(BogeyTheme.CARD_BG, BogeyTheme.NEUTRAL_300, 1, BogeyUI.RADIUS, 12, 12)
+	var over := BogeyUI._box(BogeyTheme.CARD_BG, hover_ink, 2, BogeyUI.RADIUS, 12, 12)
+	b.add_theme_stylebox_override("normal", rest)
+	b.add_theme_stylebox_override("disabled", rest)
+	b.add_theme_stylebox_override("hover", over)
+	b.add_theme_stylebox_override("pressed", over)
+	b.add_theme_stylebox_override("hover_pressed", over)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 2)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var dot := BogeyUI.dot(Brands.color(str(club.get("brand", Brands.NONE))), 6)
+	dot.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	col.add_child(dot)
+	var n := BogeyUI.heading(str(club.name), 19)
+	n.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(n)
+	var band := BogeyUI.heading("%d–%d" % [int(club.min_yard), int(club.max_yard)], 17)
+	band.add_theme_color_override("font_color", BogeyTheme.INK_SOFT)
+	col.add_child(band)
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(spacer)
+	var f := BogeyUI.body(foot, 11, foot_ink)
+	f.max_lines_visible = 3
+	col.add_child(f)
+	for c in col.get_children():
+		(c as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pad := BogeyUI.margin(col, 12, 12, 12, 12)
+	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	b.add_child(pad)
+	if not enabled:
+		b.modulate.a = 0.5
+	b.pressed.connect(on_press)
+	return b
+
+
+func _tile_grid(columns: int = 7) -> GridContainer:
+	var g := GridContainer.new()
+	g.columns = columns
+	g.add_theme_constant_override("h_separation", 12)
+	g.add_theme_constant_override("v_separation", 12)
+	return g
+
+
+# The stamp, set on a page: the hole and its score, struck at an angle.
+func _stamp(over: Control, title: String, sub: String, ink: Color) -> void:
+	var holder := CenterContainer.new()
+	holder.set_anchors_preset(Control.PRESET_FULL_RECT)
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	over.add_child(holder)
+	var s := BogeyUI._box(BogeyTheme.PARCHMENT, BogeyTheme.INK, 1, 0, 36, 16)
+	s.shadow_color = Color(0, 0, 0, 0.3)
+	s.shadow_size = 24
+	s.shadow_offset = Vector2(0, 12)
+	var outer := BogeyUI.make_panel(BogeyUI._box(BogeyTheme.PARCHMENT, BogeyTheme.INK, 1, 0, 5, 5))
+	outer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var inner := BogeyUI.make_panel(s)
+	outer.add_child(inner)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 0)
+	inner.add_child(col)
+	var k := BogeyUI.kicker("Hole %d" % current_hole_index, BogeyTheme.INK, 10)
+	k.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(k)
+	var t := BogeyUI.heading(title, 60)
+	t.add_theme_color_override("font_color", ink)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(t)
+	var u := BogeyUI.kicker(sub, BogeyTheme.INK_SOFT, 10)
+	u.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(u)
+	holder.add_child(outer)
+	outer.resized.connect(func():
+		outer.pivot_offset = outer.size / 2.0
+		outer.rotation_degrees = -6.0)
+
+
+# --- The stops ----------------------------------------------------------
+
+func _page_stops(mode: String, cpu: bool) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 80)
+	interlude.add_child(BogeyUI.margin(row, PAGE_PAD_X, PAGE_PAD_Y, PAGE_PAD_X, PAGE_PAD_Y))
+
+	# The hole just played, mounted, with its score stamped across it.
+	var mv := CourseMapView.new()
+	mv.skip_animation = true
+	var plate := BogeyUI.plate(mv)
+	plate.custom_minimum_size = Vector2(480, 0)
+	plate.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	plate.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row.add_child(plate)
+	mv.set_hole(hole)
+	mv.set_ball(hole.pin_pos, shot_path)
+	var entry: Dictionary = round_scores[-1] if not round_scores.is_empty() \
+		and int(round_scores[-1].hole) == current_hole_index else {}
+	if not entry.is_empty():
+		var diff: int = int(entry.strokes) - int(entry.par)
+		_stamp(plate, score_name(diff), "%d stroke%s" % [int(entry.strokes), "" if int(entry.strokes) == 1 else "s"],
+			BogeyTheme.FAIRWAY_DEEP if diff < 0 else (BogeyTheme.FLAG if diff > 0 else BogeyTheme.INK))
+
+	var right := VBoxContainer.new()
+	right.add_theme_constant_override("separation", 0)
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(right)
+
+	# Where the round stands, in three big figures.
+	var stats := HBoxContainer.new()
+	stats.add_theme_constant_override("separation", 56)
+	right.add_child(stats)
+	if plays_for_keeps():
+		stats.add_child(_big_figure("Strokes in hand", str(strokes_in_hand()),
+			BogeyTheme.FLAG if strokes_in_hand() <= 3 else BogeyTheme.INK))
+	var run := running_score_diff()
+	stats.add_child(_big_figure("Round", running_score_diff_text(run).replace("-", "−"),
+		BogeyTheme.FAIRWAY_DEEP if run < 0 else (BogeyTheme.FLAG if run > 0 else BogeyTheme.INK)))
+	var best := Records.hole_best(current_hole_index)
+	if best > 0:
+		stats.add_child(_big_figure("Your best here", str(best)))
+	right.add_child(_gap(18))
+	right.add_child(BogeyUI.hairline(1.0))
+
+	match mode:
+		"waiting":
+			right.add_child(_gap(36))
+			right.add_child(_italic("Drafted — waiting for %s" % ", ".join(PackedStringArray(waiting_on_names())), 30))
+			right.add_child(_gap(8))
+			right.add_child(BogeyUI.body("The next hole starts when the last pick is in.", 14, BogeyTheme.INK_SOFT))
+		"wear":
+			_wear_block(right, wear_due())
+		"choose":
+			right.add_child(_gap(32))
+			right.add_child(_italic("Before %s, choose a stop" % _next_tee(), 30))
+			var ahead := Route.ahead_text(wind_seed, current_hole_index + 1, Course.hole_count())
+			var sub := "One stop, and the other is passed by."
+			if ahead != "":
+				sub += " Beside the pro shop ahead: %s." % ahead
+			if cpu:
+				sub = "%s is choosing a stop…" % me.name
+			right.add_child(BogeyUI.margin(BogeyUI.body(sub, 13, BogeyTheme.INK_SOFT), 0, 4, 0, 20))
+			var fork_note := _lesson_note(["fork"])
+			if fork_note != null:
+				right.add_child(BogeyUI.margin(fork_note, 0, 0, 0, 20))
+			var grid := GridContainer.new()
+			grid.columns = 2
+			grid.add_theme_constant_override("h_separation", 16)
+			grid.add_theme_constant_override("v_separation", 16)
+			right.add_child(grid)
+			var stops := Route.stops(wind_seed, current_hole_index)
+			for i in range(stops.size()):
+				var id: String = stops[i]
+				var tag := ""
+				match id:
+					Route.SHOP:
+						tag = "ALWAYS OPEN"
+					Route.FIT:
+						tag = "On the bench: " + ", ".join(PackedStringArray(me.draft_boosts.map(
+							func(b): return str(ClubAbilities.BOOSTS[b].name))))
+					Route.RANGE:
+						var bad := form_deck.bad_count()
+						tag = "No bad cards to work out" if bad == 0 else "The worst %d of your %d bad card%s leave%s." % [
+							mini(bad, ShotRules.RANGE_SESSION_PURGE), bad, "" if bad == 1 else "s", "s" if bad == 1 else ""]
+					Route.HUT:
+						tag = "Today: %s" % Route.EVENTS[Route.event(wind_seed, current_hole_index, plays_for_keeps())].title.to_lower()
+				var stop_name := str(Route.STOPS[id].name).capitalize()
+				if not stop_name.begins_with("The "):
+					stop_name = "The " + stop_name
+				var card := _choice_card("", BogeyTheme.INK, stop_name,
+					32, "%s." % Route.STOPS[id].does, tag, Vector2(0, 168),
+					func(): submit("stop", {"index": i}), cpu)
+				card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				grid.add_child(card)
+
+
+func _big_figure(label: String, value: String, ink: Color = BogeyTheme.INK) -> Control:
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 0)
+	col.add_child(BogeyUI.kicker(label, BogeyTheme.INK_SOFT, 10))
+	var v := BogeyUI.heading(value, 72)
+	v.add_theme_color_override("font_color", ink)
+	col.add_child(v)
+	return col
+
+
+# A club worn in: what the wear does to it — groove a good shot, lose a
+# bad one, or take the maker's gain. The draft follows.
+func _wear_block(into: VBoxContainer, index: int) -> void:
+	var club: Dictionary = hand[index]
+	into.add_child(_gap(36))
+	into.add_child(BogeyUI.kicker("Worn in", BogeyTheme.INK_SOFT, 10))
+	into.add_child(BogeyUI.margin(BogeyUI.heading("Your %s has worn in" % club.name, 40), 0, 6, 0, 0))
+	into.add_child(BogeyUI.margin(BogeyUI.body(
+		"It has found the fairway or the green often enough to be trusted. Choose what the wear does to it; the stop follows.",
+		15, BogeyTheme.NEUTRAL_800), 0, 8, 0, 22))
+	var wear_note := _lesson_note(["wear"])
+	if wear_note != null:
+		into.add_child(BogeyUI.margin(wear_note, 0, 0, 0, 22))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 18)
+	into.add_child(grid)
+	var choices := ClubAbilities.wear_choices(club)
+	for i in range(choices.size()):
+		var c: Dictionary = choices[i]
+		var kick := "Groove"
+		var ink: Color = BogeyTheme.FAIRWAY
+		var words := "Whenever its %s is dealt, one more card is dealt beside it." % c.shot
+		match str(c.kind):
+			"drop":
+				kick = "Strip"
+				ink = BogeyTheme.FLAG
+				words = "Its %s leaves your Form deck for good." % c.shot
+			"maker":
+				kick = "The maker's gain"
+				ink = BogeyTheme.GOLD
+				words = str(ClubAbilities.gain_info(str(c.shot)).get("does", ""))
+		var card := _choice_card(kick, ink, str(c.text), 30, "", words, Vector2(0, 200),
+			func(): submit("wear", {"index": index, "choice": i}))
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(card)
+
+
+# --- The pro shop -------------------------------------------------------
+
+func _page_shop(mode: String, cpu: bool) -> void:
+	var page := _page(72, 48)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 40)
+	page.add_child(head)
+	var names := VBoxContainer.new()
+	names.add_theme_constant_override("separation", 6)
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	names.size_flags_vertical = Control.SIZE_SHRINK_END
+	head.add_child(names)
+	var chart := VBoxContainer.new()
+	chart.custom_minimum_size = Vector2(620, 0)
+	head.add_child(chart)
+
+	var shown := current_draft_options.size()
+	var keeps: int = clampi(me.draft_keeps, 1, maxi(shown, 1))
+	match mode:
+		"cut":
+			names.add_child(BogeyUI.kicker("Bag full · %d / %d" % [hand.size(), HAND_CAP], BogeyTheme.INK_SOFT, 10))
+			names.add_child(BogeyUI.heading("Something has to go", 60))
+			add_coverage_chart(chart, "Hover a club to see the yards it covers")
+		"trade":
+			names.add_child(BogeyUI.kicker("After hole %d · trade in" % current_hole_index, BogeyTheme.INK_SOFT, 10))
+			names.add_child(BogeyUI.heading("The Pro Shop", 60))
+			add_coverage_chart(chart, "")
+		_:
+			names.add_child(BogeyUI.kicker("After hole %d · take %s" % [current_hole_index,
+				"one" if keeps == 1 else str(keeps)], BogeyTheme.INK_SOFT, 10))
+			names.add_child(BogeyUI.heading("The Pro Shop", 60))
+			var cap := draft_caption()
+			if cpu:
+				cap = "%s is at the rack." % me.name
+			if cap != "It joins your bag for the rest of the round.":
+				names.add_child(_italic(cap, 22))
+			var lesson_keys: Array = ["shop"]
+			if current_hole_index >= 2:
+				lesson_keys.append("sets")
+			if opens("hunt"):
+				lesson_keys.append("hunt")
+			if current_draft_options.any(func(c): return ClubAbilities.is_staff(c)):
+				lesson_keys.append("staff")
+			if current_draft_options.any(func(c): return ClubAbilities.curse(c) != ""):
+				lesson_keys.append("second_hand")
+			var lesson := null if cpu else _lesson_note(lesson_keys)
+			if lesson != null:
+				names.add_child(BogeyUI.margin(lesson, 0, 10, 0, 0))
+			add_coverage_chart(chart, "Hover an offer to slot it into your yardages")
+
+	match mode:
+		"offers":
+			# The rack, and under it the shop's other moves in a row.
+			var row := VBoxContainer.new()
+			row.add_theme_constant_override("separation", 28)
+			row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			row.alignment = BoxContainer.ALIGNMENT_CENTER
+			page.add_child(row)
+			var rack := HBoxContainer.new()
+			rack.add_theme_constant_override("separation", 20)
+			rack.alignment = BoxContainer.ALIGNMENT_CENTER
+			rack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(rack)
+			_rack = rack
+			var offer_width := draft_card_width(shown)
+			for i in range(shown):
+				var offer: Dictionary = current_draft_options[i]
+				var cv := make_draft_card(offer, not cpu,
+					DraftAdvisor.gains(hand, offer, HAND_CAP), offer_width)
+				cv.picked.connect(_make_draft_pick_callback(i))
+				# Passing over an offer slots it into the yardage chart.
+				cv.hover_started.connect(func(_v): _set_coverage_offer(offer))
+				cv.hover_ended.connect(func(_v): _set_coverage_offer({}))
+				rack.add_child(cv)
+			var side := make_draft_side(cpu)
+			side.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+			row.add_child(side)
+		"trade":
+			page.add_child(_gap(36))
+			page.add_child(_italic("Give up a club for one more offer. Under each, what losing it costs.", 24))
+			page.add_child(_gap(20))
+			var grid := _tile_grid()
+			page.add_child(grid)
+			for i in range(hand.size()):
+				var club: Dictionary = hand[i]
+				var losses := DraftAdvisor.losses(hand, club)
+				var foot := "Nothing depends on it" if losses.is_empty() else str(losses[0].text)
+				var ink: Color = BogeyTheme.FLAG if not losses.is_empty() and losses[0].strong else BogeyTheme.NEUTRAL_700
+				var t := _club_tile(club, foot, ink, _make_trade_callback(i).bind(null))
+				if not losses.is_empty():
+					t.tooltip_text = "\n".join(PackedStringArray(losses.map(func(n): return str(n.text))))
+				grid.add_child(t)
+			page.add_child(_gap(16))
+			var back := Button.new()
+			back.text = "KEEP THEM ALL"
+			BogeyUI.style_link_button(back, 10)
+			back.add_theme_color_override("font_color", BogeyTheme.INK)
+			back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+			back.pressed.connect(_on_trade_cancelled)
+			page.add_child(back)
+		"cut":
+			page.add_child(_gap(36))
+			var what := str(pending_new_card.name) if pending_new_card is Dictionary and not (pending_new_card as Dictionary).is_empty() else "the new club"
+			page.add_child(_italic("Your bag is full. Tap a club to drop it for %s." % what, 24))
+			page.add_child(_gap(20))
+			var grid := _tile_grid()
+			page.add_child(grid)
+			for i in range(hand.size()):
+				var club: Dictionary = hand[i]
+				var losses := DraftAdvisor.losses(hand, club)
+				var foot := "Nothing depends on it" if losses.is_empty() else str(losses[0].text)
+				var t := _club_tile(club, foot, BogeyTheme.NEUTRAL_700, _make_discard_callback(i).bind(null),
+					not cpu, BogeyTheme.FLAG)
+				t.mouse_entered.connect(func(): _set_coverage_focus(club))
+				t.mouse_exited.connect(func(): _set_coverage_focus({}))
+				if not losses.is_empty():
+					t.tooltip_text = "\n".join(PackedStringArray(losses.map(func(n): return str(n.text))))
+				grid.add_child(t)
+
+
 # The pro shop's other moves, in a column beside the offers (DraftRules.gd):
 # a dig for fresh offers, a club traded in for one more — and, once
 # something has been kept from a draft that keeps two, a way to stop there.
 func make_draft_side(cpu: bool) -> Control:
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 6)
-	col.custom_minimum_size = Vector2(DRAFT_SIDE_WIDTH, 0)
-	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var col := HBoxContainer.new()
+	col.add_theme_constant_override("separation", 12)
 	var shown := current_draft_options.size()
-	var head := BogeyUI.kicker("Instead" if me.draft_taken == 0 else "Or", BogeyTheme.NEUTRAL_600, 9)
-	col.add_child(head)
-
-	if DraftRules.can_dig(hand, me.draft_taken, me.draft_digs, shown):
+	if opens("hunt") and DraftRules.can_dig(hand, me.draft_taken, me.draft_digs, shown):
 		var costs := DraftRules.dig_costs_card(hand)
-		col.add_child(_draft_side_button("Dig",
-			"%d fresh, %s" % [shown, "a bad card in" if costs else "no charge"],
+		col.add_child(_side_button("Dig", "%d fresh · %s" % [shown, "a bad card in" if costs else "no charge"],
 			"Send these back and see %d fresh club%s.\n%s" % [shown, "" if shown == 1 else "s",
 				"A bad card joins your Form deck, in a family you don't choose." if costs \
 				else "Old Faithful digs for nothing."],
-			func(): submit("dig", {}), cpu))
-	if DraftRules.can_trade(hand, me.draft_taken, me.draft_traded, shown):
-		col.add_child(_draft_side_button("Trade in", "A club out, one more in",
+			func(): submit("dig", {}), cpu, false))
+	if opens("hunt") and DraftRules.can_trade(hand, me.draft_taken, me.draft_traded, shown):
+		col.add_child(_side_button("Trade in", "A club out, one more in",
 			"Give up a club from your bag for one more offer.\nThe club is gone for good, and the shot it brought leaves your Form deck.",
-			_on_trade_pressed, cpu))
+			_on_trade_pressed, cpu, false))
 	if me.draft_taken > 0:
-		col.add_child(_draft_side_button("That'll do", "Keep what you have",
-			"Stop here and leave the rest on the rack.", func(): submit("done", {}), cpu))
-	head.visible = col.get_child_count() > 1
+		col.add_child(_side_button("That'll do", "Keep what you have",
+			"Stop here and leave the rest on the rack.", func(): submit("done", {}), cpu, true))
 	return col
 
 
-# One of the side column's buttons: what it is, and under it what it costs.
-func _draft_side_button(title: String, sub: String, tip: String, on_press: Callable,
-		disabled: bool) -> Button:
+# One of the side column's moves: what it is in capitals, under it what it costs.
+func _side_button(title: String, sub: String, tip: String, on_press: Callable,
+		disabled: bool, primary: bool) -> Button:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(DRAFT_SIDE_WIDTH, 46)
+	b.custom_minimum_size = Vector2(DRAFT_SIDE_WIDTH, 66)
 	b.tooltip_text = tip
-	BogeyUI.style_button(b, false, 13)
+	b.focus_mode = Control.FOCUS_NONE
+	BogeyUI.style_button(b, primary, 12)
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", -2)
+	col.add_theme_constant_override("separation", 4)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var name_label := BogeyUI.label(title, 14, BogeyTheme.INK, 500)
+	var ink: Color = BogeyTheme.NEUTRAL_100 if primary else BogeyTheme.INK
+	var name_label := BogeyUI.kicker(title, ink, 12)
+	name_label.add_theme_font_override("font", BogeyUI.sans(600, 3))
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(name_label)
-	var sub_label := BogeyUI.label(sub, 11, BogeyTheme.NEUTRAL_600)
+	var sub_label := BogeyUI.label(sub, 12, Color(ink, 0.7))
 	sub_label.clip_text = true
 	sub_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(sub_label)
-	var pad := BogeyUI.margin(col, 12, 5, 8, 5)
+	var pad := BogeyUI.margin(col, 16, 14, 12, 14)
 	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	b.add_child(pad)
@@ -4204,26 +4653,6 @@ func _on_trade_cancelled() -> void:
 	refresh_ui()
 
 
-# The bag, laid out to choose the club to trade in: each tile with what
-# giving it up would cost, as when the bag is full and something has to go.
-func build_trade_row() -> void:
-	var back := Button.new()
-	back.text = "Keep\nthem all"
-	back.tooltip_text = "Back to the draft, with the bag as it is."
-	back.custom_minimum_size = Vector2(TRADE_BACK_WIDTH, 60)
-	back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	BogeyUI.style_button(back, false, 12)
-	back.pressed.connect(_on_trade_cancelled)
-	options_container.add_child(back)
-	var n: int = maxi(hand.size(), 1)
-	var width := clampf(floorf((strip_width() - TRADE_BACK_WIDTH - BAG_GAP * n) / n),
-		BAG_CARD_MIN - 6.0, BAG_CARD_MAX)
-	for i in range(hand.size()):
-		var cv := make_card_view(hand[i], true, true, width, 116.0, false)
-		cv.picked.connect(_make_trade_callback(i))
-		options_container.add_child(card_with_cost(cv, DraftAdvisor.losses(hand, hand[i])))
-
-
 func _on_boost_pressed(boost: String) -> void:
 	Sound.play("ui_click")
 	_boosting = true
@@ -4238,130 +4667,257 @@ func _on_boost_cancelled() -> void:
 	refresh_ui()
 
 
-# One wide button for the strip's forks: the stops, the bench, the hut.
-func _wide_button(title: String, sub_text: String, tip: String, on_press: Callable,
-		disabled: bool) -> Button:
-	var b := _draft_side_button(title, sub_text, tip, on_press, disabled)
-	b.custom_minimum_size = Vector2(WEAR_CHOICE_WIDTH, 52)
-	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	return b
+# --- The fitting bay ----------------------------------------------------
 
+func _page_fit(mode: String, cpu: bool) -> void:
+	var page := _page(PAGE_PAD_X, 56)
+	var head := HBoxContainer.new()
+	page.add_child(head)
+	var names := VBoxContainer.new()
+	names.add_theme_constant_override("separation", 6)
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(names)
+	names.add_child(BogeyUI.kicker("Before %s" % _next_tee(), BogeyTheme.INK_SOFT, 10))
+	if mode == "bench":
+		names.add_child(BogeyUI.heading("The Fitting Bay", 60))
+		names.add_child(BogeyUI.body("%s. Only the right one mends a curse." % (
+			"%s is on the bench" % me.name if cpu else "Choose a boost, then the club it goes on"),
+			15, BogeyTheme.NEUTRAL_800))
+		var leave := _caps_btn("Leave the bay", false, func(): submit("leave", {}), 48, 11)
+		leave.custom_minimum_size.x = 200
+		leave.disabled = cpu
+		leave.size_flags_vertical = Control.SIZE_SHRINK_END
+		head.add_child(leave)
+	else:
+		var boost: Dictionary = ClubAbilities.BOOSTS[_boost_pick]
+		names.add_child(BogeyUI.heading(str(boost.name), 60))
+		names.add_child(BogeyUI.body("%s. Choose the club it goes on." % boost.does, 15, BogeyTheme.NEUTRAL_800))
+	page.add_child(_gap(16))
+	page.add_child(BogeyUI.hairline(1.0))
 
-# The fork after a hole: the pro shop, or the round's other stop here.
-# Each says what is there, so the choice is a read and not a guess.
-func build_stop_row(cpu: bool) -> void:
-	var stops := Route.stops(wind_seed, current_hole_index)
-	for i in range(stops.size()):
-		var id: String = stops[i]
-		var there: String = Route.STOPS[id].does
-		match id:
-			Route.FIT:
-				there = " · ".join(PackedStringArray(me.draft_boosts.map(
-					func(b): return str(ClubAbilities.BOOSTS[b].name))))
-			Route.RANGE:
-				var bad := form_deck.bad_count()
-				there = "No bad cards to work out" if bad == 0 else "The worst %d of your %d bad card%s leave%s" % [
-					mini(bad, ShotRules.RANGE_SESSION_PURGE), bad, "" if bad == 1 else "s", "s" if bad == 1 else ""]
-			Route.HUT:
-				there = Route.EVENTS[Route.event(wind_seed, current_hole_index, plays_for_keeps())].title
-		options_container.add_child(_wide_button(Route.STOPS[id].name, there,
-			"%s.\n%s" % [Route.STOPS[id].does, there], func(): submit("stop", {"index": i}), cpu))
+	if mode == "bench":
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 24)
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		page.add_child(BogeyUI.margin(row, 0, 72, 0, 0))
+		for boost in me.draft_boosts:
+			var what: Dictionary = ClubAbilities.BOOSTS[boost]
+			var can: bool = hand.any(func(c): return ClubAbilities.can_boost(c, boost))
+			var card := _choice_card("Boost", BogeyTheme.FAIRWAY, str(what.name), 40, "",
+				str(what.does) if can else "No club of yours can take it",
+				Vector2(300, 300), func(): _on_boost_pressed(boost), cpu or not can, 16)
+			row.add_child(card)
+		return
 
-
-# The fitting bay's bench: a button a boost, and the way out.
-func build_bench_row(cpu: bool) -> void:
-	for boost in me.draft_boosts:
-		var what: Dictionary = ClubAbilities.BOOSTS[boost]
-		var can: bool = hand.any(func(c): return ClubAbilities.can_boost(c, boost))
-		options_container.add_child(_wide_button(what.name, what.does if can else "No club of yours can take it",
-			what.does, func(): _on_boost_pressed(boost), cpu or not can))
-	options_container.add_child(_wide_button("Walk on", "Nothing today",
-		"Leave the fitting bay with the bag as it is.", func(): submit("leave", {}), cpu))
-
-
-# The hut: take what is there, or walk on.
-func build_event_row(what: Dictionary, cpu: bool) -> void:
-	options_container.add_child(_wide_button(what.take, "Take what the hut offers", what.text,
-		func(): submit("event", {}), cpu))
-	options_container.add_child(_wide_button("Walk on", "Leave it",
-		"On to the next tee, with nothing taken.", func(): submit("leave", {}), cpu))
-
-
-# The bag, laid out to choose the club the fitting bay's boost goes on:
-# under each tile, what it would do there. Lead tape first shows its shots.
-func build_boost_row() -> void:
+	# The club the boost goes on — Lead tape first asks which shot it adds.
 	var boost := _boost_pick
-	var side := VBoxContainer.new()
-	side.add_theme_constant_override("separation", 6)
-	side.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var back := Button.new()
-	var taping := boost == "lead_tape"
-	back.text = "Back to the bench" if taping else "Back to\nthe bench"
-	back.tooltip_text = "Back to the bench, with the bag as it is."
-	back.custom_minimum_size = Vector2(TRADE_BACK_WIDTH, 36 if taping else 60)
-	BogeyUI.style_button(back, false, 12)
-	back.pressed.connect(_on_boost_cancelled)
-	side.add_child(back)
-	var side_width := TRADE_BACK_WIDTH
-	if taping:
-		side_width = DRAFT_SIDE_WIDTH
-		side.add_child(BogeyUI.kicker("The shot it adds", BogeyTheme.NEUTRAL_600, 9))
+	if boost == "lead_tape":
+		var tapes := HBoxContainer.new()
+		tapes.add_theme_constant_override("separation", 12)
+		page.add_child(BogeyUI.margin(tapes, 0, 24, 0, 0))
+		tapes.add_child(BogeyUI.margin(BogeyUI.kicker("The shot it adds", BogeyTheme.INK_SOFT, 10), 0, 14, 8, 0))
 		for i in range(me.draft_tape.size()):
 			var shot := str(me.draft_tape[i])
 			var b := Button.new()
 			b.text = shot
 			b.tooltip_text = FormCard.make(shot).effect_text()
-			b.custom_minimum_size = Vector2(DRAFT_SIDE_WIDTH, 28)
-			BogeyUI.style_button(b, i == _tape_pick, 12)
+			b.custom_minimum_size = Vector2(180, 44)
+			b.focus_mode = Control.FOCUS_NONE
+			BogeyUI.style_button(b, i == _tape_pick, 14)
 			b.pressed.connect(func():
 				_tape_pick = i
 				refresh_ui())
-			side.add_child(b)
-	options_container.add_child(side)
-	var n: int = maxi(hand.size(), 1)
-	var width := clampf(floorf((strip_width() - side_width - BAG_GAP * n) / n),
-		BAG_CARD_MIN - 6.0, BAG_CARD_MAX)
+			tapes.add_child(b)
+	var grid := _tile_grid()
+	page.add_child(BogeyUI.margin(grid, 0, 32, 0, 0))
 	for i in range(hand.size()):
 		var club: Dictionary = hand[i]
 		var can := ClubAbilities.can_boost(club, boost)
-		var cv := make_card_view(club, can, true, width, 116.0, false)
 		var note := "Putters take no boost" if not ClubAbilities.grows(club) else "Already has one"
 		if ClubAbilities.curse(club) != "":
 			note = "Cursed: it needs a %s" % str(ClubAbilities.BOOSTS[ClubAbilities.MENDS[ClubAbilities.curse(club)]].name).to_lower()
 		if can:
-			cv.picked.connect(func(_cv): submit("boost", {"boost": boost, "index": i, "shot": _tape_pick}))
 			var cursed := ClubAbilities.curse(club)
 			note = str(ClubAbilities.BOOSTS[boost].does)
 			if cursed != "":
 				note = "Mends its %s" % str(ClubAbilities.curse_info(cursed).name).to_lower()
 			elif boost == "lead_tape":
 				note = "Adds a %s to its shots" % str(me.draft_tape[_tape_pick])
-		else:
-			cv.set_dimmed(true)
-		options_container.add_child(card_with_cost(cv, [{"text": note, "strong": false}]))
+		grid.add_child(_club_tile(club, note, BogeyTheme.FAIRWAY_DEEP if can else BogeyTheme.INK_SOFT,
+			func(): submit("boost", {"boost": boost, "index": i, "shot": _tape_pick}), can))
+	var back := Button.new()
+	back.text = "BACK TO THE BENCH"
+	BogeyUI.style_link_button(back, 10)
+	back.add_theme_color_override("font_color", BogeyTheme.INK)
+	back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	back.pressed.connect(_on_boost_cancelled)
+	page.add_child(BogeyUI.margin(back, 0, 16, 0, 0))
 
 
-# A club that is worn in: the club, and a button for each thing the level
-# can be spent on.
-func build_wear_row(index: int) -> void:
-	var club: Dictionary = hand[index]
-	options_container.add_child(make_card_view(club, false, true, BAG_CARD_MAX, 0.0))
+# --- The hut ------------------------------------------------------------
+
+func _page_hut(cpu: bool) -> void:
+	var what: Dictionary = Route.EVENTS[Route.event(wind_seed, current_hole_index, plays_for_keeps())]
+	var center := CenterContainer.new()
+	interlude.add_child(center)
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 6)
-	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	options_container.add_child(col)
-	var choices := ClubAbilities.wear_choices(club)
-	for i in range(choices.size()):
-		var c: Dictionary = choices[i]
-		var groove: bool = c.kind == "groove"
-		var b := _draft_side_button(c.text,
-			"Dealt with a spare card beside it" if groove else "Out of your Form deck for good",
-			("Whenever its %s is dealt, one more card is dealt beside it." if groove \
-				else "Its %s leaves your Form deck for good.") % c.shot,
-			func(): submit("wear", {"index": index, "choice": i}), false)
-		# Wide enough for "Groove its Controlled Fade".
-		b.custom_minimum_size.x = WEAR_CHOICE_WIDTH
-		col.add_child(b)
+	col.add_theme_constant_override("separation", 24)
+	col.custom_minimum_size = Vector2(1000, 0)
+	center.add_child(col)
+	var k := BogeyUI.kicker("The hut · before %s" % _next_tee(), BogeyTheme.INK_SOFT, 10)
+	k.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(k)
+	var t := BogeyUI.heading(str(what.title), 72)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(t)
+	var words := BogeyUI.body(str(what.text), 18, BogeyTheme.NEUTRAL_800)
+	words.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	words.custom_minimum_size = Vector2(640, 0)
+	words.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	col.add_child(words)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(BogeyUI.margin(row, 0, 12, 0, 0))
+	var walk := _caps_btn("Walk on", false, func(): submit("leave", {}), 56)
+	walk.custom_minimum_size.x = 180
+	walk.disabled = cpu
+	row.add_child(walk)
+	var take := _caps_btn(str(what.take), true, func(): submit("event", {}), 56)
+	take.custom_minimum_size.x = 220
+	take.disabled = cpu
+	row.add_child(take)
+	if cpu:
+		var w := _italic("%s is at the hut…" % me.name, 22)
+		w.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		col.add_child(w)
+
+
+# --- The card -----------------------------------------------------------
+
+func _page_end() -> void:
+	var center := CenterContainer.new()
+	interlude.add_child(center)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 0)
+	center.add_child(col)
+
+	var total_strokes := 0
+	var total_par := 0
+	for entry in round_scores:
+		total_strokes += int(entry.strokes)
+		total_par += int(entry.par)
+	var diff := total_strokes - total_par
+
+	var kick := "%s · round complete" % Course.active_name
+	var headline := "%d — %s" % [total_strokes, score_diff_text(diff)]
+	if _run_over:
+		kick = "%s · out of strokes" % Course.active_name
+		headline = "The run ended after %d hole%s" % [round_scores.size(), "" if round_scores.size() == 1 else "s"]
+	if is_multiplayer():
+		headline = _winner_line()
+	if on_tour():
+		kick = "The tour · %s · %d of %d" % [Course.active_name, GameSetup.tour_leg + 1, TOUR.size()]
+	var k := BogeyUI.kicker(kick, BogeyTheme.INK_SOFT, 10)
+	k.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(k)
+	var h := BogeyUI.heading(headline, 56)
+	h.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(BogeyUI.margin(h, 0, 8, 0, 0))
+	if _opened_course != "":
+		var opened := BogeyUI.heading("%s is now open" % _opened_course, 26)
+		opened.add_theme_color_override("font_color", BogeyTheme.FAIRWAY_DEEP)
+		opened.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		col.add_child(BogeyUI.margin(opened, 0, 10, 0, 0))
+
+	# The card itself, printed large.
+	var card := ScorecardView.new()
+	if is_multiplayer():
+		var rows: Array = []
+		for i in range(players.size()):
+			var p: Player = players[i]
+			rows.append({"name": p.name, "color": CourseMapView.seat_color(i),
+				"scores": p.round_scores, "live": 0, "active": false})
+		card.set_card(rows, -1)
+	else:
+		card.set_round(round_scores, -1, 0)
+	var big := 1.3
+	card.scale = Vector2(big, big)
+	var holder := Control.new()
+	holder.custom_minimum_size = card.custom_minimum_size * big
+	holder.add_child(card)
+	var sheet := BogeyUI.make_panel(BogeyUI.card_style(28, 22))
+	sheet.add_child(holder)
+	sheet.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	col.add_child(BogeyUI.margin(sheet, 0, 32, 0, 0))
+
+	var bag_line := bag_summary()
+	if on_tour():
+		bag_line = "The tour, %s. %s" % [tour_total_text(), bag_line]
+	var bl := BogeyUI.body(bag_line, 13, BogeyTheme.INK_SOFT)
+	bl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(BogeyUI.margin(bl, 0, 14, 0, 0))
+	var end_note := _lesson_note(["end"])
+	if end_note != null:
+		end_note.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		col.add_child(BogeyUI.margin(end_note, 0, 22, 0, 0))
+
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 14)
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	var menu := _caps_btn("Menu", false, _on_header_menu_pressed, 52, 11)
+	menu.custom_minimum_size.x = 140
+	if tour_continues():
+		# Pack for the next course: the bag down to what travels, then on.
+		var next_course := tour_course_name(GameSetup.tour_leg + 1)
+		var over: int = hand.size() - TOUR_KEEP
+		if over > 0:
+			col.add_child(_gap(28))
+			col.add_child(BogeyUI.hairline(1.0))
+			var ph := HBoxContainer.new()
+			ph.add_child(BogeyUI.heading("Pack for %s: leave %d behind" % [next_course, over], 30))
+			col.add_child(BogeyUI.margin(ph, 0, 14, 0, 0))
+			col.add_child(BogeyUI.body("%d clubs travel, with everything they have gained. Tap a club to leave it behind." % TOUR_KEEP,
+				13, BogeyTheme.NEUTRAL_800))
+			var grid := _tile_grid(mini(hand.size(), 14))
+			grid.add_theme_constant_override("h_separation", 6)
+			col.add_child(BogeyUI.margin(grid, 0, 14, 0, 0))
+			var putters: int = hand.filter(func(c): return ClubAbilities.is_putter(c)).size()
+			for i in range(hand.size()):
+				var club: Dictionary = hand[i]
+				var stays: bool = ClubAbilities.is_putter(club) and putters <= 1
+				var losses := DraftAdvisor.losses(hand, club)
+				var foot := "Your only putter travels" if stays else ("" if losses.is_empty() else str(losses[0].text))
+				var t := _club_tile(club, foot, BogeyTheme.FLAG, func(): _on_pack_leave(i), not stays, BogeyTheme.FLAG)
+				t.custom_minimum_size = Vector2(96, 110)
+				grid.add_child(t)
+		buttons.add_child(_caps_btn("Start the tour again", false, restart_round, 52, 11))
+		var go := _caps_btn("Tee off at %s" % next_course, true, _on_tour_next, 52, 12)
+		go.custom_minimum_size.x = 300
+		go.disabled = over > 0
+		buttons.add_child(go)
+	else:
+		buttons.add_child(menu)
+		var again := _caps_btn("Start the tour again" if on_tour() else "Play again", true, restart_round, 52, 12)
+		again.custom_minimum_size.x = 220
+		buttons.add_child(again)
+	col.add_child(BogeyUI.margin(buttons, 0, 32, 0, 0))
+
+
+# The headline of a group's card: who won, and by how much — a tie said as one.
+func _winner_line() -> String:
+	var standings: Array = players.filter(func(p): return not p.round_scores.is_empty())
+	if standings.size() < 2:
+		return "Round complete"
+	standings.sort_custom(func(a, b): return a.total_strokes() < b.total_strokes())
+	var low: int = standings[0].total_strokes()
+	var tied: Array = standings.filter(func(p): return p.total_strokes() == low)
+	if tied.size() > 1:
+		return "%s tie on %d" % [" & ".join(PackedStringArray(tied.map(func(p): return p.name))), low]
+	var gap: int = standings[1].total_strokes() - low
+	var who: String = standings[0].name
+	return "%s %s by %d" % [who, "win" if who == "You" else "wins", gap]
 
 
 # What the draft's caption says about how it was earned.
@@ -4398,8 +4954,8 @@ func strip_width() -> float:
 # column beside them: the full specimen for three, cut narrow for five.
 func draft_card_width(count: int) -> float:
 	var n: int = maxi(count, 1)
-	return clampf(floorf((strip_width() - DRAFT_SIDE_WIDTH - BAG_GAP * n) / n),
-		DRAFT_CARD_MIN, DRAFT_CARD_WIDTH)
+	var avail := 1600.0 - 72.0 * 2.0
+	return clampf(floorf((avail - 20.0 * (n - 1)) / n), DRAFT_CARD_MIN, DRAFT_CARD_WIDTH)
 
 
 func make_form_card_view(card: FormCard, interactive: bool = true) -> FormCardView:
@@ -4414,7 +4970,7 @@ func make_form_deck_chip_button() -> Button:
 	var b := Button.new()
 	var left: int = form_deck.deck.size()
 	var used: int = form_deck.discard.size()
-	b.text = "Deck  %d" % left
+	b.text = "View"
 	b.tooltip_text = "%d Form cards left to draw, %d in the discard pile.\nClick to see what's in the deck." % [left, used]
 	b.focus_mode = Control.FOCUS_NONE
 	BogeyUI.style_link_button(b, 10)
@@ -4445,76 +5001,56 @@ func refresh_turn_ui() -> void:
 		turn_banner_label.text = "%s to play" % me.name
 
 
-# The shot panel, always on: the one number that matters — how far to the
-# pin — then a short spec sheet (lie, wind, strokes, your best here) and
-# what the lie is doing to you. When a club is in hand it also shows the
-# swing tier and its draw consequence, which is the read the game turns on.
+# --- The left column: the hole and the shot -----------------------------
+
+# The one number that matters — how far to the pin — then a short spec
+# sheet (lie, wind, strokes, in hand, your best here), what the lie is
+# doing to you, and the last shot taken apart.
 func rebuild_shot_outlook() -> void:
 	clear_container(shot_outlook)
-	shot_outlook.visible = true
-
-	# Between shots there is no shot to describe: with the round over the
-	# panel sums it up, and while a club is being drafted it shows what
-	# the hole just played came to.
-	if state == State.DONE:
-		_build_round_summary()
+	if not hole:
 		return
-	if (state == State.DRAFT or state == State.DISCARD_FOR_DRAFT or state == State.WAITING) \
-			and not round_scores.is_empty() and int(round_scores[-1].hole) == current_hole_index:
-		_build_hole_result(round_scores[-1])
-		return
-
-	var dist_to_pin: float = ball_pos.distance_to(hole.pin_pos) if hole else 0.0
+	var dist_to_pin: float = ball_pos.distance_to(hole.pin_pos)
 	var on_green := current_lie == "green"
-	# On the green a putt is better read in feet, matching the putt meter's
+	# On the green a putt is better read in feet, matching the putt strip's
 	# own label — "1 yard to the pin" reads wrong for a tap-in.
-	var in_feet := on_green and dist_to_pin < 4.0
-	var big := BogeyUI.big_stat(
-		str(maxi(1, int(round(dist_to_pin * 3.0)))) if in_feet else str(int(round(dist_to_pin))),
-		"Feet to the pin" if in_feet else "Yards to the pin")
-	shot_outlook.add_child(big[0])
+	var in_feet := on_green
+	var figure := str(maxi(1, int(round(dist_to_pin * 3.0)))) if in_feet else str(int(round(dist_to_pin)))
+	var big := BogeyUI.big_stat(figure, "Feet to the hole" if in_feet else "Yards to the pin", 112)
+	shot_outlook.add_child(BogeyUI.margin(big[0], 0, 18, 0, 0))
 
 	var risky := current_lie == "rough" or current_lie == "bunker"
 	var specs := VBoxContainer.new()
 	specs.add_theme_constant_override("separation", 0)
-	shot_outlook.add_child(specs)
-	specs.add_child(BogeyUI.hairline(0.14))
-	specs.add_child(BogeyUI.spec_row("Lie", current_lie.capitalize(),
-		BogeyTheme.FLAG if risky else BogeyTheme.INK))
+	shot_outlook.add_child(BogeyUI.margin(specs, 0, 16, 0, 0))
+	specs.add_child(BogeyUI.hairline(1.0))
+	_spec(specs, "Lie", current_lie.capitalize(), BogeyTheme.FLAG if risky else BogeyTheme.INK)
 	# The wind, read against the line you're playing: toward the aim once
-	# there is one, otherwise toward the pin. Putts don't feel it.
-	if hole and not on_green:
-		var line: Vector2 = (aim_target - ball_pos) if (state == State.AIM or state == State.FORM_DRAW) \
-			and aim_target.distance_to(ball_pos) > 1.0 else (hole.pin_pos - ball_pos)
-		specs.add_child(BogeyUI.hairline(0.07))
-		var wind_row := BogeyUI.spec_row("Wind", Wind.describe(hole.wind, line))
-		wind_row.tooltip_text = "Read against the line you're playing.\nHigh shots ride the wind, low ones punch under it."
-		specs.add_child(wind_row)
-	specs.add_child(BogeyUI.hairline(0.07))
-	specs.add_child(BogeyUI.spec_row("Strokes", str(strokes)))
+	# there is one, otherwise toward the pin.
+	var line: Vector2 = (aim_target - ball_pos) if (state == State.AIM or state == State.FORM_DRAW) \
+		and aim_target.distance_to(ball_pos) > 1.0 else (hole.pin_pos - ball_pos)
+	var wind_row := _spec(specs, "Wind", Wind.describe(hole.wind, line))
+	wind_row.tooltip_text = "Read against the line you're playing.\nHigh shots ride the wind, low ones punch under it."
+	if Wind.gust_mph(hole.wind) > 0:
+		wind_row.tooltip_text += "\nGusting up to %d mph. Your shot flies in the wind that is blowing when you play your card." % Wind.gust_mph(hole.wind)
+	_spec(specs, "Strokes", str(strokes))
 	if plays_for_keeps():
 		# What is left to spend, before this hole's score is in.
 		var left := strokes_in_hand()
-		specs.add_child(BogeyUI.hairline(0.07))
-		var keeps_row := BogeyUI.spec_row("In hand", "%d stroke%s" % [left, "" if left == 1 else "s"],
-			BogeyTheme.FLAG if left <= 3 else BogeyTheme.INK)
+		var keeps_row := _spec(specs, "In hand", str(left), BogeyTheme.FLAG if left <= 3 else BogeyTheme.INK)
 		keeps_row.tooltip_text = "Strokes in hand. Every stroke over par spends one, every stroke under gives one back.\nWith none left after a hole, the round is over."
-		specs.add_child(keeps_row)
 		if on_tour():
-			specs.add_child(BogeyUI.hairline(0.07))
-			specs.add_child(BogeyUI.spec_row("Tour", "%d of %d" % [GameSetup.tour_leg + 1, TOUR.size()]))
+			_spec(specs, "Tour", "%d of %d" % [GameSetup.tour_leg + 1, TOUR.size()])
 	var hole_best := Records.hole_best(current_hole_index)
 	if hole_best > 0:
-		specs.add_child(BogeyUI.hairline(0.07))
-		specs.add_child(BogeyUI.spec_row("Your best", str(hole_best)))
-	specs.add_child(BogeyUI.hairline(0.14))
+		_spec(specs, "Your best", "%d · %s" % [hole_best, score_name(hole_best - hole_par).to_lower()])
 
 	# What this lie costs you — Section 5's terrain modifiers, said plainly
-	# rather than left for the player to remember.
+	# rather than left for the player to remember. A costly lie is boxed in claret.
 	var lie_note := ""
 	match current_lie:
 		"tee":
-			lie_note = "Full aimed distance, every club playable."
+			lie_note = "Tee it up. Whatever distance you aim for flies in full."
 		"fairway":
 			lie_note = "Full aimed distance, every club playable, no draw penalty."
 		"rough":
@@ -4522,213 +5058,419 @@ func rebuild_shot_outlook() -> void:
 		"bunker":
 			lie_note = "50% distance, woods unplayable, and the club forces one fresh bad Form card on you."
 		"green":
-			lie_note = "Putting switches to the timing meter, and the sunk band narrows with distance."
+			lie_note = "On the green. Putter only."
 	if lie_note != "":
+		var note := BogeyUI.body(lie_note, 13, BogeyTheme.ACCENT_800 if risky else BogeyTheme.NEUTRAL_700)
 		if risky:
-			shot_outlook.add_child(BogeyUI.note_box(lie_note,
-				BogeyTheme.ACCENT_100, BogeyTheme.ACCENT_500, BogeyTheme.ACCENT_800))
+			var box := BogeyUI.make_panel(BogeyUI._box(BogeyTheme.ACCENT_100, BogeyTheme.ACCENT_300, 1, BogeyUI.RADIUS, 12, 10))
+			box.add_child(note)
+			shot_outlook.add_child(BogeyUI.margin(box, 0, 12, 0, 0))
 		else:
-			shot_outlook.add_child(BogeyUI.body(lie_note, 13, BogeyTheme.NEUTRAL_600))
+			shot_outlook.add_child(BogeyUI.margin(note, 0, 12, 0, 0))
 
-	# The last shot, taken apart — what to learn before choosing the next.
-	if not me.last_shot.is_empty() and (state == State.CLUB_SELECT or state == State.PUTTING):
+	# The last shot, taken apart. Before the next club it leads the reads,
+	# beside the map (_show_reach); on the green that column is the putt's,
+	# so it is told here.
+	var story := _last_shot_told()
+	if not me.last_shot.is_empty() and (state == State.PUTTING or (story.is_empty() and state == State.CLUB_SELECT)):
 		var last := VBoxContainer.new()
-		last.add_theme_constant_override("separation", 3)
-		shot_outlook.add_child(last)
-		last.add_child(BogeyUI.kicker("Last shot  ·  %s" % me.last_shot.club))
-		last.add_child(BogeyUI.body(str(me.last_shot.text), 13, BogeyTheme.NEUTRAL_700))
-
-	# Club-specific read, only once a club is actually in hand.
-	if (state == State.AIM or state == State.FORM_DRAW) and not pending_club.is_empty():
-		var club_col := VBoxContainer.new()
-		club_col.add_theme_constant_override("separation", 1)
-		shot_outlook.add_child(club_col)
-		club_col.add_child(BogeyUI.kicker("Club in hand"))
-		var club_name := BogeyUI.heading(str(pending_club.name), 26)
-		club_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		club_name.add_theme_constant_override("line_spacing", -6)
-		club_col.add_child(club_name)
-
-		var tier := swing_tier_for_shot()
-		var aim_dist: float = ball_pos.distance_to(aim_target)
-		club_col.add_child(BogeyUI.body("%s · aiming %d of %d–%d yds" % [
-			ShotResolver.tier_name(tier), int(round(aim_dist)),
-			int(pending_club.min_yard), int(pending_club.max_yard)], 13, BogeyTheme.NEUTRAL_700))
-
-		var tier_hint := ""
-		var tier_is_risky := false
-		match tier:
-			ShotResolver.Tier.FULL:
-				tier_hint = "Swinging all-out — draws only 2 Form cards, less room to dodge a bad one."
-				tier_is_risky = true
-			ShotResolver.Tier.MID:
-				tier_hint = "A comfortable, repeatable swing — draws 3 Form cards, the best choice."
-			ShotResolver.Tier.FINESSE:
-				tier_hint = "A delicate touch — draws only 2 Form cards, less room to dodge a bad one."
-				tier_is_risky = true
-			ShotResolver.Tier.EXTREME_FINESSE:
-				tier_hint = "Below this club's range — no draw at all: a bad Form card is created and you must play it."
-				tier_is_risky = true
-		if tier_is_risky:
-			shot_outlook.add_child(BogeyUI.note_box(tier_hint,
-				BogeyTheme.ACCENT_100, BogeyTheme.ACCENT_500, BogeyTheme.ACCENT_800))
-		else:
-			shot_outlook.add_child(BogeyUI.note_box(tier_hint,
-				BogeyTheme.OLIVE_100, BogeyTheme.OLIVE_500, BogeyTheme.OLIVE_800))
-
-		if ShotRules.lie_forces_card(hand, play_lie()) and tier != ShotResolver.Tier.EXTREME_FINESSE:
-			shot_outlook.add_child(BogeyUI.note_box(
-				"Playing from the sand — the same treatment as Extreme Finesse: no draw, a bad Form card is created and you must play it.",
-				BogeyTheme.ACCENT_100, BogeyTheme.ACCENT_500, BogeyTheme.ACCENT_800))
+		last.add_theme_constant_override("separation", 2)
+		shot_outlook.add_child(BogeyUI.margin(last, 0, 14, 0, 0))
+		last.add_child(BogeyUI.hairline(0.12))
+		last.add_child(BogeyUI.margin(BogeyUI.kicker("Last shot", BogeyTheme.INK_SOFT, 9), 0, 8, 0, 0))
+		if story.is_empty():
+			last.add_child(BogeyUI.heading(str(me.last_shot.club), 20))
+			last.add_child(BogeyUI.body(str(me.last_shot.text), 13, BogeyTheme.NEUTRAL_800))
+			return
+		var head := BogeyUI.heading(story[0], 22)
+		head.add_theme_color_override("font_color", story[1])
+		head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		last.add_child(head)
+		last.add_child(BogeyUI.body(story[2], 13, BogeyTheme.NEUTRAL_800))
 
 
-# The shot panel between holes: the hole just finished, as its score.
-func _build_hole_result(entry: Dictionary) -> void:
-	var diff: int = int(entry.strokes) - int(entry.par)
-	var big := BogeyUI.big_stat(str(int(entry.strokes)),
-		"Stroke" if int(entry.strokes) == 1 else "Strokes")
-	shot_outlook.add_child(big[0])
-	var specs := VBoxContainer.new()
-	specs.add_theme_constant_override("separation", 0)
-	shot_outlook.add_child(specs)
-	specs.add_child(BogeyUI.hairline(0.14))
-	specs.add_child(BogeyUI.spec_row("Result", score_name(diff),
-		BogeyTheme.FAIRWAY_DEEP if diff < 0 else (BogeyTheme.FLAG if diff > 0 else BogeyTheme.INK)))
-	specs.add_child(BogeyUI.hairline(0.07))
-	specs.add_child(BogeyUI.spec_row("Round", "%s thru %d" % [
-		running_score_diff_text(running_score_diff()), round_scores.size()]))
-	var hole_best := Records.hole_best(current_hole_index)
-	if hole_best > 0:
-		specs.add_child(BogeyUI.hairline(0.07))
-		specs.add_child(BogeyUI.spec_row("Your best", str(hole_best)))
-	specs.add_child(BogeyUI.hairline(0.14))
+# The last shot as [headline, its ink, a few sentences]: the card and where
+# it put the ball (claret for a miss or trouble, green for a good card that
+# found short grass), then the aim, the finish against it, and what the
+# card, the wind and the ground each did. Empty with nothing to tell.
+func _last_shot_told() -> Array:
+	if not me.last_shot.has("card"):
+		return []
+	var where: String = str(me.last_shot.where)
+	var ink: Color = BogeyTheme.INK
+	if where in ["water", "out", "bunker"] or not bool(me.last_shot.good):
+		ink = BogeyTheme.FLAG
+	elif where in ["fairway", "green"]:
+		ink = BogeyTheme.FAIRWAY_DEEP
+	var where_text: String = {"out": "out of bounds, +1", "water": "water, +1"}.get(where, where)
+	var rows: Array = me.last_shot.rows
+	var told := "%s, aimed %s. Finished %s. The card: %s." % [me.last_shot.club,
+		rows[0][1], rows[1][1], str(me.last_shot.effect).to_lower()]
+	for row in rows.slice(2):
+		told += " %s: %s." % [row[0], row[1]]
+	var gust: float = float(me.last_shot.get("gust", 0.0))
+	if gust >= GUST_TOLD:
+		told += " Struck in a gust: the wind was blowing %d mph." % Wind.mph(Wind.gusted(hole.wind, gust))
+	return ["%s · %s" % [me.last_shot.card, where_text], ink, told]
 
 
-# The shot panel once the last putt has dropped: the round, summed up.
-# A group gets its leaderboard — lowest total first, as stroke play reads.
-func _build_round_summary() -> void:
-	var specs := VBoxContainer.new()
-	specs.add_theme_constant_override("separation", 0)
-	if is_multiplayer():
-		var standings := players.duplicate()
-		standings.sort_custom(func(a, b): return a.total_strokes() < b.total_strokes())
-		var best: Player = standings[0]
-		# Everyone on the low score shares it — a tie is reported as a tie.
-		var low: Array = []
-		for p in standings:
-			if p.total_strokes() == best.total_strokes():
-				low.append(p.name)
-		shot_outlook.add_child(BogeyUI.big_stat(str(best.total_strokes()),
-			"Low round" if low.size() == 1 else "Tied for low round")[0])
-		var who := BogeyUI.heading(" & ".join(PackedStringArray(low)), 24)
-		who.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		who.add_theme_constant_override("line_spacing", -6)
-		shot_outlook.add_child(who)
-		shot_outlook.add_child(specs)
-		specs.add_child(BogeyUI.hairline(0.14))
-		for p in standings:
-			specs.add_child(BogeyUI.spec_row(p.name, "%d  (%s)" % [
-				p.total_strokes(), running_score_diff_text(p.score_diff())]))
-			specs.add_child(BogeyUI.hairline(0.07))
+# One line of the spec sheet: a label at the left, its value at the right,
+# over a hairline. Returns the row, for a tooltip.
+func _spec(col: VBoxContainer, label_text: String, value_text: String,
+		ink: Color = BogeyTheme.INK) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.mouse_filter = Control.MOUSE_FILTER_PASS
+	var cap := BogeyUI.kicker(label_text, BogeyTheme.INK_SOFT, 10)
+	cap.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(cap)
+	var val := BogeyUI.body(value_text, 14, ink)
+	val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	val.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(val)
+	var m := BogeyUI.margin(row, 0, 7, 0, 7)
+	m.mouse_filter = Control.MOUSE_FILTER_PASS
+	col.add_child(m)
+	col.add_child(BogeyUI.hairline(0.12))
+	return m
+
+
+# --- The right column: the reads ----------------------------------------
+
+# A section head in the reads: small capitals over an ink rule, and an
+# optional note or link at the far end.
+func _section_head(text: String, right: Control = null) -> Control:
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	var row := HBoxContainer.new()
+	row.add_child(BogeyUI.kicker(text, BogeyTheme.INK, 10))
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(gap)
+	if right != null:
+		row.add_child(right)
+	col.add_child(row)
+	col.add_child(BogeyUI.hairline(1.0))
+	return col
+
+
+func rebuild_right_col() -> void:
+	clear_container(right_col)
+	coverage_view = null
+	reach_title = null
+	reach_note = null
+	in_hand_box = null
+	if state == State.PUTTING:
+		_build_putt_reads()
 		return
 
-	var total_strokes := 0
-	var total_par := 0
-	for entry in round_scores:
-		total_strokes += int(entry.strokes)
-		total_par += int(entry.par)
-	var diff := total_strokes - total_par
-	shot_outlook.add_child(BogeyUI.big_stat(str(total_strokes), "Strokes")[0])
-	shot_outlook.add_child(specs)
-	specs.add_child(BogeyUI.hairline(0.14))
-	specs.add_child(BogeyUI.spec_row("To par", score_diff_text(diff),
-		BogeyTheme.FAIRWAY_DEEP if diff < 0 else (BogeyTheme.FLAG if diff > 0 else BogeyTheme.INK)))
-	specs.add_child(BogeyUI.hairline(0.07))
-	specs.add_child(BogeyUI.spec_row("Course par", str(total_par)))
-	specs.add_child(BogeyUI.hairline(0.07))
-	specs.add_child(BogeyUI.spec_row("Holes", str(round_scores.size())))
-	specs.add_child(BogeyUI.hairline(0.14))
+	# Row one: the reach (and the club in hand) | the Form deck by family.
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 28)
+	right_col.add_child(top)
+
+	var reach := VBoxContainer.new()
+	reach.add_theme_constant_override("separation", 6)
+	reach.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	reach.size_flags_stretch_ratio = 1.0
+	top.add_child(reach)
+	reach_title = BogeyUI.heading("", 28)
+	reach_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	reach.add_child(reach_title)
+	reach_note = BogeyUI.body("", 12, BogeyTheme.NEUTRAL_700)
+	reach.add_child(reach_note)
+	in_hand_box = VBoxContainer.new()
+	in_hand_box.add_theme_constant_override("separation", 2)
+	reach.add_child(in_hand_box)
+	if (state == State.AIM or state == State.FORM_DRAW) and not pending_club.is_empty():
+		rebuild_in_hand()
+	else:
+		_show_reach({})
+
+	var form := VBoxContainer.new()
+	form.add_theme_constant_override("separation", 0)
+	form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	form.size_flags_stretch_ratio = 1.0
+	top.add_child(form)
+	form.add_child(_section_head("Form deck · %d" % (form_deck.deck.size() + form_deck.discard.size()),
+		make_form_deck_chip_button()))
+	form.add_child(make_family_form_table(FormCard.family_of(pending_club) \
+		if (state == State.AIM or state == State.FORM_DRAW) and not pending_club.is_empty() else ""))
+	# What the last swing left for the next one, and cards made for the next draw.
+	var owed := PackedStringArray()
+	if not me.pocket.is_empty():
+		owed.append("In your pocket: %s. It joins your next hand." % me.pocket[0].key())
+	if me.tempo > 0:
+		owed.append("Tempo: your next swing is dealt one more card.")
+	if not me.created_next.is_empty() and (state == State.CLUB_SELECT or state == State.AIM):
+		owed.append("Waiting for your next draw: %s (created)." % " and ".join(PackedStringArray(me.created_next)))
+	for t in owed:
+		var box := BogeyUI.make_panel(BogeyUI._box(BogeyTheme.OLIVE_100, Color(0, 0, 0, 0), 0, BogeyUI.RADIUS, 8, 6))
+		box.add_child(BogeyUI.body(t, 12, BogeyTheme.FAIRWAY_DEEP))
+		form.add_child(BogeyUI.margin(box, 0, 8, 0, 0))
+
+	# Row two: the yardages, the whole width — only while a club is being
+	# chosen; once one is in hand the chart has nothing left to decide.
+	if state == State.CLUB_SELECT:
+		add_coverage_chart(right_col, "claret: no club reaches",
+			ball_pos.distance_to(hole.pin_pos) if hole else -1.0)
+
+	# Row three: the call | abilities.
+	var low := HBoxContainer.new()
+	low.add_theme_constant_override("separation", 28)
+	right_col.add_child(low)
+	var call_col := VBoxContainer.new()
+	call_col.add_theme_constant_override("separation", 8)
+	call_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	low.add_child(call_col)
+	ability_box = VBoxContainer.new()
+	ability_box.add_theme_constant_override("separation", 6)
+	ability_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	low.add_child(ability_box)
+	if opens("call"):
+		build_call_box(call_col)
+	rebuild_ability_box()
 
 
-# The abilities the active player can use right now, as buttons, plus a
-# note of any created cards waiting for their next draw.
+# The club in hand: its maker, its name, the aim against its carry, and the
+# swing's tier on a low-mid-high bar, with any warning in claret. Rebuilt as
+# the crosshair moves.
+func rebuild_in_hand() -> void:
+	if not is_instance_valid(in_hand_box) or pending_club.is_empty():
+		return
+	clear_container(in_hand_box)
+	var lo := float(pending_club.min_yard)
+	var hi := float(pending_club.max_yard)
+	reach_title.text = "%s · up to %d" % [pending_club.name, roundi(hi)]
+	reach_note.text = ""
+	var sub := BogeyUI.kicker("In hand · reaches %d–%d" % [roundi(lo), roundi(hi)], BogeyTheme.INK_SOFT, 10)
+	in_hand_box.add_child(sub)
+	in_hand_box.add_child(BogeyUI.margin(BogeyUI.hairline(1.0), 0, 10, 0, 6))
+
+	var brand := str(pending_club.get("brand", Brands.NONE))
+	var maker := HBoxContainer.new()
+	maker.add_theme_constant_override("separation", 6)
+	maker.add_child(BogeyUI.dot(Brands.color(brand), 6))
+	maker.add_child(BogeyUI.kicker("In hand · %s" % Brands.display_name(brand), BogeyTheme.NEUTRAL_700, 9))
+	in_hand_box.add_child(maker)
+	in_hand_box.add_child(BogeyUI.heading(str(pending_club.name), 24))
+
+	var tier := swing_tier_for_shot()
+	var aim_dist: float = ball_pos.distance_to(aim_target)
+	var created: int = me.created_next.size() + ClubAbilities.draw_extras(pending_club, current_lie).size()
+	var count: int = ShotRules.form_choice_count(hand, tier, play_lie(), created, pending_club)
+	in_hand_box.add_child(BogeyUI.body("Aiming %d of %d–%d · %s · draws %d" % [
+		roundi(aim_dist), roundi(lo), roundi(hi), ShotResolver.tier_name(tier), count],
+		13, BogeyTheme.NEUTRAL_800))
+
+	# Where the aim sits in the club's carry: low third, the middle, the top.
+	if lo > 0.0 and hi > lo:
+		var t := clampf((aim_dist - lo) / (hi - lo), 0.0, 1.0)
+		var bar := Control.new()
+		bar.custom_minimum_size = Vector2(0, 16)
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bar.draw.connect(func():
+			var w := bar.size.x
+			var third := (w - 4.0) / 3.0
+			for i in 3:
+				bar.draw_rect(Rect2(i * (third + 2.0), 4, third, 8),
+					BogeyTheme.OLIVE_400 if i == 1 else BogeyTheme.NEUTRAL_300)
+			bar.draw_rect(Rect2(clampf(t * w, 1.0, w - 1.0) - 1.0, 0, 2, 16), BogeyTheme.INK))
+		in_hand_box.add_child(BogeyUI.margin(bar, 0, 6, 0, 0))
+		var ticks := HBoxContainer.new()
+		for word in ["Low", "Mid", "High"]:
+			var l := BogeyUI.label(word.to_upper(), 9, BogeyTheme.NEUTRAL_600)
+			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			l.horizontal_alignment = [HORIZONTAL_ALIGNMENT_LEFT, HORIZONTAL_ALIGNMENT_CENTER,
+				HORIZONTAL_ALIGNMENT_RIGHT][["Low", "Mid", "High"].find(word)]
+			ticks.add_child(l)
+		in_hand_box.add_child(ticks)
+
+	var warn := ""
+	match tier:
+		ShotResolver.Tier.FULL:
+			warn = "Swinging all-out — fewer Form cards, less room to dodge a bad one."
+		ShotResolver.Tier.FINESSE:
+			warn = "A delicate touch — fewer Form cards, less room to dodge a bad one."
+		ShotResolver.Tier.EXTREME_FINESSE:
+			warn = "Below this club's range — no draw at all: a bad Form card is created and you must play it."
+	if ShotRules.lie_forces_card(hand, play_lie()) and tier != ShotResolver.Tier.EXTREME_FINESSE:
+		warn = "Playing from the sand — no draw: a bad Form card is created and you must play it."
+	if warn != "":
+		in_hand_box.add_child(BogeyUI.margin(BogeyUI.body(warn, 13, BogeyTheme.FLAG), 0, 8, 0, 0))
+
+
+# Your form with each kind of club: a line a family, its good and bad
+# cards in play. A swing is dealt only from the family of the club in hand
+# (Section 4 "Form by club family"), so this is the read a club choice
+# turns on — a cold driver is a reason to hit an iron. `active` is the
+# family being swung, shaded; passing over a club in the bag shades its own.
+func make_family_form_table(active: String = "") -> Control:
+	_family_rows = {}
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 0)
+	var form := form_deck.family_form()
+	for fam in FormCard.FAMILIES:
+		var good: int = form[fam].good
+		var bad: int = form[fam].bad
+		if good + bad == 0:
+			continue
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		var name_label := BogeyUI.label(str(FormCard.FAMILY_LABEL[fam]).capitalize(), 13)
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(name_label)
+		# Claret when two cards in five are bad, green when none are.
+		var bad_ink: Color = BogeyTheme.INK
+		if bad == 0:
+			bad_ink = BogeyTheme.FAIRWAY_DEEP
+		elif float(bad) / float(good + bad) >= 0.4:
+			bad_ink = BogeyTheme.FLAG
+		row.add_child(BogeyUI.label("%d good ·" % good, 13))
+		row.add_child(BogeyUI.label("%d bad" % bad, 13, bad_ink))
+		var line := BogeyUI.make_panel(BogeyUI._box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, 0, 6, 7))
+		line.add_child(row)
+		col.add_child(line)
+		col.add_child(BogeyUI.hairline(0.12))
+		_family_rows[fam] = line
+	light_family(active)
+	return col
+
+
+# Shades one family's line and sets it in full weight; "" shows them alike.
+func light_family(family: String) -> void:
+	for fam in _family_rows:
+		var line: PanelContainer = _family_rows[fam]
+		if not is_instance_valid(line):
+			continue
+		var on: bool = family != "" and fam == family
+		line.add_theme_stylebox_override("panel", BogeyUI._box(
+			Color(BogeyTheme.INK, 0.06) if on else Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, 0, 6, 7))
+		for l in line.get_child(0).get_children():
+			(l as Label).add_theme_font_override("font", BogeyUI.sans(600 if on else 450))
+
+
+# The call (DraftRules): offered before the tee shot, and kept in view for
+# as long as the hole it was made on is being played.
+func build_call_box(col: VBoxContainer) -> void:
+	col.add_child(_section_head("The call"))
+	var terms := "Make %s or better and the pro shop shows %d offers and you keep %d. Miss and it shows only %d." % [
+		DraftRules.CALL_NAME, DraftRules.offer_count(hand, DraftRules.MADE),
+		DraftRules.keep_count(hand, DraftRules.MADE), DraftRules.offer_count(hand, DraftRules.MISSED)]
+	if can_call_hole():
+		var call_btn := Button.new()
+		call_btn.text = ("%s called — take it back" % DraftRules.CALL_NAME.capitalize()) if me.called \
+			else ("Call %s" % DraftRules.CALL_NAME).to_upper()
+		call_btn.tooltip_text = terms
+		call_btn.custom_minimum_size = Vector2(0, 44)
+		BogeyUI.style_button(call_btn, me.called, 11)
+		call_btn.add_theme_font_override("font", BogeyUI.sans(600, 3))
+		call_btn.pressed.connect(func(): submit("call", {}))
+		call_btn.disabled = is_cpu_turn()
+		col.add_child(BogeyUI.margin(call_btn, 0, 4, 0, 0))
+		col.add_child(BogeyUI.body("Before your tee shot. " + terms, 12, BogeyTheme.NEUTRAL_700))
+	elif me.called:
+		var box := BogeyUI.make_panel(BogeyUI._box(BogeyTheme.INK, BogeyTheme.INK, 0, BogeyUI.RADIUS, 12, 10))
+		box.add_child(BogeyUI.label("Called · %s or better on the %s" % [DraftRules.CALL_NAME,
+			_ordinal(current_hole_index)], 13, BogeyTheme.NEUTRAL_100))
+		col.add_child(BogeyUI.margin(box, 0, 4, 0, 0))
+		col.add_child(BogeyUI.body(terms, 12, BogeyTheme.NEUTRAL_700))
+	else:
+		col.add_child(BogeyUI.body("Only before the tee shot.", 12, BogeyTheme.INK_SOFT))
+
+
+func _ordinal(n: int) -> String:
+	var suffix := "th"
+	if n % 100 < 11 or n % 100 > 13:
+		suffix = ["th", "st", "nd", "rd", "th", "th", "th", "th", "th", "th"][n % 10]
+	return "%d%s" % [n, suffix]
+
+
+# The abilities the active player can use right now, as gilt-edged
+# buttons: the name, then which club gives it and how many are left.
 func rebuild_ability_box() -> void:
-	if ability_box == null:
+	if not is_instance_valid(ability_box):
 		return
 	clear_container(ability_box)
 	var list := available_abilities()
-	var waiting: Array = me.created_next
-	var show_waiting := not waiting.is_empty() and (state == State.CLUB_SELECT or state == State.AIM)
-	# The call (DraftRules): offered on the tee, and kept in view for as
-	# long as the hole it was made on is being played.
-	var calling := can_call_hole()
-	var on_the_hole := state == State.CLUB_SELECT or state == State.AIM \
-		or state == State.FORM_DRAW or state == State.PUTTING
-	var show_call := calling or (me.called and on_the_hole)
-	ability_box.visible = not list.is_empty() or show_waiting or show_call
-	if not ability_box.visible:
+	# A guided round shows the box only once a club gives it something to hold.
+	if list.is_empty() and guided():
 		return
-	if show_call:
-		ability_box.add_child(BogeyUI.hairline(0.14))
-		ability_box.add_child(BogeyUI.kicker("The call", BogeyTheme.INK))
-		var terms := "Make %s or better and the draft shows %d, keep %d. Miss and it shows %d." % [
-			DraftRules.CALL_NAME, DraftRules.offer_count(hand, DraftRules.MADE),
-			DraftRules.keep_count(hand, DraftRules.MADE), DraftRules.offer_count(hand, DraftRules.MISSED)]
-		if calling:
-			var call_btn := Button.new()
-			call_btn.text = "%s called" % DraftRules.CALL_NAME.capitalize() if me.called \
-				else "Call %s" % DraftRules.CALL_NAME
-			call_btn.tooltip_text = terms + ("\nTap to take it back." if me.called else "")
-			call_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			BogeyUI.style_button(call_btn, me.called, 13)
-			call_btn.pressed.connect(func(): submit("call", {}))
-			call_btn.disabled = is_cpu_turn()
-			ability_box.add_child(call_btn)
-			ability_box.add_child(BogeyUI.body(terms, 12, BogeyTheme.NEUTRAL_600))
-		else:
-			ability_box.add_child(BogeyUI.body("%s called on this hole. %s" % [
-				DraftRules.CALL_NAME.capitalize(), terms], 13, BogeyTheme.NEUTRAL_700))
-	if list.is_empty() and not show_waiting:
+	ability_box.add_child(_section_head("Abilities"))
+	if list.is_empty():
+		ability_box.add_child(BogeyUI.margin(BogeyUI.body("None to use on this shot.", 12, BogeyTheme.INK_SOFT), 0, 4, 0, 0))
 		return
-	ability_box.add_child(BogeyUI.hairline(0.14))
-	ability_box.add_child(BogeyUI.kicker("Abilities", BogeyTheme.INK))
-	if show_waiting:
-		ability_box.add_child(BogeyUI.body("Your next Form draw includes %s (created)." % \
-			" and ".join(PackedStringArray(waiting)), 13, BogeyTheme.OLIVE_800))
 	for e in list:
-		# One line each: the name on the button, how many are left at its
-		# right edge. Which club gives it, and how often, is on the hover.
 		var armed: bool = e.toggle and e.armed
-		var left := "%d left %s" % [e.left, ClubAbilities.period_text(e.period)]
 		var b := Button.new()
-		b.text = str(e.label)
-		b.tooltip_text = "%s\n%s · %s" % [e.label, left, e.source]
+		b.tooltip_text = "%s\n%d left %s · %s" % [e.label, e.left, ClubAbilities.period_text(e.period), e.source]
 		if armed:
 			b.tooltip_text += "\nOn — tap to switch off."
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		b.clip_text = true
-		BogeyUI.style_button(b, armed, 13)
-		# Cut closer than a stock button — there may be three of these —
-		# with room kept clear on the right for the count.
-		for key in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
-			var box := b.get_theme_stylebox(key).duplicate() as StyleBoxFlat
-			box.content_margin_top = 7
-			box.content_margin_bottom = 7
-			box.content_margin_left = 12
-			box.content_margin_right = 62
-			b.add_theme_stylebox_override(key, box)
+		b.focus_mode = Control.FOCUS_NONE
+		b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		var normal := BogeyUI._box(BogeyTheme.INK if armed else BogeyTheme.CARD_BG, BogeyTheme.GOLD, 1, BogeyUI.RADIUS, 12, 9)
+		var hover := BogeyUI._box(BogeyTheme.INK if armed else BogeyTheme.GOLD_100, BogeyTheme.GOLD, 1, BogeyUI.RADIUS, 12, 9)
+		for key in ["normal", "disabled"]:
+			b.add_theme_stylebox_override(key, normal)
+		for key in ["hover", "pressed", "hover_pressed"]:
+			b.add_theme_stylebox_override(key, hover)
+		b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+		var ink: Color = BogeyTheme.NEUTRAL_100 if armed else BogeyTheme.INK
+		var inner := VBoxContainer.new()
+		inner.add_theme_constant_override("separation", 0)
+		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var name_l := BogeyUI.label(str(e.label), 13, ink, 500)
+		name_l.clip_text = true
+		name_l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		inner.add_child(name_l)
+		var sub := BogeyUI.label("On · tap to switch off" if armed else "%s · %d left %s" % [
+			e.source, e.left, ClubAbilities.period_text(e.period)], 11, Color(ink, 0.7))
+		sub.clip_text = true
+		sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		inner.add_child(sub)
+		var pad := BogeyUI.margin(inner, 12, 8, 12, 8)
+		pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		b.add_child(pad)
+		b.custom_minimum_size = Vector2(0, 50)
 		b.pressed.connect(_on_ability_pressed.bind(e.id))
 		b.disabled = is_cpu_turn()
-		var count := BogeyUI.label("On" if armed else "%d left" % e.left, 12,
-			BogeyTheme.NEUTRAL_300 if armed else BogeyTheme.NEUTRAL_600)
-		count.set_anchors_preset(Control.PRESET_FULL_RECT)
-		count.offset_right = -12
-		count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		count.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		b.add_child(count)
-		ability_box.add_child(b)
+		ability_box.add_child(BogeyUI.margin(b, 0, 4, 0, 0))
+
+
+# The reads on the green: the putter and the distance, the green's grades
+# on this line, how big the cup plays, and where everyone else's ball lies.
+func _build_putt_reads() -> void:
+	var putter: Dictionary = {}
+	for c in hand:
+		if ClubAbilities.is_putter(c):
+			putter = c
+			break
+	var head := VBoxContainer.new()
+	head.add_theme_constant_override("separation", 6)
+	right_col.add_child(head)
+	head.add_child(BogeyUI.heading("%s · %s" % [str(putter.get("name", "Putter")), putt_distance_text()], 30))
+	var rows := VBoxContainer.new()
+	rows.add_theme_constant_override("separation", 0)
+	right_col.add_child(rows)
+	rows.add_child(BogeyUI.hairline(1.0))
+	var read := ShotResolver.putt_read(hole, ball_pos)
+	_spec(rows, "Across the line", "Level" if absf(read.fall) < ShotResolver.PUTT_FLAT \
+		else "Falls %.1f%% to the %s" % [absf(read.fall) * 100.0, "right" if read.fall > 0.0 else "left"])
+	_spec(rows, "Along it", "Level" if absf(read.along) < ShotResolver.PUTT_FLAT \
+		else "%.1f%% %s" % [absf(read.along) * 100.0, "uphill" if read.along > 0.0 else "downhill"])
+	var cup_mult: float = ShotRules.putt_band_mult(hand, putt_dist, me.armed)
+	if not is_equal_approx(cup_mult, 1.0):
+		_spec(rows, "The cup", "Plays %d%% of its size" % roundi(cup_mult * 100.0))
+	var others := PackedStringArray()
+	for m in other_ball_markers():
+		others.append("%s, %d ft" % [m.name, maxi(1, roundi(Vector2(m.pos).distance_to(hole.pin_pos) * 3.0))])
+	if not others.is_empty():
+		_spec(rows, "Other balls", ", ".join(others))
+	right_col.add_child(BogeyUI.body("The ball breaks toward the low side, runs on downhill and dies uphill. Too much pace and it will not drop.",
+		13, BogeyTheme.NEUTRAL_800))
 
 
 func _on_ability_pressed(id: String) -> void:
@@ -4761,8 +5503,11 @@ func rebuild_bag_row() -> void:
 	var width := bag_card_width(hand.size())
 	for i in range(hand.size()):
 		var card = hand[i]
+		# Each tile carries its club's cards as dots, so the bag can be read
+		# for risk before a club is picked. (A putter on the green is dealt none.)
 		var cv := make_card_view(card,
-			choosing and playable.has(i) and not is_cpu_turn(), true, width)
+			choosing and playable.has(i) and not is_cpu_turn(), true, width, STRIP_CARD_H, true,
+			form_deck.club_form(card) if form_deck and current_lie != "green" else {})
 		if cv.interactive:
 			cv.picked.connect(_make_club_callback(i))
 			# Hovering a club previews its reach on the hole map, so two
@@ -4783,7 +5528,7 @@ func _on_draft_card_picked(cv: CardView, index: int) -> void:
 	if is_cpu_turn():
 		return
 	_animating = true
-	_fade_out(options_container)
+	_fade_out(_rack if is_instance_valid(_rack) else options_container)
 
 	get_tree().create_timer(0.25).timeout.connect(func():
 		_animating = false
@@ -4797,11 +5542,19 @@ func _on_form_card_picked(fv: FormCardView, index: int) -> void:
 		return
 	_animating = true
 	_fade_out(form_container)
+	# The gust is the one blowing at the click, not a quarter-second on.
+	var gust := live_gust()
 
 	get_tree().create_timer(0.25).timeout.connect(func():
 		_animating = false
-		submit("form", {"index": index})
+		submit("form", {"index": index, "gust": gust})
 	)
+
+
+# How much of a gust is blowing on this machine's map right now (0 where
+# the wind doesn't gust, and in the flow harnesses, which run no frames).
+func live_gust() -> float:
+	return map_view.gust if map_view and hole and Wind.gust_mph(hole.wind) > 0 else 0.0
 
 
 # Fades every card in a row once one of them has been picked. A card may
@@ -4873,21 +5626,29 @@ func _on_club_hover_end(_cv: CardView) -> void:
 	_show_reach({})
 
 
-# --- Yardage chart and reach readout (right column) ------------------
+# --- Yardage chart and reach readout (the reads) ------------------------
 
-# The bag on a yardage ruler, under the Form table — see BagCoverageView.
-# `pin` marks the flag's distance while a shot is being chosen.
-func add_coverage_chart(note: String, pin: float = -1.0) -> void:
+# The bag on a yardage ruler — see BagCoverageView. `pin` marks the flag's
+# distance while a shot is being chosen.
+func add_coverage_chart(into: Container, note: String, pin: float = -1.0) -> void:
 	coverage_view = null
 	if hand.filter(func(c): return c.get("type", "") != "putter").is_empty():
 		return
-	form_container.add_child(BogeyUI.hairline(0.14))
-	form_container.add_child(BogeyUI.kicker("Your yardages", BogeyTheme.INK))
-	if note != "":
-		form_container.add_child(BogeyUI.body(note, 12, BogeyTheme.NEUTRAL_600))
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	into.add_child(col)
+	var head := HBoxContainer.new()
+	head.add_child(BogeyUI.kicker("Your yardages", BogeyTheme.INK, 10))
+	var n := BogeyUI.label(note, 11 if note.length() < 40 else 12, BogeyTheme.INK_SOFT)
+	n.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	n.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	n.clip_text = true
+	n.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	head.add_child(n)
+	col.add_child(head)
 	coverage_view = BagCoverageView.new()
 	coverage_view.setup(hand, pin, state == State.DRAFT)
-	form_container.add_child(coverage_view)
+	col.add_child(coverage_view)
 
 
 func _set_coverage_offer(club: Dictionary) -> void:
@@ -4900,35 +5661,42 @@ func _set_coverage_focus(club: Dictionary) -> void:
 		coverage_view.set_focus(club)
 
 
-# Club choice: a plain read of what the club passed over carries, against
-# the flag. Flat yards only: wind and slope are the player's to read.
-func add_reach_readout() -> void:
-	form_container.add_child(BogeyUI.hairline(0.14))
-	form_container.add_child(BogeyUI.kicker("Club reach", BogeyTheme.INK))
-	reach_title = BogeyUI.heading("", 22)
-	reach_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	form_container.add_child(reach_title)
-	reach_note = BogeyUI.body("", 13, BogeyTheme.NEUTRAL_700)
-	form_container.add_child(reach_note)
-	_show_reach({})
-
-
 func _show_reach(club: Dictionary) -> void:
 	if not is_instance_valid(reach_title) or not is_instance_valid(reach_note) or not hole:
 		return
+	# While a club is in hand the reach is its own (rebuild_in_hand()).
+	if (state == State.AIM or state == State.FORM_DRAW) and not pending_club.is_empty():
+		return
 	var to_pin := ball_pos.distance_to(hole.pin_pos)
+	reach_title.add_theme_color_override("font_color", BogeyTheme.INK)
+	# No club passed over: the shot just played, where there is one.
+	var story := _last_shot_told()
+	if club.is_empty() and not story.is_empty():
+		reach_title.text = story[0]
+		reach_title.add_theme_color_override("font_color", story[1])
+		reach_note.text = "Last shot: " + story[2]
+		reach_note.add_theme_font_override("font", BogeyUI.sans())
+		reach_note.add_theme_font_size_override("font_size", 12)
+		reach_note.add_theme_color_override("font_color", BogeyTheme.NEUTRAL_800)
+		return
 	if club.is_empty():
 		reach_title.text = "%d yds to the pin" % roundi(to_pin)
-		reach_note.text = "Pass over a club to see how far it carries."
+		reach_note.text = "HOVER A CLUB TO SEE ITS REACH"
+		reach_note.add_theme_font_override("font", BogeyUI.sans(600, 2))
+		reach_note.add_theme_font_size_override("font_size", 10)
+		reach_note.add_theme_color_override("font_color", BogeyTheme.INK_SOFT)
 		return
+	reach_note.add_theme_font_override("font", BogeyUI.sans())
+	reach_note.add_theme_font_size_override("font_size", 12)
+	reach_note.add_theme_color_override("font_color", BogeyTheme.NEUTRAL_700)
 	var lo := float(club.get("min_yard", 0.0))
 	var hi := float(club.get("max_yard", 0.0))
 	if club.get("type", "") == "putter" or lo <= 0.0:
-		reach_title.text = "%s · up to %d yds" % [club.name, roundi(hi)]
+		reach_title.text = "%s · up to %d" % [club.name, roundi(hi)]
 		reach_note.text = "%d yds to the pin." % roundi(to_pin)
 		return
 	var sweet := ShotResolver.tier_yardage_range(club, ShotResolver.Tier.MID)
-	reach_title.text = "%s · %d–%d yds" % [club.name, roundi(lo), roundi(hi)]
+	reach_title.text = "%s · %d–%d" % [club.name, roundi(lo), roundi(hi)]
 	var after: String
 	if to_pin < lo:
 		after = "The pin is %d — inside its shortest carry, so any swing at it is Extreme Finesse." % roundi(to_pin)
@@ -4937,9 +5705,24 @@ func _show_reach(club: Dictionary) -> void:
 	else:
 		after = "The pin is %d — leaves about %d–%d." % [roundi(to_pin),
 			roundi(to_pin - hi), roundi(to_pin - lo)]
+	# The stake: what is in the club's pile, how much of it each swing
+	# shows you, and how often that is nothing but misses.
 	var dealt := form_deck.club_form(club)
-	reach_note.text = "Sweet spot %d–%d. %s Flat yards, before wind and slope. It is dealt from %d good and %d bad cards." % [
-		roundi(sweet.x), roundi(sweet.y), after, int(dealt.good), int(dealt.bad)]
+	var misses := {}
+	for c in form_deck.club_cards(club):
+		if not c.good:
+			misses[c.name] = int(misses.get(c.name, 0)) + 1
+	var named: Array = misses.keys().map(func(k): return k if misses[k] == 1 else "%s ×%d" % [k, misses[k]])
+	var stake := "Its pile: %d shots, %d misses%s." % [int(dealt.good), int(dealt.bad),
+		"" if named.is_empty() else " (%s)" % ", ".join(PackedStringArray(named))]
+	var see_mid := ShotRules.form_choice_count(hand, ShotResolver.Tier.MID, current_lie, 0, club)
+	var see_full := ShotRules.form_choice_count(hand, ShotResolver.Tier.FULL, current_lie, 0, club)
+	if not ShotRules.is_forced(hand, ShotResolver.Tier.MID, current_lie):
+		stake += " The sweet spot shows you %d of them, a full or soft swing %d. All misses: %s, or %s." % [
+			see_mid, see_full, ShotRules.all_miss_odds(int(dealt.good), int(dealt.bad), see_mid),
+			ShotRules.all_miss_odds(int(dealt.good), int(dealt.bad), see_full)]
+	reach_note.text = "Sweet spot %d–%d. %s Flat yards, before wind and slope.\n%s" % [
+		roundi(sweet.x), roundi(sweet.y), after, stake]
 
 
 func _make_club_callback(hand_index: int) -> Callable:
@@ -4983,7 +5766,13 @@ func submit(kind: String, payload: Dictionary) -> void:
 	if is_cpu_turn():
 		return
 	if not online:
+		var said := _taught.size()
+		_lesson_fresh = false
 		_apply_action(kind, payload)
+		# A lesson goes once the step it was about is taken, unless that
+		# step brought the next one.
+		if caddy and caddy.is_teaching() and _taught.size() == said:
+			caddy.dismiss()
 		return
 	if not is_my_turn():
 		_reject(kind, "not this seat's turn")
@@ -5064,14 +5853,13 @@ func _apply_action(kind: String, payload: Dictionary) -> void:
 		"aim":
 			_on_aim_picked(payload.get("target", Vector2.ZERO))
 		"form":
-			on_form_pick(int(payload.get("index", -1)))
+			on_form_pick(int(payload.get("index", -1)), float(payload.get("gust", 0.0)))
 		"draft":
 			on_draft_pick(int(payload.get("index", -1)))
 		"discard":
 			on_discard_pick(int(payload.get("index", -1)))
 		"putt":
-			on_putt_stopped(str(payload.get("result", "")),
-				float(payload.get("accuracy", 0.0)))
+			on_putt(payload.get("aim", Vector2.ZERO))
 		"ability":
 			on_ability(str(payload.get("id", "")))
 		"call":

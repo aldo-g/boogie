@@ -86,7 +86,7 @@ static func club_class(ctype: String, max_y: float) -> String:
 # one shot and the miss. A maker's club: the maker's signature shot, one of
 # the two (fixed by the club's name, so the same club always brings the
 # same) and the miss. A limited edition: the signature and both, no miss.
-# Putters bring nothing: they are played on the meter.
+# Putters bring nothing: they are aimed on the green.
 static func shots_for(cname: String, max_y: float, ctype: String, brand: String, limited: bool) -> Array:
 	if ctype == "putter":
 		return []

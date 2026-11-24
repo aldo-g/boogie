@@ -88,6 +88,35 @@ func _check_round_builds() -> void:
 	_expect(last > first * 1.25, "the wind doesn't get up through the round (%.1f mph on the 1st, %.1f on the 18th)" % [first / 600.0, last / 600.0])
 	_expect(most <= Wind.MAX_MPH + 0.5, "a late hole blew %.0f mph, past the ceiling" % most)
 
+	# One wind a round, over the whole course: early on (before it
+	# freshens) no hole's is more than the sway off any other's, and
+	# pointed back over the course they all blow one way. What changes is
+	# how each hole lies to it: somewhere it is into you, somewhere behind.
+	var plan = load("res://scripts/CoursePlan.gd")
+	var lie: Array = []
+	for n in range(1, 19):
+		lie.append(HoleData.hole(n))
+	lie = plan.lie(lie, Course.active_theme, Course.active_name)
+	for seed in [3, 11, 58, 204]:
+		var day: Vector2 = Wind.for_hole(seed, 1, "", 0.0)
+		if day.length() < 6.0:
+			continue
+		var over0: Vector2 = (lie[0] as Transform2D).basis_xform(day)
+		var into := 0
+		var behind := 0
+		for n in range(1, 19):
+			var w: Vector2 = Wind.for_hole(seed, n, "", 0.0)
+			_expect(absf(w.length() - day.length()) <= 2.0 * Wind.SWAY_MPH + 1.0,
+				"seed %d: hole %d blows %d mph and the 1st %d" % [seed, n, Wind.mph(w), Wind.mph(day)])
+			var over: Vector2 = (lie[n - 1] as Transform2D).basis_xform(w)
+			_expect(absf(rad_to_deg(over.angle_to(over0))) <= 2.0 * Wind.SWAY_DEG + 1.0,
+				"seed %d: hole %d's wind blows another way over the course (%.0f degrees off the 1st's)" % [
+					seed, n, rad_to_deg(over.angle_to(over0))])
+			var up_the_hole: float = w.normalized().dot(Vector2(0, 1))
+			into += 1 if up_the_hole < -0.5 else 0
+			behind += 1 if up_the_hole > 0.5 else 0
+		_expect(into > 0 and behind > 0, "seed %d: the wind is never both into and behind (%d into, %d behind)" % [seed, into, behind])
+
 	# Pins, on every hole of every course the game ships.
 	for c in CourseLibrary.all():
 		Course.use_shipped(c.id)
@@ -202,10 +231,13 @@ func _check_course_plan() -> void:
 		var holes: Array = []
 		for n in range(1, Course.hole_count() + 1):
 			holes.append(HoleData.hole(n))
-		var coastal: bool = plan.COAST.has(Course.active_theme)
-		var places: Array = plan.route(holes, 1.04, coastal)
+		# A links lies by the sea: the terrain, and any course called one.
+		var coastal: bool = plan.coast_of(Course.active_theme, Course.active_name) > 0.0
+		_expect(coastal == (Course.active_theme == "links" or str(c.name).to_lower().contains("links")),
+			"%s: %s by the sea" % [c.name, "is" if coastal else "isn't"])
+		var places: Array = plan.lie(holes, Course.active_theme, Course.active_name)
 		_expect(places.size() == holes.size(), "%s: the plan places %d of %d holes" % [c.name, places.size(), holes.size()])
-		_expect(places == plan.route(holes, 1.04, coastal), "%s: the plan routes differently the second time" % c.name)
+		_expect(places == plan.lie(holes, Course.active_theme, Course.active_name), "%s: the plan routes differently the second time" % c.name)
 		var feet: Array = []
 		for i in places.size():
 			feet.append(places[i] * plan.footprint(holes[i], i == 0, coastal))
@@ -381,7 +413,8 @@ func _play_round(main) -> bool:
 			main.State.DISCARD_FOR_DRAFT, main.State.DISCARD_FOR_HAZARD:
 				main.on_discard_pick(randi() % main.hand.size())
 			main.State.PUTTING:
-				main.on_putt_stopped("sunk" if randf() < 0.45 else "miss", randf())
+				main.on_putt(ShotResolver.solve_putt(main.hole, main.ball_pos) \
+					+ (Vector2.ZERO if randf() < 0.45 else Vector2(randf_range(-2.0, 2.0), randf_range(-2.0, 2.0))))
 			_:
 				return false
 	return main.state == main.State.DONE
@@ -475,18 +508,12 @@ func _check_terrain() -> void:
 	_expect(_run_out(HoleData.build(def, 1, "links")) > park + 1.0, "links ground doesn't run")
 	_expect(_run_out(HoleData.build(def, 1, "alpine")) < park - 1.0, "alpine ground doesn't hold")
 
-	# Wind: early in a round (nothing has built yet — late = 0) parkland
-	# draws exactly what the game always drew; a links blows harder than
-	# that, a desert less.
+	# Wind: over many rounds a links blows harder than parkland, a desert
+	# less. (Hole 1, before anything has built.)
 	var sums := {"parkland": 0.0, "links": 0.0, "desert": 0.0}
-	for n in range(1, 301):
+	for seed in range(1, 301):
 		for id in sums:
-			sums[id] += Wind.for_hole(4321, n, id, 0.0).length()
-		var rng := RandomNumberGenerator.new()
-		rng.seed = hash([4321, n, "wind"])
-		var mph: float = Wind.MAX_MPH * pow(rng.randf(), Wind.CALM_SKEW)
-		_expect(Wind.mph(Wind.for_hole(4321, n, "", 0.0)) == (int(round(mph)) if round(mph) >= 1.0 else 0),
-			"parkland wind on hole %d changed" % n)
+			sums[id] += Wind.for_hole(seed, 1, id, 0.0).length()
 	_expect(sums.links > sums.parkland * 1.2, "a links isn't windier than parkland")
 	_expect(sums.desert < sums.parkland * 0.8, "a desert isn't calmer than parkland")
 

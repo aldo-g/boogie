@@ -42,6 +42,57 @@ static func all() -> Array:
 	return _courses
 
 
+# --- The ladder ---------------------------------------------------------
+# The game's courses open one at a time, in picker order: a course is
+# locked until a finished round on the one before it came in at QUALIFY
+# over par or better (Records: any round recorded on this machine). The
+# first is always open, and so is anything saved from the editor.
+# Settings' "open_all" opens the lot.
+const QUALIFY := 5
+
+
+# What stands between the player and course `id`: {} if it is open, else
+# { name, id, target, best } — the course to score on, the strokes over par
+# to match, and the best round there so far ({} with none).
+static func lock_on(id: String) -> Dictionary:
+	if bool(Settings.get_value("open_all")):
+		return {}
+	var list := all()
+	for i in range(1, list.size()):
+		if list[i].id != id:
+			continue
+		var best := Records.best_round(Records.key_for(str(list[i - 1].id)))
+		if not best.is_empty() and int(best.diff) <= QUALIFY:
+			return {}
+		return {"name": list[i - 1].name, "id": list[i - 1].id, "target": QUALIFY, "best": best}
+	return {}
+
+
+# The course after `id` in the ladder ({} after the last, or for a course
+# that isn't one of the game's).
+static func next_after(id: String) -> Dictionary:
+	var list := all()
+	for i in range(list.size() - 1):
+		if list[i].id == id:
+			return list[i + 1]
+	return {}
+
+
+# The first course still locked, as lock_on() gives it, or {} with every
+# course open. The tour plays them all, so it waits for this to be empty.
+static func first_lock() -> Dictionary:
+	for c in all():
+		var lock := lock_on(str(c.id))
+		if not lock.is_empty():
+			return lock
+	return {}
+
+
+# "5 over par or better", "level par or better".
+static func target_text(over: int) -> String:
+	return "%s or better" % ("level par" if over == 0 else "%d %s par" % [absi(over), "over" if over > 0 else "under"])
+
+
 # A fresh copy of one course, or {} if there's no course with that id.
 static func course(id: String) -> Dictionary:
 	for c in all():
