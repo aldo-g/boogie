@@ -58,6 +58,11 @@ static var tour_bag: Array = []
 static var tour_brands: Array = []
 static var tour_results: Array = []
 
+# A round being picked up again: what RoundSave.read() returned, set by
+# RoundSave.restore_setup() on the title screen and taken by the game
+# scene as it starts. Empty for a fresh round.
+static var resume: Dictionary = {}
+
 
 static func start_tour() -> void:
 	reset_to_local(1)
@@ -74,6 +79,7 @@ static func reset_to_local(count: int) -> void:
 	tour_bag = []
 	tour_brands = []
 	tour_results = []
+	resume = {}
 	cpu_seats = {}
 	online = false
 	my_seat = 0

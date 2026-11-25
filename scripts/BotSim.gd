@@ -35,6 +35,10 @@ var BotSimMain: GDScript
 #   gift=<A>+<B>         start with these clubs added to the bag
 #   blank=power|brand    ...stripped of their ability, or of their brand
 #   starter=std          standard Driver / 7-Iron / Putter instead of Bogey-Mart
+#   noopen               the round starts on the first tee with the starter bag,
+#                        not at the pro shop (Main.begin_round)
+#   cap=<n>              a hole is picked up at n times its par (game:
+#                        ShotRules.DEFAULT_PAR_MULT)
 #   fixed=<k>            no draft: a fixed bag of k brandless clubs chosen
 #                        for yardage coverage, plus a putter
 #   putt=<n>             how far out the bot's read of a putt is, in thousandths (default 100)
@@ -113,7 +117,9 @@ func _play(round_seed: int, v: Dictionary) -> Dictionary:
 	main.build_ui()
 	main.init_game()
 	_shape_bag(main.players[0], v)
-	main.start_hole()
+	main.opening_draft = not v.has("noopen")
+	ShotRules.par_mult = int(v.get("cap", ShotRules.DEFAULT_PAR_MULT))
+	main.begin_round()
 	main.map_view.skip_animation = true
 
 	var bot := GreedyBot.new(round_seed)
@@ -131,13 +137,19 @@ func _play(round_seed: int, v: Dictionary) -> Dictionary:
 		bot.putt_error = float(v.putt) / 1000.0
 	if v.has("aim"):
 		bot.aim_error = float(v.aim)
-	var seen_holes := 1
+	# Nothing is logged for a hole until its tee, so what the bot notes
+	# before the first one is the opening stop at the pro shop.
+	var seen_holes: int = main.hole_log.size()
+	var opening_notes: Dictionary = {}
 	var hole_notes: Array = []
 	var actions := 0
 	while main.state != main.State.DONE and actions < MAX_ACTIONS:
 		actions += 1
 		if main.hole_log.size() != seen_holes:
-			hole_notes.append(bot.notes)
+			if seen_holes == 0:
+				opening_notes = bot.notes
+			else:
+				hole_notes.append(bot.notes)
 			bot.reset_log()
 			seen_holes = main.hole_log.size()
 		if not bot.act(main):
@@ -159,7 +171,7 @@ func _play(round_seed: int, v: Dictionary) -> Dictionary:
 			h.merge(hole_notes[i], true)
 		holes.append(h)
 	var rec := {"seed": round_seed, "total": p.total_strokes(), "par": p.total_par(),
-		"live": p.live_brands, "holes": holes,
+		"live": p.live_brands, "holes": holes, "opening": str(opening_notes.get("draft", "")),
 		"final_bag": p.hand.map(func(c): return c.name),
 		# Growth (ClubAbilities): what the bag ended the round having gained.
 		"curses": main.curses,

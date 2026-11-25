@@ -37,6 +37,12 @@ var drifts: Array = []
 var holes_to_play := 18
 var phase := "connecting"
 var settle := 0
+# ...and a little real time as well as frames: idle frames pass in
+# microseconds, and a packet over a real socket does not. Without it, about
+# one run in six checked the client before the host's broadcast had landed
+# (2026-11-25), and the client then acted on a stale rack.
+const SETTLE_MSEC := 25
+var _settle_until := 0
 var _pending_check := false
 var _host_root: Node
 var _cli_root: Node
@@ -108,6 +114,9 @@ func _roll_payload() -> Dictionary:
 	# Ability loadouts, so the round exercises club abilities online.
 	for i in range(scratch.players.size()):
 		scratch.players[i].hand = TestBags.loadout(i)
+	# The round opens at the pro shop: the host deals every seat's rack.
+	scratch.online = true
+	scratch.deal_opening()
 	var p: Dictionary = scratch.build_round_payload()
 	scratch.free()
 	return p
@@ -124,7 +133,7 @@ func _spawn_game(parent: Node, payload: Dictionary, seat: int, is_host: bool):
 	g.my_seat = seat
 	g.build_ui()
 	g.apply_round_payload(payload)
-	g.start_hole()
+	g.begin_round()
 	g.map_view.skip_animation = true
 	g.connect_net_signals()
 	g.set_meta("is_host", is_host)
@@ -155,8 +164,8 @@ func _process(_delta: float) -> bool:
 
 func _play_step() -> bool:
 	# Let in-flight RPCs land before reading state or acting again.
-	if settle > 0:
-		settle -= 1
+	if settle > 0 or Time.get_ticks_msec() < _settle_until:
+		settle = maxi(settle - 1, 0)
 		return false
 	if _pending_check:
 		_pending_check = false
@@ -231,6 +240,7 @@ func _play_step() -> bool:
 	# would compare the host's new state against a client that has not
 	# been told yet.
 	settle = 30
+	_settle_until = Time.get_ticks_msec() + SETTLE_MSEC
 	_pending_check = true
 	return false
 

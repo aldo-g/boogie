@@ -44,11 +44,31 @@ static func all() -> Array:
 
 # --- The ladder ---------------------------------------------------------
 # The game's courses open one at a time, in picker order: a course is
-# locked until a finished round on the one before it came in at QUALIFY
-# over par or better (Records: any round recorded on this machine). The
-# first is always open, and so is anything saved from the editor.
-# Settings' "open_all" opens the lot.
-const QUALIFY := 5
+# locked until a finished round on the one before it came in at that
+# rung's target over par or better (Records: any round recorded on this
+# machine). The first is always open, and so is anything saved from the
+# editor. Settings' "open_all" opens the lot.
+#
+# The targets step down the ladder (2026-11-25; one figure of 5 before):
+# 5 over on the first course opens the second, 3 over there the third,
+# and level par the fourth. The courses play about equally hard, so the
+# target is what climbs. A course past the end of the list takes the last.
+const QUALIFY := [5, 3, 0]
+
+
+# Strokes over par a round on the `rung`th course (0 is the first) has to
+# match to open the next one.
+static func target(rung: int) -> int:
+	return int(QUALIFY[clampi(rung, 0, QUALIFY.size() - 1)])
+
+
+# ...and the same for a course by its id.
+static func target_on(id: String) -> int:
+	var list := all()
+	for i in range(list.size()):
+		if list[i].id == id:
+			return target(i)
+	return target(0)
 
 
 # What stands between the player and course `id`: {} if it is open, else
@@ -61,10 +81,15 @@ static func lock_on(id: String) -> Dictionary:
 	for i in range(1, list.size()):
 		if list[i].id != id:
 			continue
-		var best := Records.best_round(Records.key_for(str(list[i - 1].id)))
-		if not best.is_empty() and int(best.diff) <= QUALIFY:
+		# A course that has been played stays open: nothing earned under an
+		# easier target is taken back when a target moves.
+		var own := Records.key_for(id)
+		if Records.rounds_played(own) > 0 or Records.hole_best(1, own) > 0:
 			return {}
-		return {"name": list[i - 1].name, "id": list[i - 1].id, "target": QUALIFY, "best": best}
+		var best := Records.best_round(Records.key_for(str(list[i - 1].id)))
+		if not best.is_empty() and int(best.diff) <= target(i - 1):
+			return {}
+		return {"name": list[i - 1].name, "id": list[i - 1].id, "target": target(i - 1), "best": best}
 	return {}
 
 

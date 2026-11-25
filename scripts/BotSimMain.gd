@@ -4,7 +4,7 @@ extends "res://scripts/Main.gd"
 # Main.gd for the balance harness (BotSim.gd) — a dev tool, not shipped.
 #
 # Plays the real rules, with three changes:
-#   - the screen is never redrawn, logged to or narrated (speed: the bot
+#   - the screen is never redrawn or narrated (speed: the bot
 #     reads state, not widgets);
 #   - each hole is recorded: wind, hazards found, bad cards the Form deck
 #     gained, and the bag it was played with;
@@ -29,14 +29,6 @@ var curses: int = 0              # curses that landed on a club this round
 
 
 func refresh_ui() -> void:
-	pass
-
-
-func rebuild_log() -> void:
-	pass
-
-
-func log_msg(_text: String) -> void:
 	pass
 
 

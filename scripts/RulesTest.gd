@@ -392,6 +392,13 @@ const KNOWN_POWERS := ["gold_cleek", "bulger", "old_tom", "rutter", "old_reliabl
 	"surgeon", "gambler", "old_faithful", "metronome", "chameleon"]
 
 
+func _index_of(bag: Array, name: String) -> int:
+	for i in range(bag.size()):
+		if bag[i].name == name:
+			return i
+	return -1
+
+
 func _club(name: String) -> Dictionary:
 	for c in _all_clubs():
 		if c.name == name:
@@ -1034,8 +1041,8 @@ func _check_growth() -> void:
 	var tempo_n: int = ShotRules.draw_form(FormDeck.new(), [tempo_club], tempo_club, 120, "fairway", {}, [], 1).cards.size()
 	_expect(tempo_n == plain_n + 1, "Tempo's card is one more in the next hand (%d, %d)" % [plain_n, tempo_n])
 
-	# A hole costs triple par at most.
-	_expect(ShotRules.hole_cap(3) == 9 and ShotRules.hole_cap(5) == 15, "a hole is capped at triple par")
+	# A hole costs double par at most.
+	_expect(ShotRules.hole_cap(3) == 6 and ShotRules.hole_cap(5) == 10, "a hole is capped at double par")
 
 	# The route: the same for every machine, the pro shop always one of the two.
 	var Route := preload("res://scripts/Route.gd")
@@ -1102,6 +1109,14 @@ func _check_draft_rules() -> void:
 		"one trade a draft, and not after a pick")
 	_expect(not DraftRules.can_trade(plain, 0, false, DraftRules.MAX_OFFERS), "no trade into a full rack")
 	_expect(not DraftRules.can_trade([_club("Putter")], 0, false, 3), "the last club can't be traded")
+	# A bag always holds a putter: the only one can't leave, unless a putter comes in for it.
+	_expect(not DraftRules.can_leave(plain, _index_of(plain, "Putter")), "the only putter can't leave the bag")
+	_expect(DraftRules.can_leave(plain, _index_of(plain, "Driver")), "any other club can")
+	_expect(DraftRules.can_leave(plain, _index_of(plain, "Putter"), _club("Titanist Blade Putter")), "the only putter can go for another putter")
+	_expect(not DraftRules.can_leave(plain, _index_of(plain, "Putter"), _club("5-Iron")), "...but not for an iron")
+	var two_putters: Array = plain + [_club("Titanist Blade Putter")]
+	_expect(DraftRules.can_leave(two_putters, _index_of(two_putters, "Putter")), "with two putters, one can leave")
+	_expect(GreedyBot.choose_discard(plain, _club("5-Iron")) != _index_of(plain, "Putter"), "the bot never cuts its only putter")
 
 	# The new riders switch on at the draft like the old ones.
 	_expect(_texts(DraftAdvisor.gains([_club("The Surgeon")], _club("Titanist 4-Iron"))).contains("Switches on: The Surgeon"),

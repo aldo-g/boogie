@@ -35,12 +35,16 @@ const ROUGH_DECAY_CHANCE := 1.0 / 5.0
 
 # The most a hole can cost: this many times its par, and the ball is
 # picked up. A hole can otherwise be unfinishable (an island green found
-# from the same spot every time).
-const MAX_PAR_MULT := 3
+# from the same spot every time). Double par is the pick-up golfers
+# already play to; it was triple until 2026-11-25, when one hole could
+# spend most of a round's strokes in hand. A static var, like
+# Brands.top_tier, so BotSim's cap=<n> can measure another size.
+const DEFAULT_PAR_MULT := 2
+static var par_mult: int = DEFAULT_PAR_MULT
 
 
 static func hole_cap(par: int) -> int:
-	return par * MAX_PAR_MULT
+	return par * par_mult
 
 
 # A range session (skipping an end-of-hole draft) purges this many bad

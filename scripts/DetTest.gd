@@ -95,7 +95,7 @@ func _make_instance():
 		m.player_count = 2
 		m.build_ui()
 		m.init_game()
-		m.start_hole()
+		m.begin_round()
 	m.map_view.skip_animation = true
 	return m
 
@@ -125,6 +125,12 @@ func _serialize_player(p) -> Dictionary:
 		"putt_dist": p.putt_dist,
 		"yips_pending": p.yips_pending,
 		"round_scores": p.round_scores.duplicate(true),
+		# The opening rack: dealt before any action has been sent.
+		"draft_options": p.current_draft_options.duplicate(true),
+		"draft_keeps": p.draft_keeps,
+		"draft_stop": p.draft_stop,
+		"draft_boosts": p.draft_boosts.duplicate(),
+		"draft_tape": p.draft_tape.duplicate(),
 	}
 
 
@@ -145,6 +151,11 @@ func _apply_player(p, d: Dictionary) -> void:
 	p.putt_dist = d.putt_dist
 	p.yips_pending = d.yips_pending
 	p.round_scores = d.round_scores.duplicate(true)
+	p.current_draft_options = d.draft_options.duplicate(true)
+	p.draft_keeps = d.draft_keeps
+	p.draft_stop = d.draft_stop
+	p.draft_boosts = d.draft_boosts.duplicate()
+	p.draft_tape = d.draft_tape.duplicate()
 
 
 # The game's own wire format, so created cards keep their mark.
@@ -158,10 +169,12 @@ func _cards_from_names(names: Array) -> Array:
 
 func _copy_state(src, dst) -> void:
 	dst.current_hole_index = src.current_hole_index
+	dst._opening = src._opening                        # sent in the round payload
 	dst.wind_seed = src.wind_seed                      # sent in the round payload
 	# Derived, never sent: the hole, its wind and its pin all come out of
-	# the hole number and that one seed.
-	dst.hole = HoleData.for_round(src.current_hole_index, src.wind_seed)
+	# the hole number and that one seed. (Before the first tee, the map
+	# already shows the first hole.)
+	dst.hole = HoleData.for_round(maxi(src.current_hole_index, 1), src.wind_seed)
 	dst.hole_yardage = dst.hole.yardage
 	dst.hole_par = dst.hole.par
 	dst.active_index = src.active_index

@@ -29,9 +29,14 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
 **The bag (deckbuilding-adjacent, but non-standard)**
 - Start with three Bogey-Mart clubs — Driver, 7-Iron, Putter. Deliberately the
   worst gear in the game: you start with it and only ever lose it.
+- **The round opens at the pro shop**: five clubs on the rack, keep two,
+  before the first tee. (Not in a guided first round, nor on the later
+  courses of a tour, where the clubs you carried over are the opening.)
 - At the **end of every hole but the last**, draw 3 clubs from a shared pool
   and permanently add 1 to your bag. The round ends on the final putt.
 - Bag caps at 14 clubs (a real club limit). Once full, discard before adding.
+- **A bag always holds a putter**: your only one can't be traded in, cut or
+  left behind on a tour, unless the club coming in for it is a putter.
 - Any club in the bag can be played for any shot.
 - No currency, no shop — the draw-3-pick-1 step is the entire acquisition
   system.
@@ -108,7 +113,7 @@ par; **2-4 players** can share a screen in hot-seat, and you can take on a
 - **The tour**: the four courses as one run, alone. Six clubs travel from
   each course to the next with everything they have gained, and each
   course allows two fewer strokes in hand (ten, eight, six, four).
-- **A hole costs triple par at most**: there, the ball is picked up.
+- **A hole costs double par at most**: there, the ball is picked up.
 - **Strokes in hand**: a solo round is played for keeps. You start with
   ten; every stroke over par spends one and every stroke under gives one
   back; with none left after a hole, the round is over.
@@ -218,6 +223,15 @@ wasn't started from the title screen: `Main.tscn` run on its own, the
 capture tool and the test harnesses leave your records alone, in a window
 or headless.
 
+**The round in progress** is kept in `user://round.save`, written at the
+stop after each hole and before the first tee. Leave a round (or a tour)
+and the title screen shows **Continue**, which picks it up at that stop;
+leave in the middle of a hole and you play that hole again from its tee.
+There is one save: starting another round replaces it (TEE OFF asks
+first), and finishing the round removes it. Local rounds only — solo,
+hot-seat, against the computer, the tour — and only ones started from the
+title screen; online rounds are the host's to run and are not saved.
+
 **Settings** (title screen, or the header's **Settings** mid-round) are
 kept in `user://settings.cfg` and apply as you change them: master, music
 and effects volume; shot animation (Normal, Fast, or Instant, which skips
@@ -276,9 +290,9 @@ badly each misjudges a line and how far out each one's read of a putt is.
 - You watch their turn: the club, the line on the map, the Form hand they
   drew, the card they keep (lit), then the
   shot. The pauses shorten with the shot-speed setting.
-- Nothing you press counts while they are up. The log says who leads after
-  every hole, and Charlie remarks on their good and bad holes, takes stock
-  at halfway and has the last word on the match.
+- Nothing you press counts while they are up. The scorecard carries a line
+  for each of you, and Charlie remarks on their good and bad holes, takes
+  stock at halfway and has the last word on the match.
 - Their round is never recorded. Yours is, as a "vs computer" round.
 
 ### Online play
@@ -322,7 +336,7 @@ a brand toward its next set, the shot it brings to your Form deck, and
 whether a Staff club would be asleep or awake in your bag. When the bag is
 full, each club you might cut says what cutting it would break.
 
-After every shot the log and the shot panel take it apart — **how far it
+After every shot the shot panel takes it apart — **how far it
 carried and rolled, and what the wind and the slope added or cost** — so
 the wind and elevation are something you can learn, not just suffer.
 
@@ -352,7 +366,9 @@ Bogey/
 │   ├── Capture.tscn       Screenshot capture helper
 │   └── CourseSheet.tscn   Paints every hole of a course into one PNG
 └── scripts/
-    ├── Main.gd            Game loop, state machine, UI construction
+    ├── Main.gd            Game loop, state machine, the shot screen
+    ├── BetweenHoles.gd    The pages between holes: the stops, the pro shop, the fitting bay, the hut, the card
+    ├── RoundSave.gd       The round in progress, saved at every stop and picked up from the title
     ├── ShotRules.gd       The rules of a stroke — tier, Form draw, lies, penalties, putt leaves
     ├── ClubAbilities.gd   What club text does: riders, created cards, charges, passives
     ├── Records.gd         Per-course bests and history, saved between sessions
@@ -381,6 +397,7 @@ Bogey/
     ├── RulesTest.gd       Rules and roster harness, no screen (dev tool)
     ├── TestBags.gd        Ability loadouts the flow harnesses play with (dev tool)
     ├── RecordsTest.gd     Records and settings persistence harness (dev tool)
+    ├── SaveTest.gd        Leaving a round and coming back (dev tool)
     ├── ShotResolver.gd    Shot math — distance, deviation, cup radius
     ├── FormCard.gd        A single Form card and its known effect
     ├── FormDeck.gd        The shared Form deck and per-tier draws
@@ -443,6 +460,11 @@ godot --headless --script res://scripts/RulesTest.gd
 # scratch files — never your own records
 godot --headless --script res://scripts/RecordsTest.gd
 
+# Leaving a round and coming back: what is saved and when, a second game
+# built from the save stands where the first did and plays on, a tour and
+# a computer golfer come back. Uses a scratch file — never your own save
+godot --headless --script res://scripts/SaveTest.gd
+
 # Full 18-hole rounds for 1-4 players: turn order, hole flow, bag caps
 godot --headless --script res://scripts/MPTest.gd
 
@@ -482,9 +504,11 @@ godot --headless --script res://scripts/CourseTest.gd
 ## Courses
 
 Four 18-hole courses ship with the game. They open one at a time: each is
-locked until you finish a round on the one before it at 5 over par or
-better (`QUALIFY` in `scripts/CourseLibrary.gd`), and the tour opens with
-the last of them. Settings can open them all. Step through them with the
+locked until you finish a round on the one before it at that rung's
+target or better — 5 over par on the first course, 3 over on the second,
+level par on the third (`QUALIFY` in `scripts/CourseLibrary.gd`) — and the
+tour opens with the last of them. A course you have played stays open.
+Settings can open them all. Step through them with the
 arrows beside the course name on the title screen.
 
 | Course | Terrain | Par | Yards | What it's like |
@@ -570,7 +594,10 @@ takes a few seconds.
 - **Multiplayer for 2-4 players, online or hot-seat** — furthest-from-pin
   turn order, per-player bags/Form decks/draft pools, standings and a
   winner; host-authoritative online with disconnect recovery
-- Starting Bogey-Mart bag; draw-3-pick-1 club draft after each hole but the
+- **A round you can leave**: saved at every stop, picked up from the title
+  with Continue — a tour between its courses too
+- Starting Bogey-Mart bag, and an opening pro shop (five on the rack, keep
+  two) before the first tee; draw-3-pick-1 club draft after each hole but the
   last (14-club cap, forced discard when full), with three ways to hunt for
   a club: **call the hole, dig, trade in**
 - **Brands, set bonuses at 2/4/8, per-run draft pools, and limited-edition
@@ -641,6 +668,11 @@ takes a few seconds.
   constants in `PuttMeter.gd`.
 - **Bag cap and gimme range** — `HAND_CAP` at the top of `Main.gd`;
   `GIMME_YARDS` in `scripts/ShotRules.gd`.
+- **The most a hole can cost** — `DEFAULT_PAR_MULT` in `scripts/ShotRules.gd`
+  (2: double par). **The ladder's targets** — `QUALIFY` in
+  `scripts/CourseLibrary.gd`. **Strokes in hand** — `STROKES_IN_HAND` in
+  `Main.gd`. BotSim's `noopen` and `cap=<n>` measure a round without the
+  opening shop, or with another cap.
 - **Club yardage bands, brands and card text** — `assets/data/clubs.json`.
   Standards appear `standard_copies` times in each run's pool; branded
   clubs only when their brand is live. `RulesTest` checks the file is

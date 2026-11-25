@@ -11,3 +11,6 @@ export_presets.cfg
 
 # macOS
 .DS_Store
+
+# Local switch: no windowed Godot launches from tools/launch_quiet.sh
+tools/NO_WINDOWS

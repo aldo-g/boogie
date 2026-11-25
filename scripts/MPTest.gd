@@ -56,7 +56,7 @@ func _check_tour() -> bool:
 		main.build_ui()
 		main.init_game()
 		main._apply_tour_carry()
-		main.start_hole()
+		main.begin_round()
 	var problems: Array = []
 	if main.hand.size() != kept.size() or int(main.hand.filter(func(c): return c.name == kept[0].name)[0].get("level", 0)) != 1:
 		problems.append("the bag did not travel (%d clubs)" % main.hand.size())
@@ -101,7 +101,7 @@ func _run_round(count: int, keeps: bool = false) -> bool:
 		main.player_count = count
 		main.build_ui()
 		main.init_game()
-		main.start_hole()
+		main.begin_round()
 
 	if main.players.size() != count:
 		print("players=%d -> FAIL (built %d players)" % [count, main.players.size()])

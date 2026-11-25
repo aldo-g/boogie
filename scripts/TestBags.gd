@@ -113,7 +113,10 @@ static func pick_hunt(main, chance: float) -> Dictionary:
 		moves.append({"kind": "dig", "payload": {}})
 	# Not from a small bag: the harnesses expect a bag to stay playable.
 	if main.hand.size() > 3 and _DraftRules.can_trade(main.hand, p.draft_taken, p.draft_traded, shown):
-		moves.append({"kind": "trade", "payload": {"index": randi() % main.hand.size()}})
+		# Never the only putter: a bag keeps one (DraftRules.can_leave).
+		var tradable: Array = range(main.hand.size()).filter(func(i): return _DraftRules.can_leave(main.hand, i))
+		if not tradable.is_empty():
+			moves.append({"kind": "trade", "payload": {"index": tradable.pick_random()}})
 	if p.draft_taken > 0:
 		moves.append({"kind": "done", "payload": {}})
 	if moves.is_empty():

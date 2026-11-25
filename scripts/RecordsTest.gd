@@ -116,7 +116,7 @@ func _check_course_identity() -> void:
 
 
 # The ladder: a course opens when the one before it has a finished round
-# at CourseLibrary.QUALIFY over par or better.
+# at that rung's target over par or better (CourseLibrary.target).
 func _check_ladder() -> void:
 	var ids: Array = CourseLibrary.all().map(func(c): return str(c.id))
 	_expect(CourseLibrary.lock_on(ids[0]).is_empty(), "the first course is open")
@@ -125,11 +125,22 @@ func _check_ladder() -> void:
 	_expect(not lock.is_empty() and str(lock.id) == ids[0], "the second course is locked behind the first")
 	_expect(not CourseLibrary.first_lock().is_empty(), "so the tour is locked too")
 	Course.use_builtin()
-	Records.record_round("You", 71 + CourseLibrary.QUALIFY + 1, 71, "solo")
+	Records.record_round("You", 71 + CourseLibrary.target(0) + 1, 71, "solo")
 	_expect(not CourseLibrary.lock_on(ids[1]).is_empty(), "a round one over the target doesn't open it")
-	Records.record_round("You", 71 + CourseLibrary.QUALIFY, 71, "solo")
+	Records.record_round("You", 71 + CourseLibrary.target(0), 71, "solo")
 	_expect(CourseLibrary.lock_on(ids[1]).is_empty(), "a round on the target opens it")
 	_expect(not CourseLibrary.lock_on(ids[2]).is_empty(), "the third course is still locked")
+	# The targets step down, and the lock says which one it is asking for.
+	_expect(CourseLibrary.target(1) < CourseLibrary.target(0) and CourseLibrary.target(2) < CourseLibrary.target(1),
+		"each rung should ask for a better round than the last")
+	_expect(int(CourseLibrary.lock_on(ids[2]).target) == CourseLibrary.target(1), "the third course's lock should ask for the second rung's target")
+	_expect(CourseLibrary.target_on(ids[1]) == CourseLibrary.target(1), "target_on should find a course's rung")
+	# A course that has been played stays open, whatever the round before it was.
+	Course.use_shipped(ids[2])
+	Records.record_round("You", 90, 72, "solo")
+	_expect(CourseLibrary.lock_on(ids[2]).is_empty(), "a course with a round on it should stay open")
+	Records.clear_course(Records.key_for(ids[2]))
+	Course.use_builtin()
 	Settings.set_value("open_all", true)
 	_expect(CourseLibrary.lock_on(ids[2]).is_empty() and CourseLibrary.first_lock().is_empty(), "the setting opens every course")
 	Settings.set_value("open_all", false)

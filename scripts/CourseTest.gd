@@ -436,7 +436,7 @@ func _check_custom_round() -> void:
 		"holes": [h1, Course.blank_hole(3), Course.blank_hole(5)]})))
 	var main = _new_main(2)
 	main.init_game()
-	main.start_hole()
+	main.begin_round()
 	var done := _play_round(main)
 	_expect(done, "3-hole custom round didn't finish")
 	for p in main.players:

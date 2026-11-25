@@ -22,6 +22,7 @@ const TITLE_FONT := preload("res://assets/fonts/AlexBrush-Regular.ttf")
 const Palette := preload("res://scripts/BogeyTheme.gd")
 const Rivals := preload("res://scripts/Rivals.gd")
 const CoursePlan := preload("res://scripts/CoursePlan.gd")
+const RoundSave := preload("res://scripts/RoundSave.gd")
 const MAIN_SCENE := "res://scenes/Main.tscn"
 const EDITOR_SCENE := "res://scenes/CourseEditor.tscn"
 
@@ -300,12 +301,20 @@ func _rebuild_panel() -> void:
 func _choose(what: String) -> void:
 	Sound.play("ui_click")
 	pick = what
+	_tee_armed = false
 	_set_status("Choose how you want to play")
 	_rebuild_panel()
 	_refresh_tee_off()
 
 
 func _build_menu() -> void:
+	# A round left unfinished (RoundSave.gd): one press picks it up.
+	var saved := RoundSave.read()
+	if not saved.is_empty():
+		var again := _tile("Continue", RoundSave.summary(saved), false, _on_resume_pressed.bind(saved), true)
+		again.tooltip_text = "Pick up the round you left, at the stop after the last hole you finished.\nStarting another round replaces it."
+		panel.add_child(again)
+
 	# On this screen: a round alone, hot-seat (2–4), the tour.
 	var here := VBoxContainer.new()
 	here.add_theme_constant_override("separation", 8)
@@ -489,7 +498,7 @@ func _rebuild_course() -> void:
 		if not (lock.best as Dictionary).is_empty():
 			rung += " (your best there: %s)" % Records.diff_text(int(lock.best.diff))
 	elif not next.is_empty() and not CourseLibrary.lock_on(str(next.id)).is_empty():
-		rung = "Score %s here to open %s" % [CourseLibrary.target_text(CourseLibrary.QUALIFY), next.name]
+		rung = "Score %s here to open %s" % [CourseLibrary.target_text(CourseLibrary.target_on(Course.active_id)), next.name]
 	if rung != "":
 		facts.add_child(BogeyUI.margin(BogeyUI.label(rung + ".", 13,
 			BogeyTheme.FLAG if not lock.is_empty() else BogeyTheme.FAIRWAY_DEEP), 0, 9, 0, 9))
@@ -550,6 +559,9 @@ func _refresh_tee_off() -> void:
 		_:
 			_tee_off.text = "TEE OFF"
 	_tee_off.tooltip_text = "A round alone on %s." % Course.active_name if pick == "play" else ""
+	if _tee_armed:
+		_tee_off.text = "REPLACE THE ROUND YOU LEFT?"
+		_tee_off.tooltip_text = "A round is saved. Press again to start this one in its place, or Continue to go back to it."
 
 
 # What the course in the picker is locked behind ({} if it is open; a
@@ -558,7 +570,18 @@ func _lock() -> Dictionary:
 	return CourseLibrary.lock_on(Course.active_id) if Course.active_path == "" else {}
 
 
+# Set once TEE OFF has been pressed with a round saved: the next press
+# starts the new round, which replaces the saved one.
+var _tee_armed := false
+
+
 func _on_tee_off_pressed() -> void:
+	if not _tee_armed and not RoundSave.read().is_empty():
+		_tee_armed = true
+		Sound.play("ui_click")
+		_refresh_tee_off()
+		return
+	_tee_armed = false
 	match pick:
 		"play":
 			_on_local_pressed(1)
@@ -595,6 +618,7 @@ func _course_choices() -> Array:
 
 func _on_course_step(courses: Array, index: int, step: int) -> void:
 	Sound.play("ui_click")
+	_tee_armed = false
 	var choice: Dictionary = courses[posmod(index + step, courses.size())]
 	var ok: bool = Course.use_shipped(str(choice.id)) if str(choice.id) != "" else Course.use_file(str(choice.path))
 	if not ok:
@@ -896,6 +920,13 @@ func _on_local_pressed(count: int) -> void:
 	get_tree().change_scene_to_file(MAIN_SCENE)
 
 
+# Back to the round that was left, where it was saved.
+func _on_resume_pressed(saved: Dictionary) -> void:
+	Sound.play("ui_confirm")
+	RoundSave.restore_setup(saved)
+	get_tree().change_scene_to_file(MAIN_SCENE)
+
+
 # The tour starts on the first of its courses, whatever the picker says.
 func _on_tour_pressed() -> void:
 	Sound.play("ui_confirm")
@@ -977,8 +1008,12 @@ func _on_start_pressed() -> void:
 func _roll_round(count: int, names: Dictionary) -> Dictionary:
 	var scratch = load(MAIN_SCENE).instantiate()
 	scratch.player_count = clampi(count, 1, MAX_PLAYERS)
+	scratch.online = true
 	scratch.init_game()
 	scratch.apply_seat_names(names)
+	# The round opens at the pro shop: every seat's rack is dealt here, so
+	# it travels with the round.
+	scratch.deal_opening()
 	var payload: Dictionary = scratch.build_round_payload()
 	scratch.free()
 	payload["seat_names"] = names
@@ -1003,8 +1038,10 @@ func _on_host_lost() -> void:
 
 
 func _on_round_starting(payload: Dictionary) -> void:
+	# Nothing of a round played alone on this machine comes along: not a
+	# tour, a guided round or a computer golfer.
+	GameSetup.reset_to_local(clampi(int(payload.get("player_count", 1)), 1, MAX_PLAYERS))
 	GameSetup.online = true
-	GameSetup.player_count = clampi(int(payload.get("player_count", 1)), 1, MAX_PLAYERS)
 	GameSetup.my_seat = maxi(Net.my_seat, 0)
 	GameSetup.seat_names = payload.get("seat_names", {})
 	GameSetup.round_payload = payload

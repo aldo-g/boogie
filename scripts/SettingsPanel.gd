@@ -82,7 +82,7 @@ func _build() -> void:
 		show_open.call())
 	show_open.call()
 	add_child(open_all)
-	add_child(BogeyUI.body("A course opens when you score %s on the one before it. Press to open them all." % CourseLibrary.target_text(CourseLibrary.QUALIFY), 12, BogeyTheme.NEUTRAL_600))
+	add_child(BogeyUI.body("A course opens when you score its target on the one before it: %s to open the second, and tighter from there. Press to open them all." % CourseLibrary.target_text(CourseLibrary.target(0)), 12, BogeyTheme.NEUTRAL_600))
 
 	add_child(BogeyUI.hairline(0.12))
 	add_child(BogeyUI.kicker("Learning the game"))

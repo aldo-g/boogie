@@ -14,6 +14,8 @@ You play a round of golf by building a permanent, ever-growing hand of clubs (yo
 
 Each course is a **fixed, designed layout** — all 18 holes have known yardage, par, hazard placement, and pin position. There's no random hole generation; you always know the course, and can learn it and develop strategy for it over repeat plays. Randomness lives in the Form draw, not the hole layout itself.
 
+**Before the first tee (2026-11-25):** the round opens at the pro shop, five clubs on the rack and two to keep (Section 3H). The steps below then run for each hole.
+
 1. **Move to the next hole** (yardage, par, hazards, and pin position are all known upfront).
 2. **Declare your shot**: choose a club from your Bag and your target (usually the pin, but can be a deliberate layup). This sets your swing tier for that club (see Section 4).
 3. **Draw 3 Form cards**, look at all 3, pick 1 to pair with your shot.
@@ -29,11 +31,12 @@ Each course is a **fixed, designed layout** — all 18 holes have known yardage,
 
 ## 3. The Bag (Collection-Building System)
 
-- You start with 3 cards: a **Bogey-Mart Driver, Putter and 7-Iron** — the cheap supermarket starter set, and deliberately the worst clubs in the game (Section 3A). They stay in your Bag until you choose to cut them, which is the run's first real goal.
+- You start with 3 cards: a **Bogey-Mart Driver, Putter and 7-Iron** — the cheap supermarket starter set, and deliberately the worst clubs in the game (Section 3A). They stay in your Bag until you choose to cut them, which is the run's first real goal. **Since 2026-11-25 the round opens at the pro shop** (Section 3H): five clubs on the rack and two to keep before the first tee, so the first hole is played with five clubs, not three.
 - **At the end of every hole but the last**, draw 3 cards from the shared club deck, look at all 3, and pick 1 to add permanently to your Bag. The 2 you didn't pick go to a discard pile, which reshuffles into the club deck when it runs dry.
 - Your Bag caps at **14 cards** (the real-club limit). Once full, you must discard a card before drawing again — a genuine "what's earning its place in the bag" decision.
 - You can play **any** card in your Bag for a shot — old standards or something you picked up on a previous hole.
-- Over an 18-hole round, this means up to 17 potential additions (until 2026-11-17 the game also dealt a draft after the 18th, for a club that could never be hit) — you'll likely hit the 14-card cap somewhere on the back nine, adding escalating "what do I cut" tension as the round progresses. **14 is fixed** — it's golf's actual club limit, and keeping it means the cap needs no explanation. The real squeeze comes from having to cover the course's yardage gaps with those 14 slots (Section 3A), not from the number itself.
+- **A bag always holds a putter** (Alastair's rule, 2026-11-25). The only putter can't be traded in, cut to make room for a new club, or left behind on a tour; it can go only when the club coming in for it is a putter. Its tile is greyed on those pages and says so. As built: `DraftRules.can_leave(bag, index, incoming)`, asked by `Main.on_trade_in`, `on_discard_pick` and `_on_pack_leave`, by the pages in `BetweenHoles.gd`, and by the bot before it cuts or trades. Until this date only a tour's packing kept it.
+- Over an 18-hole round, this means up to 17 potential additions (until 2026-11-17 the game also dealt a draft after the 18th, for a club that could never be hit) — you'll likely hit the 14-card cap somewhere on the back nine, adding escalating "what do I cut" tension as the round progresses. **14 is fixed** — it's golf's actual club limit, and keeping it means the cap needs no explanation. The real squeeze comes from having to cover the course's yardage gaps with those 14 slots (Section 3A), not from the number itself. (Two more come from the opening shop since 2026-11-25, and what the bag's cap does in play is in Open Questions.)
 - **Limited edition cards** are shuffled into the same shared club deck at lower odds. They follow the same club categories (Wood/Iron/Wedge/Putter) but have stronger yardage bands and a bonus ability tied to the Form Card System (see Section 4).
 - No currency involved — this is the entire acquisition system. Drafting happens once per hole, at the end of it.
 - **Every club brings its shots** (Section 4, "Clubs bring their shots"): two or three Form cards that join the deck with the club and leave with it, so the bag is the deck. And the draft can be **hunted in** rather than waited on: call the hole, dig, or trade in a club (Section 3D).
@@ -333,7 +336,7 @@ Until this date the draft could only be waited on. Every club came past about on
 - **The call is the one place the way you play a hole changes what you draft.** Before it, a birdie and a triple bogey were followed by the same three clubs. It is known information like everything else in the long game: made on the tee, free to take back until the first Form hand is drawn, shown in the shot panel for as long as the hole is played, and stamped with how it came out ("BIRDIE · called it").
 - **Keeping two.** After the first club is kept the draft stays open on what is left. A range session takes the place of one of the two. "That'll do" stops at one.
 - **A dig's card is a price, not a hazard.** It is rolled through the same gate as hazard decay, so online every machine adds the same card; MacGregorian's decay block does not stop it.
-- **Trading in is how Bogey-Mart goes early.** A club only used to leave a full bag, and the bag fills after hole 11, so the starter set could not be retired before the back nine (Section 3A). Any club can now be traded from the first draft. A bag cannot trade its last club.
+- **Trading in is how Bogey-Mart goes early.** A club only used to leave a full bag, and the bag fills after hole 11, so the starter set could not be retired before the back nine (Section 3A). Any club can now be traded from the first draft. A bag cannot trade its last club, nor its only putter (Section 3).
 - **Two limited editions bend these** (Section 3C): The Gambler pays a made call better and softens a missed one; Old Faithful digs for nothing.
 - **The computer golfers hunt too.** GreedyBot calls a hole it rates itself three-in-ten or better to birdie (`call_at`), trades in a club its bag would not miss, and digs when the rack offers next to nothing. It does not change how it plays a called hole, which a person would.
 
@@ -488,6 +491,7 @@ One of these, fixed with the route. Each can be walked on from.
 **A solo round is played for keeps.** It starts with **10 strokes in hand**; every stroke over par spends one and every stroke under gives one back; **with none left after a hole, the round is over.** (In other words: the round ends the moment it stands ten over par, plus or minus what the hut paid.) The count is on the hole panel, in claret from three down. A round stopped this way is not a course record and is not saved as one.
 
 - Why ten: the mid-skill bot stands ten over before the last hole in 9% of its rounds as built (96 rounds; 16% in the game before). Ten is a round a club golfer usually finishes and a careless one does not. The weekend-hacker bot averages fifteen over, so it would rarely finish.
+- **2026-11-25:** with the opening shop (Section 3H) and a hole capped at double par (Section 5) the mid-skill bot runs out in 7% of rounds (96 rounds; 15% that morning without them), and the weekend hacker in 65% (48 rounds). Ten was left alone.
 - **Not in hot-seat, online or against the computer**, where the others at the table are the stakes and putting a friend out of the round is no fun; and not in a test round from the course editor.
 
 ### The course bites later
@@ -526,6 +530,37 @@ A run was one round: the bag peaked around the 14th and was thrown away on the 1
 - **The cap is rare in sensible play**: nine holes in 144 rival rounds were picked up.
 
 **As built**: the carry is held in `GameSetup` (`tour`, `tour_leg`, `tour_bag`, `tour_brands`, `tour_results`) and each course is a fresh load of the game scene, so nothing about a round had to learn to change course mid-flight. `Main.gd`: `TOUR`, `TOUR_KEEP`, `TOUR_TIGHTEN`, `_apply_tour_carry`, `build_pack_row`, `strokes_allowance`. MPTest checks that a second course starts with the carried bag, a deck built from it and the tighter allowance. **Not measured**: no bot plays a tour, so six clubs and the 10-8-6-4 allowances are first guesses.
+
+---
+
+## 3H. The Opening Shop (2026-11-25)
+
+Until this date a round began on the first tee with the three Bogey-Mart clubs, the same three every time. Measured that morning (BotSim at Coley Niblick's settings, 96 rounds over the four courses): the first four holes cost 1.9 of the round's 2.5 strokes over par, 63% of the long shots on holes 1-6 were hit with a Bogey-Mart club, and a 4-set first stood on the 11th tee (the median), with seven holes left to use it. The front nine played 3.5 strokes harder than the back. The hardest and least varied part of the game was its first twenty minutes, and it was the same in every run.
+
+**The round now opens at the pro shop: five clubs on the rack, keep two, before the first tee.** It is the rack a made call pays (Section 3D), so there is no new rule to learn, and it is a pro shop like any other: a dig is open (a trade-in is not, since the rack is full at five). Then the first tee, with five clubs.
+
+- **Not in a guided round** (Section 7A), which starts with club, aim and card and nothing else; and **not on the later courses of a tour** (Section 3G), where the six clubs carried over are the opening.
+- In hot-seat each player takes the stop in turn. Online everyone does at once, and the host deals every seat's rack with the round, so it travels in the round payload like the decks.
+- The computer golfers take it too, as they take any pro shop.
+
+**Measured (2026-11-25)** — BotSim, `aim=13,putt=185`, 24 rounds on each of the four courses per arm on seeds 101-124, so 96 rounds an arm. One tree, with switches (`noopen`, `cap=3`); the arms are independent samples. The hole cap (Section 5) moved the same day, so it has a row of its own.
+
+| Arm | Against par | Front nine | Back nine | Holes 1-4 | Out of strokes in hand | A 4-set first on the tee (median) | ...by the 9th tee | One-card hands a round |
+|---|---|---|---|---|---|---|---|---|
+| The game that morning (first tee, triple par) | +2.51 ± 0.51 | +2.99 | -0.48 | +1.86 | 15% | 11th | 19% of rounds | 3.7 |
+| ...with a hole capped at double par | +2.29 ± 0.48 | +2.76 | -0.47 | +1.80 | 9% | 11th | 20% | 3.6 |
+| As built: the opening shop, and double par | +0.42 ± 0.51 | +1.51 | -1.09 | +1.09 | 7% | 9th | 51% | 2.2 |
+
+- **The game is about two strokes easier: 2.1 ± 0.7**, nearly all of it the opening shop (1.9 ± 0.7 against the cap-only row). The front nine gained 1.5 and the back 0.6. That puts it about where it stood on 2026-11-20 (+0.94), before the bent holes and the aimed putt made it harder. Not retuned: whether +0.4 for a club regular is where the game should sit is Alastair's call, and the levers are the ones Section 5 lists.
+- **The build arrives two holes sooner**: a 4-set stands on the 9th tee in half of all rounds, where it was one in five.
+- **The front nine is still the hard half**, by 2.6 strokes (3.5 before).
+- **The bag is nearer its cap**: 12.5 clubs on the 18th tee (11.9), 27% of rounds reach fourteen at some point, and a full bag forced a cut at 9 of 1,632 hole-ends (1 before). It is still the fork, not the cap, that squeezes the bag: see Open Questions.
+- **Bogey-Mart goes a little sooner**: 12% of rounds end with no Bogey-Mart wood or iron (2% before), and the driver is still in the bag at the end of 48% (78%). A bot going all out for a set trades them away and ends 63% of rounds with none. Retiring the set is a thing a player chooses to do; nothing was changed to force it.
+- **The top set** (Section 3A) was measured before the route existed, so it was measured again: an ordinary round reaches eight of a maker in 2% of rounds (2 of 96), and going all out (`allout`) in 72% (69 of 96), on the 14th tee. The figures were 8% and 99%. The bot going all out still leaves the pro shop for another stop seven times a round, so 72% is a floor for a person who does not. Alastair's test for the top tier was "rare, but achievable in a game if you go all out"; eight still passes it and stays. At seven the figures would be 4% and 96%.
+- **The rivals** on Bogey Links (48 rounds each, seeds 201-248): 82.5, 72.2 and 63.7, against 87.9, 74.2 and 66.2 on 2026-11-22, so `Rivals.gd` says +11, +1 and -7. The weekend hacker gains most.
+- **Not measured: people.** The bot picks its two clubs as it picks any club. Whether five on the rack is too much to read before a ball has been hit, for a player past the guided round, is for play to say.
+
+**As built**: `Main.begin_round()` starts every round, on the first tee or at the shop (`opens_at_shop()`). The stop is "the stop after hole 0": `_opening` is set, `current_hole_index` is 0 with the first hole on the map, `_draw_draft_options()` deals it as `DraftRules.OPENING`, and `finish_hole_done()` ends it like any other. Online: `deal_opening()` on the host, and the `opening` flag and each seat's rack in `build_round_payload()`. BotSim: `noopen`. **Defaults that were mine** (Alastair's instruction was "do all this", to a list that said to deal the draft a made call already pays before the first tee): leaving it out of guided rounds and of a tour's later courses, leaving the dig open, and the page's wording.
 
 ---
 
@@ -815,7 +850,7 @@ The simulations (Open Questions, below) said the round got easier as it went: th
 
 **The rivals** on Bogey Links now shoot 85.8, 74.5 and 66.6 (48 rounds each), against 80.2, 72.9 and 65.1 when they were first measured; `Rivals.gd` says +15, +4 and -4 accordingly. The weekend hacker has moved most: a tucked pin beside water punishes a bot that fires at every flag.
 
-**The most a hole can cost (2026-11-20): triple par.** A ball that has taken three times the hole's par in strokes is picked up and the hole is scored at that: 9 on a par 3, 12 on a par 4, 15 on a par 5 (`ShotRules.hole_cap`). In every mode. It ends the hole described next, which random play in the test harness still met about one solo round in fifteen.
+**The most a hole can cost: double par (2026-11-25; triple par from 2026-11-20).** A ball that has taken twice the hole's par in strokes is picked up and the hole is scored at that: 6 on a par 3, 8 on a par 4, 10 on a par 5 (`ShotRules.hole_cap`; the multiple is `ShotRules.par_mult`). In every mode. Double par is the pick-up golfers already play to. Why it moved: round scores have a standard deviation of 5 strokes where each layer of the design measures at a stroke or less, and at triple par one hole cost the mid-skill bot four over or worse in a quarter of its rounds, which is most of ten strokes in hand gone on one tee. At double par that is 16% of rounds (11% with the opening shop). On its own the change moved the average by 0.2 ± 0.7 strokes, which is nothing, and the rounds that run out of strokes in hand from 15% to 9% (Section 3H, "Measured"). Bogey Links' 17th, the island green, was left as it is: it costs the mid-skill bot half a stroke (+0.51 over 72 rounds) and is played to the cap in 15% of them. The figure of two is mine. It ends the hole described next, which random play in the test harness still met about one solo round in fifteen.
 
 **A hole that can't be finished.** An earlier run of these simulations, on the draining deck, found one: on an island green a ball in the water is replayed from where it was struck, and from rough beside the lake into a gale no club carries it — one easy-rival round in 48 took 117 on Bogey Links' 17th and a medium round never ended. It has not recurred in the 670-odd rounds played since the deck was mended (worst hole: 13), but nothing in the rules prevents it, and tucked pins and a livelier wind on the closing holes are the conditions for it. A maximum score per hole (the Rules of Golf's own "Maximum Score" format) would end it; not built, because it is a rule and not a tuning number.
 
@@ -934,6 +969,21 @@ Deck shuffles are deliberately **not** made deterministic. Doing so would need e
 
 ---
 
+### Leaving a round and coming back (2026-11-25)
+
+A round is an hour or more and a tour is four of them, and until this date nothing was kept: closing the game lost the round, and a tour lived only in memory.
+
+- **The round is saved at the stop after each hole, and before the first tee**: the state as the hole was scored, before anything is dealt at the stop. The title screen shows **Continue** with where the round stands ("Bogey Links · 6 holes played · +3"), and one press picks it up at that stop.
+- **Leaving in the middle of a hole means playing that hole again from its tee.** A finished hole is never lost. A save taken mid-hole would have to hold a ball in flight, a Form hand and a putt half read; the stop is the one place a round is at rest.
+- **A tour course that is finished is saved as finished**, with the bag still to pack, so a tour survives between its courses too.
+- **One save.** Starting another round from the title replaces it, and TEE OFF asks once before it does. Finishing the round, or running out of strokes in hand, removes it.
+- **Local rounds a player started, only**: solo, hot-seat, against the computer, guided, the tour. Not online, where the host runs the round; not editor test rounds; and never a harness or a capture (the gate is `Records.enabled`, the one the records use).
+- What comes back: the bags with everything the clubs have gained, the club pools, the Form decks in their order, the scores, the charges spent, strokes won and lost at the hut, a pocketed card, the call on the hole just scored, the lessons already said, and the tour so far. The route, the wind and the pins need no saving, since they come from the round's seed. What a fitting bay has on its bench, and whether a club on the rack is second-hand, are rolled again.
+
+**As built**: `scripts/RoundSave.gd` (the file, `user://round.save`, written with `store_var` so that hole numbers and levels stay whole numbers, which JSON would hand back as floats; `restore_setup()`, `summary()`), `Main.save_data()` / `apply_save()` / `resume_round()` / `_save_round()`, `GameSetup.resume`, the title's Continue tile, and `SaveTest.gd`. **Mine, not Alastair's** (he said "do all this" to "save between holes and keep the tour on disk"): one slot, saving at the stop and not mid-hole, the confirm on TEE OFF, and the title's wording.
+
+---
+
 ## 7A. The Guided Round (2026-11-25)
 
 A new player's first solo round brings the game in a piece at a time. Nothing is cut; pieces are held back by hole, and Charlie says what each one is the first time it turns up (`scripts/Lessons.gd`). Why: the first tee showed about ten ideas at once and the first pro shop five more, and the systems had outrun what a new player could take in.
@@ -961,7 +1011,7 @@ The schedule (which hole each piece opens on) and every line are in `Lessons.gd`
 
 ## 8. Course & Expansion Structure
 
-**The ladder (2026-11-24).** The game's courses open one at a time, in the picker's order: Bogey Links is open from the start, and each course after it is locked until a finished round on the one before came in at **5 over par or better** (`CourseLibrary.QUALIFY`; any round recorded on this machine counts, see Records). The tour waits until every course is open. The title screen shows a locked course faintly, says what would open it, and on an open course says what a round there would open; the end-of-round page says when a course has just opened. Courses saved from the editor are never locked, and Settings has a switch that opens everything. Alastair's calls: something to unlock, a target score as the key, and that difficulty should climb through the courses themselves and not through a separate ascension level or modifiers (harder courses are to be added later; the four that ship play about equally hard today). Mine: the figure of 5, one figure for every course, locking the tour, and the settings switch.
+**The ladder (2026-11-24).** The game's courses open one at a time, in the picker's order: Bogey Links is open from the start, and each course after it is locked until a finished round on the one before came in at **5 over par or better** (`CourseLibrary.QUALIFY`; any round recorded on this machine counts, see Records). The tour waits until every course is open. The title screen shows a locked course faintly, says what would open it, and on an open course says what a round there would open; the end-of-round page says when a course has just opened. Courses saved from the editor are never locked, and Settings has a switch that opens everything. Alastair's calls: something to unlock, a target score as the key, and that difficulty should climb through the courses themselves and not through a separate ascension level or modifiers (harder courses are to be added later; the four that ship play about equally hard today). Mine: the figure of 5, one figure for every course, locking the tour, and the settings switch. **2026-11-25: the target steps down the ladder.** 5 over on Bogey Links opens Windlestraw Links, 3 over there opens Mirage Mesa, and level par there opens Thin Air Ridge (`CourseLibrary.QUALIFY` is a list now; `target()`, `target_on()`). The courses play about equally hard, so the target is the one thing that climbs until harder courses are added. The mid-skill bot makes each rung's target in 79%, 83% and 67% of its rounds (72, 24 and 24 rounds, with the opening shop and double par in); the weekend hacker makes 5 over on Bogey Links in 15% of its rounds. A course that has a round on it stays open, so nothing opened under the single figure was taken back. Mine: the three figures and that rule. Wind, pins and strokes in hand were not used as a ladder, as Alastair asked on 2026-11-24.
 
 - **Base game**: 1 full 18-hole course with a fixed, designed layout (yardages and hazard placement fixed), plus the base hazard/bad-card set and the shared club deck (standards + limited editions).
 - **Custom courses (built 2026-10-16)**: an in-game course editor builds courses of 1-18 holes in the same format the base course uses — fairway centreline, green, bunkers, water, elevation and green tilt — and saves them as JSON. Any course can be picked for solo, hot-seat or online play; the host's course travels in the round payload and is sanitised on arrival. Shorter courses simply mean fewer holes and fewer drafts, so the Bag never fills: brand sets are much harder to complete on a 3- or 9-hole course, which is fine for quick games but is not the balance the design targets.
@@ -1023,6 +1073,7 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 15. ~~**Grow the clubs**~~ **Done** (2026-11-19) — every club brings its shots to a deck that starts at 25 cards and is dealt them alone, clubs wear in with use (a maker's club into its maker's gain), boosts at the fitting bay, and curses from water, out of bounds and second-hand clubs, each mended by one boost. See Sections 3E and 4.
 16. ~~**The way round**~~ **Done** (2026-11-19) — a fork after every hole (pro shop, or a fitting bay, the range or the hut), four things that can happen at the hut, a solo round played for ten strokes in hand, and trouble that bites harder late. See Section 3F.
 17. ~~**Seven follow-ups**~~ **Done** (2026-11-20) — growth shown on the bag tile, a hole capped at triple par, a livelier late wind and tighter late pins, the putter wearing in and going twitchy, the tour of four courses, Tempo and Pocket cards, and the hustler settled by a real putt. See Sections 3E, 3F, 3G, 4 and 5.
+18. ~~**The shape of a run**~~ **Done** (2026-11-25) — the round opens at the pro shop, a hole is capped at double par, a round and a tour are saved at every stop and picked up from the title, and the ladder's target steps down. In the code, `Main.gd` lost its play-by-play log (written by 103 calls and read by nothing since the log left the screen) and its between-holes pages, which are `BetweenHoles.gd`. See Sections 3H, 5, 7 and 8.
 
 ---
 
@@ -1049,3 +1100,4 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 - ~~Whether "Active" abilities need an explicit UI/UX moment~~ **Decided 2026-10-17:** yes — a button with its charges shown, in an Abilities box under the shot panel.
 - Whether the Bulger, Gold Cleek and Old Reliable charges are the right size. Gold Cleek in particular hands out a Pure Strike every hole; if it decides rounds, make it once per round with the Titanist Wood rider raising it to once every six holes.
 - **Whether the hunting moves, the signature shots and the Staff clubs do what they were built for (2026-11-17).** See Section 3D, "Measured". Still to learn from people rather than the bot: whether "five, keep two" against "only two" is the right size of bet (the bot's play does not change on a called hole, a person's will); whether a signature shot should stay in the deck once earned rather than leave with its club; whether Bomb's baggage is too cheap or too dear; and whether Staff clubs are taken early as bets or only once the set is nearly in.
+- **What the bag's cap does (2026-11-25).** Sections 3 and 3A lean on the 14-club cap for "what do I cut". Since the route (Section 3F) the bot takes the pro shop at about ten stops of seventeen, and its bag stood at 11.9 clubs on the 18th tee: one forced cut in 1,632 hole-ends. With the opening shop it is 12.5 clubs and nine cuts, and 27% of rounds touch fourteen (Section 3H). What squeezes the bag in play is the fork (a club, or a boost, or a cleaner deck), not the cap. Nothing was changed for it. If the cut is wanted back as a decision, the lever is how often the other stop is worth more than a club, not the number 14.

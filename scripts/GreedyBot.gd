@@ -886,7 +886,7 @@ func _cut_outside(bag: Array, maker: String, incoming = null) -> int:
 	for i in range(bag.size()):
 		var after: Array = bag.duplicate()
 		after.remove_at(i)
-		if int(Brands.counts(after).get(maker, 0)) < held:
+		if int(Brands.counts(after).get(maker, 0)) < held or not DraftRules.can_leave(bag, i, incoming):
 			continue
 		if incoming != null:
 			after.append(incoming)
@@ -905,6 +905,8 @@ func _dead_club(bag: Array) -> int:
 	var best := -1
 	var least := trade_below
 	for i in range(bag.size()):
+		if not DraftRules.can_leave(bag, i):
+			continue
 		var after: Array = bag.duplicate()
 		after.remove_at(i)
 		var loss := base - bag_score(after)
@@ -930,9 +932,12 @@ func birdie_chance(main) -> float:
 # Which club to cut so `incoming` fits: the one whose loss hurts least.
 # Never the last putter.
 static func choose_discard(bag: Array, incoming) -> int:
-	var best := 0
+	var best := -1
 	var best_score := -INF
 	for i in range(bag.size()):
+		# A bag keeps its only putter (DraftRules.can_leave).
+		if not DraftRules.can_leave(bag, i, incoming):
+			continue
 		var after: Array = bag.duplicate()
 		after.remove_at(i)
 		if incoming != null:
@@ -941,4 +946,4 @@ static func choose_discard(bag: Array, incoming) -> int:
 		if s > best_score:
 			best_score = s
 			best = i
-	return best
+	return maxi(best, 0)

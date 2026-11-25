@@ -29,6 +29,11 @@ extends RefCounted
 # doglegs and curves: 87.9, 74.2 and 66.2, so +17, +3 and -5. A bend's
 # inside corner is out of bounds, and the wilder the golfer the more it
 # costs: 4.2 strokes (se 1.2), 1.6 (0.7) and 1.9 (0.7).
+# Re-measured 2026-11-25 (same 48 seeds) after the round began to open at
+# the pro shop (five clubs on the first tee, not three) and a hole was
+# capped at double par: 82.5, 72.2 and 63.7, so +11, +1 and -7. The
+# weekend hacker gains most: 5.5 strokes (se 1.2), against 2.0 (1.0) and
+# 2.5 (0.7).
 # ---------------------------------------------------------
 
 const ORDER := ["easy", "medium", "hard"]
@@ -39,21 +44,21 @@ const SKILLS := {
 		"blurb": "Weekend hacker",
 		"aim": 19.0,     # yards of misjudgement per 100 yards of shot (sd)
 		"putt": 0.225,   # how far out its read of a putt is (GreedyBot.putt_error)
-		"typical": 17,   # strokes against par on the built-in course
+		"typical": 11,   # strokes against par on the built-in course
 	},
 	"medium": {
 		"name": "Coley Niblick",
 		"blurb": "Club regular",
 		"aim": 13.0,
 		"putt": 0.185,
-		"typical": 3,
+		"typical": 1,
 	},
 	"hard": {
 		"name": "Ace Marlin",
 		"blurb": "Scratch golfer",
 		"aim": 8.0,
 		"putt": 0.150,
-		"typical": -5,
+		"typical": -7,
 	},
 }
 

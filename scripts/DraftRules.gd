@@ -36,6 +36,9 @@ const CALL_NAME := "birdie"
 
 const MADE := "made"
 const MISSED := "missed"
+# The stop before the first tee (Main.begin_round): the round opens at the
+# pro shop, with the rack a made call pays.
+const OPENING := "opening"
 
 # A dig unsettles the swing with one of these families' own misses. Not the
 # putter's: its pile is too small to take one.
@@ -65,7 +68,7 @@ static func gambler_softens_miss(bag: Array) -> bool:
 # How many clubs the draft deals.
 static func offer_count(bag: Array, result: String) -> int:
 	match result:
-		MADE:
+		MADE, OPENING:
 			return OFFERS_MADE
 		MISSED:
 			return OFFERS if gambler_softens_miss(bag) else OFFERS_MISSED
@@ -76,6 +79,8 @@ static func offer_count(bag: Array, result: String) -> int:
 static func keep_count(bag: Array, result: String) -> int:
 	if result == MADE:
 		return KEEPS_MADE + (0 if _gambler(bag).is_empty() else 1)
+	if result == OPENING:
+		return KEEPS_MADE
 	return KEEPS
 
 
@@ -98,6 +103,18 @@ static func dig_costs_card(bag: Array) -> bool:
 # sessions) made in this draft, `digs` the digs, `offers` what is showing.
 static func can_dig(bag: Array, taken: int, digs: int, offers: int) -> bool:
 	return taken == 0 and offers > 0 and digs < dig_limit(bag)
+
+
+# --- The putter stays ---------------------------------------------------
+# A bag always holds a putter (Alastair, 2026-11-25). The only one can't be
+# traded in, cut for a new club or left behind on a tour; it can go when
+# the club coming in for it (`incoming`) is a putter.
+static func can_leave(bag: Array, index: int, incoming = null) -> bool:
+	if index < 0 or index >= bag.size() or not ClubAbilities.is_putter(bag[index]):
+		return true
+	if incoming is Dictionary and ClubAbilities.is_putter(incoming):
+		return true
+	return bag.filter(func(c): return ClubAbilities.is_putter(c)).size() > 1
 
 
 # --- Trading in ---------------------------------------------------------

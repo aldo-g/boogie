@@ -29,16 +29,11 @@ const CardFace := preload("res://scripts/CardFace.gd")
 const DraftRules := preload("res://scripts/DraftRules.gd")
 const Route := preload("res://scripts/Route.gd")
 const Lessons := preload("res://scripts/Lessons.gd")
+const RoundSave := preload("res://scripts/RoundSave.gd")
 
 # Parchment / fairway theme, shared with Title.gd via BogeyTheme.
 const COLOR_BG := Palette.PARCHMENT
-const COLOR_PANEL := Palette.PARCHMENT_RAISED
-const COLOR_TEXT := Palette.INK
 const COLOR_TEXT_SOFT := Palette.INK_SOFT
-const COLOR_ACCENT := Palette.FAIRWAY_DEEP
-const COLOR_SAND := Palette.SAND_DEEP
-const COLOR_WATER := Palette.WATER_DEEP
-const COLOR_FLAG := Palette.FLAG
 
 var state: int = State.DRAFT
 
@@ -110,6 +105,12 @@ const STROKES_IN_HAND := 10
 # Off for the flow harnesses, which play at random and must reach the 18th.
 var for_keeps: bool = true
 var _run_over: bool = false
+
+# The round opens at the pro shop (begin_round): true while that stop, the
+# one before the first tee, is being made. `opening_draft` is the switch a
+# harness turns off to play a round without it.
+var _opening: bool = false
+var opening_draft: bool = true
 # Guided round (Lessons.gd): lesson key -> the hole it was said on.
 var _taught: Dictionary = {}
 var _lesson_fresh: bool = false   # a lesson has been said since the player last acted
@@ -314,8 +315,6 @@ var course_line: Label                 # under the wordmark: "Bogey Links · Hol
 var elev_note: Label                   # beside the side view: "Flag level with you · 380 yds"
 var hole_plate: Control                # the map's mount, for the caddy to sit in
 
-# The hole's record, newest first — see log_msg(). Recorded, not shown.
-var log_entries: Array = []
 var scorecard: ScorecardView
 var brand_rack: HBoxContainer          # brand swatches, in the bag header — hover for the set's clubs and bonuses
 var hole_title: Label
@@ -343,6 +342,14 @@ func _ready() -> void:
 		Course.use_shipped(TOUR[clampi(GameSetup.tour_leg, 0, TOUR.size() - 1)])
 	build_ui()
 
+	if not online and not GameSetup.resume.is_empty():
+		# A round left earlier, picked up at the stop it was saved at.
+		var saved := GameSetup.resume
+		GameSetup.resume = {}
+		apply_save(saved)
+		resume_round(saved)
+		return
+
 	if online and not GameSetup.round_payload.is_empty():
 		# Online: the host already rolled every deck and sent it, so adopt
 		# that rather than rolling our own — otherwise no two machines
@@ -358,7 +365,183 @@ func _ready() -> void:
 	if online:
 		connect_net_signals()
 
-	start_hole()
+	begin_round()
+
+
+# Whether a round opens at the pro shop, before the first tee: five clubs
+# on the rack and two to keep (DraftRules.OPENING), so no two rounds start
+# with the same bag and the first holes aren't played with three clubs.
+# Not a guided round, which starts with club, aim and card and nothing
+# else; and not a later course of a tour, where the clubs carried over are
+# the opening.
+func opens_at_shop() -> bool:
+	if not opening_draft or Course.hole_count() <= 0:
+		return false
+	# Online there is no guided round and no tour, whatever this machine
+	# last played alone.
+	if online:
+		return true
+	return not guided() and not (GameSetup.tour and GameSetup.tour_leg > 0)
+
+
+# Starts the round the players have just been dealt: at the pro shop, or
+# on the first tee. Online the host has dealt every seat's rack already
+# (deal_opening) and it came with the round, so nothing is dealt here.
+func begin_round() -> void:
+	_save_round(0)
+	current_hole_index = 1
+	if not online:
+		_opening = opens_at_shop()
+	if not _opening:
+		start_hole()
+		return
+	# The stop before the first tee is "the stop after hole 0", with the
+	# first hole on the map so the rack can be read against it.
+	current_hole_index = 0
+	hole = HoleData.for_round(1, wind_seed)
+	hole_yardage = hole.yardage
+	hole_par = hole.par
+	for p in players:
+		p.ball_pos = hole.tee_pos
+		p.shot_path = [hole.tee_pos]
+	active_index = 0
+	sync_map_to_active()
+	if online:
+		_simul_draft = true
+		_show_simultaneous_draft()
+		return
+	_begin_stops()
+
+
+# --- Leaving a round and coming back (RoundSave.gd) -----------------------
+# The round is saved at the stop after each hole, as the hole was scored
+# and before anything is dealt there, and before the first tee. Only a
+# local round a player started from the title: the gate is the one the
+# records use, so no harness, capture or editor test round writes a save
+# (or clears the player's).
+
+func _saves() -> bool:
+	return Records.enabled and not online and not GameSetup.return_to_editor
+
+
+# `holes_done` is how many holes are scored; `done` marks a tour course
+# that is finished with the bag still to pack for the next.
+func _save_round(holes_done: int, done: bool = false) -> void:
+	if _saves():
+		RoundSave.write(save_data(holes_done, done))
+
+
+func save_data(holes_done: int, done: bool = false) -> Dictionary:
+	var out: Array = []
+	for p in players:
+		out.append({
+			"name": p.name,
+			"cpu_skill": p.cpu_skill,
+			"hand": p.hand.duplicate(true),
+			"club_deck": p.club_deck.duplicate(true),
+			"club_discard": p.club_discard.duplicate(true),
+			"live_brands": p.live_brands.duplicate(),
+			"form_deck": form_card_names(p.form_deck.deck),
+			"form_discard": form_card_names(p.form_deck.discard),
+			"round_scores": p.round_scores.duplicate(true),
+			"ability_log": p.ability_log.duplicate(true),
+			"hand_bonus": p.hand_bonus,
+			"tempo": p.tempo,
+			"pocket": form_card_names(p.pocket),
+			# The call on the hole just scored: the stop that follows pays it.
+			"call_result": p.call_result,
+		})
+	return {
+		"version": RoundSave.VERSION,
+		"players": out,
+		"wind_seed": wind_seed,
+		"hole": holes_done,
+		"done": done,
+		"course": Course.to_wire(Course.active()),
+		"course_id": Course.active_id,
+		"course_path": Course.active_path,
+		"course_name": Course.active_name,
+		"guided": GameSetup.guided,
+		"taught": _taught.duplicate(),
+		"tour": {"on": GameSetup.tour, "leg": GameSetup.tour_leg,
+			"bag": GameSetup.tour_bag.duplicate(true), "brands": GameSetup.tour_brands.duplicate(),
+			"results": GameSetup.tour_results.duplicate(true)},
+	}
+
+
+# Rebuilds the players from a save, in place of init_game(). The course
+# and GameSetup were put back by RoundSave.restore_setup() before the
+# scene loaded.
+func apply_save(data: Dictionary) -> void:
+	_cpu_reset()
+	_run_over = false
+	_opened_course = ""
+	_hustle = false
+	wind_seed = int(data.get("wind_seed", 0))
+	_taught = (data.get("taught", {}) as Dictionary).duplicate()
+	players = []
+	_bots = {}
+	var entries: Array = data.get("players", [])
+	for i in range(entries.size()):
+		var e: Dictionary = entries[i]
+		var p := Player.new(str(e.get("name", "Player")))
+		p.hand = (e.get("hand", []) as Array).duplicate(true)
+		p.club_deck = (e.get("club_deck", []) as Array).duplicate(true)
+		p.club_discard = (e.get("club_discard", []) as Array).duplicate(true)
+		p.live_brands = (e.get("live_brands", []) as Array).duplicate()
+		p.form_deck = FormDeck.new()
+		p.form_deck.deck = form_cards_from_names(e.get("form_deck", []))
+		p.form_deck.discard = form_cards_from_names(e.get("form_discard", []))
+		p.round_scores = (e.get("round_scores", []) as Array).duplicate(true)
+		p.ability_log = (e.get("ability_log", {}) as Dictionary).duplicate(true)
+		p.hand_bonus = int(e.get("hand_bonus", 0))
+		p.tempo = int(e.get("tempo", 0))
+		p.pocket = form_cards_from_names(e.get("pocket", []))
+		p.call_result = str(e.get("call_result", ""))
+		var skill := str(e.get("cpu_skill", ""))
+		if Rivals.has(skill):
+			p.cpu_skill = skill
+			_bots[i] = Rivals.make_bot(skill, hash([Time.get_ticks_usec(), i]))
+			cpu_seats[i] = skill
+		players.append(p)
+	player_count = players.size()
+	active_index = 0
+
+
+# Picks a saved round up where it was left: before the first tee, at the
+# stop after the last hole scored, or on the card of a finished tour course.
+func resume_round(data: Dictionary) -> void:
+	var holes_done := clampi(int(data.get("hole", 0)), 0, Course.hole_count())
+	if holes_done <= 0:
+		begin_round()
+		return
+	current_hole_index = holes_done
+	hole = HoleData.for_round(holes_done, wind_seed)
+	hole_yardage = hole.yardage
+	hole_par = hole.par
+	for p in players:
+		# In the hole, as they were when it was scored.
+		p.ball_pos = hole.pin_pos
+		p.shot_path = [hole.pin_pos]
+		p.current_lie = "green"
+		p.holed_out = true
+	active_index = 0
+	sync_map_to_active()
+	if bool(data.get("done", false)) or holes_done >= Course.hole_count():
+		state = State.DONE
+		refresh_ui()
+		return
+	_begin_stops()
+
+
+# Host only, online: deals every seat's opening rack on the round being
+# rolled, so it travels in the payload (build_round_payload) and no
+# machine deals its own.
+func deal_opening() -> void:
+	_opening = opens_at_shop()
+	if _opening:
+		current_hole_index = 0
+		_deal_simultaneous_draft()
 
 
 # Subscribes to the connection events this round needs. Its own method
@@ -756,57 +939,10 @@ func caddy_says(kind: String, ctx: Dictionary = {}, everyone: bool = false, wait
 	caddy.react(kind, ctx, wait)
 
 
-# The record of the hole — every stroke, penalty and ruling, newest
-# first — as {tag, head, body} entries. Callers pass bbcode-ish strings;
-# this strips the markup, takes a leading "[b]...[/b]" run as the entry's
-# headline and a "Stroke N" opener as its tag.
-#
-# Recorded, not shown: the sheet has no play-by-play column. What the
-# player needs from the last shot is in the shot panel.
-func log_msg(text: String) -> void:
-	var clean := strip_markup(text)
-	if clean.strip_edges() == "":
-		return
-
-	var tag := "Note"
-	var head := ""
-	var body := clean
-
-	# "Stroke 3 — played Hook with Driver (lie: fairway)" splits into a
-	# "Stroke 3" tag and the rest as the headline.
-	if clean.begins_with("Stroke "):
-		var dash := clean.find(" — ")
-		if dash > 0:
-			tag = clean.substr(0, dash)
-			head = clean.substr(dash + 3)
-			body = ""
-	elif text.begins_with("[b]"):
-		var close := text.find("[/b]")
-		if close > 0:
-			head = strip_markup(text.substr(3, close - 3))
-			body = strip_markup(text.substr(close + 4))
-			tag = "Hole"
-
-	log_entries.push_front({"tag": tag, "head": head.strip_edges(), "body": body.strip_edges()})
-
-
-# Drops bbcode tags, leaving the plain words.
-func strip_markup(text: String) -> String:
-	var out := ""
-	var depth := 0
-	for i in text.length():
-		var ch := text[i]
-		if ch == "[":
-			depth += 1
-		elif ch == "]":
-			if depth > 0:
-				depth -= 1
-		elif depth == 0:
-			out += ch
-	return out
-
-
 func clear_container(c: Container) -> void:
+	# A harness that never builds the screen has no containers to clear.
+	if c == null:
+		return
 	for child in c.get_children():
 		child.queue_free()
 
@@ -879,8 +1015,16 @@ func build_round_payload() -> Dictionary:
 			"live_brands": p.live_brands.duplicate(),
 			"form_deck": form_card_names(p.form_deck.deck),
 			"form_discard": form_card_names(p.form_deck.discard),
+			# The opening rack, when the round opens at the pro shop.
+			"draft_options": p.current_draft_options.duplicate(true),
+			"draft_keeps": p.draft_keeps,
+			"draft_stop": p.draft_stop,
+			"draft_stage": p.draft_stage,
+			"draft_boosts": p.draft_boosts.duplicate(),
+			"draft_tape": p.draft_tape.duplicate(),
 		})
-	return {"players": out, "course": Course.to_wire(Course.active()), "wind_seed": wind_seed}
+	return {"players": out, "course": Course.to_wire(Course.active()), "wind_seed": wind_seed,
+		"opening": _opening}
 
 
 # Rebuilds this machine's players from the host's payload, so every peer
@@ -906,9 +1050,16 @@ func apply_round_payload(payload: Dictionary) -> void:
 		p.form_deck = FormDeck.new()
 		p.form_deck.deck = form_cards_from_names(e.get("form_deck", []))
 		p.form_deck.discard = form_cards_from_names(e.get("form_discard", []))
+		p.current_draft_options = (e.get("draft_options", []) as Array).duplicate(true)
+		p.draft_keeps = int(e.get("draft_keeps", 0))
+		p.draft_stop = str(e.get("draft_stop", ""))
+		p.draft_stage = str(e.get("draft_stage", ""))
+		p.draft_boosts = (e.get("draft_boosts", []) as Array).duplicate()
+		p.draft_tape = (e.get("draft_tape", []) as Array).duplicate()
 		players.append(p)
 	player_count = players.size()
 	active_index = 0
+	_opening = bool(payload.get("opening", false))
 
 
 # A FormCard is fully described by its name — every card in the game comes
@@ -1028,7 +1179,6 @@ func make_player(player_name: String) -> Player:
 # pop_back() on an empty Array returns null and would fail this signature.
 func draw_from_deck(deck: Array, discard: Array) -> Dictionary:
 	if deck.is_empty() and not discard.is_empty():
-		log_msg("[i]Deck empty — reshuffling discard pile back in.[/i]")
 		deck.append_array(discard)
 		discard.clear()
 		deck.shuffle()
@@ -1060,12 +1210,6 @@ func start_hole() -> void:
 		_bots[seat].reset_log()
 	active_index = 0
 
-	log_entries.clear()
-	log_msg("[b]Hole %d — Par %d — %d yards[/b]" % [current_hole_index, hole_par, int(hole_yardage)])
-	log_msg("Wind: %s (%s off the tee)." % [Wind.strength_word(hole.wind).to_lower(),
-		Wind.describe(hole.wind, hole.pin_pos - hole.tee_pos)])
-	if is_multiplayer():
-		log_msg("[i]%s to play.[/i]" % me.name)
 	var has_water := hole.hazards.any(func(h): return h.get("type", "") == "water")
 	_teach_tee()
 	caddy_says("tee", {"par": hole_par, "yards": hole_yardage, "wind": hole.wind,
@@ -1130,11 +1274,7 @@ func advance_turn() -> bool:
 	var next := next_to_play()
 	if next < 0:
 		return false
-	var changed := next != active_index
 	active_index = next
-	if is_multiplayer() and changed:
-		log_msg("\n[i]%s to play — %d yards from the pin.[/i]" % [
-			me.name, int(me.distance_to(hole.pin_pos))])
 	sync_map_to_active()
 	return true
 
@@ -1257,7 +1397,6 @@ func begin_form_draw() -> void:
 		ClubAbilities.record(me.ability_log, clean, current_hole_index)
 	if clean != "":
 		me.armed["clean_lie"] = true
-		log_msg("[i]%s plays from the %s as though from the fairway.[/i]" % [pending_club.name, current_lie])
 	for id in ["boost_tier", "ideal_club"]:
 		if me.armed.has(id):
 			ClubAbilities.record(me.ability_log, id, current_hole_index)
@@ -1276,23 +1415,8 @@ func begin_form_draw() -> void:
 		result.cards.append_array(me.pocket)
 		result.forced = false
 		me.pocket = []
-	var tier: int = result.tier
 	current_form_options = result.cards
 	current_form_forced = result.forced
-
-	if current_form_forced:
-		var reason := "playing from the sand" if result.from_lie else "below this club's range"
-		log_msg("\n[b]Playing %s[/b] (%s) — %s creates a bad Form card. No choice, you're forced to play it." % [
-			pending_club.name, ShotResolver.tier_name(tier), reason.capitalize()])
-	elif result.had_forced_card:
-		log_msg("\n[b]Playing %s[/b] (%s) — a bad Form card is forced on you, but you hold %s instead." % [
-			pending_club.name, ShotResolver.tier_name(tier), " and ".join(PackedStringArray(created))])
-	else:
-		log_msg("\n[b]Playing %s[/b] (%s) — drawing %d Form card%s." % [
-			pending_club.name, ShotResolver.tier_name(tier), current_form_options.size(),
-			"" if current_form_options.size() == 1 else "s"])
-		if not created.is_empty():
-			log_msg("[i]Created for this draw: %s.[/i]" % ", ".join(PackedStringArray(created)))
 	state = State.FORM_DRAW
 	Sound.play("card_draw")
 	teach("form")
@@ -1306,7 +1430,6 @@ func begin_draft_phase() -> void:
 	if not _draw_draft_options():
 		# Nothing left to offer at all — skip the draft and move on, so the
 		# round can still finish instead of stalling on an empty pick.
-		log_msg("[i]The club deck is exhausted — no draft this hole.[/i]")
 		begin_next_draft()
 		return
 	Sound.play("card_draw")
@@ -1321,7 +1444,9 @@ func _draw_draft_options() -> bool:
 	for c in hand:
 		owned_names[c.name] = true
 
-	me.draft_keeps = DraftRules.keep_count(hand, me.call_result)
+	# Before the first tee the rack is the one a made call pays.
+	var result: String = DraftRules.OPENING if _opening else me.call_result
+	me.draft_keeps = DraftRules.keep_count(hand, result)
 	me.draft_taken = 0
 	me.draft_digs = 0
 	me.draft_traded = false
@@ -1330,7 +1455,7 @@ func _draw_draft_options() -> bool:
 	# The stop is still to choose (Route.gd). What a fitting bay would have
 	# on its bench is rolled now, through _roll(), so every machine agrees
 	# and the fork can say what is there before it is taken.
-	me.draft_stop = "" if opens("fork") else Route.SHOP
+	me.draft_stop = "" if opens("fork") and not _opening else Route.SHOP
 	me.draft_boosts = _roll("bench", func():
 		var ids: Array = ClubAbilities.BOOSTS.keys()
 		ids.shuffle()
@@ -1339,7 +1464,7 @@ func _draw_draft_options() -> bool:
 		var shots: Array = ClubAbilities.TAPE_SHOTS.duplicate()
 		shots.shuffle()
 		return shots.slice(0, ClubAbilities.TAPE_CHOICES))
-	current_draft_options = _deal_offers(DraftRules.offer_count(hand, me.call_result), owned_names)
+	current_draft_options = _deal_offers(DraftRules.offer_count(hand, result), owned_names)
 	return not current_draft_options.is_empty()
 
 
@@ -1570,7 +1695,6 @@ func on_draft_pick(index: int) -> void:
 
 	if hand.size() >= HAND_CAP:
 		pending_new_card = card
-		log_msg("Hand is full (%d cards) — discard one to make room for [b]%s[/b]." % [HAND_CAP, card.name])
 		state = State.DISCARD_FOR_DRAFT
 	else:
 		var was := _bag_marks()
@@ -1618,23 +1742,15 @@ func on_draft_done() -> void:
 func add_club(card: Dictionary) -> void:
 	hand.append(card)
 	sort_hand()
-	log_msg("Added [b]%s[/b] to your hand." % card.name)
-	if not form_deck.bring(card).is_empty():
-		log_msg("[color=#%s]It brings %s to your %s form.[/color]" % [COLOR_ACCENT.to_html(false),
-			Brands.shots_text(card), FormCard.FAMILY_LABEL.get(FormCard.family_of(card), "").to_lower()])
+	form_deck.bring(card)
 	var bad := Brands.baggage(card)
 	if bad != "":
 		form_deck.add_bad_card_to_deck(bad, FormCard.family_of(card))
-		log_msg("[color=#%s]...and a %s comes with it.[/color]" % [COLOR_FLAG.to_html(false), bad])
 
 
 func remove_club(index: int) -> Dictionary:
 	var removed: Dictionary = hand.pop_at(index)
-	log_msg("Discarded %s." % removed.name)
-	var gone := form_deck.take(removed)
-	if not gone.is_empty():
-		log_msg("[i]Its %s leave%s your Form deck with it.[/i]" % [
-			", ".join(PackedStringArray(gone)), "s" if gone.size() == 1 else ""])
+	form_deck.take(removed)
 	return removed
 
 
@@ -1666,8 +1782,6 @@ func _mark_club(club: Dictionary) -> void:
 	# Not on the last hole: no draft follows it to make the choice at.
 	if ClubAbilities.wear_pending(mine) <= due or current_hole_index >= Course.hole_count():
 		return
-	log_msg("[color=#%s][b]%s is worn in.[/b] Choose what it gains at the next draft.[/color]" % [
-		COLOR_ACCENT.to_html(false), mine.name])
 	Sound.play("ui_confirm")
 	if _can_stamp():
 		hole_banner.stamp("WORN IN", _club_kicker(mine), "Choose what it gains at the draft",
@@ -1688,9 +1802,6 @@ func maybe_curse_club(club: Dictionary) -> void:
 	if id == "hosel_rocket":
 		form_deck.add_card("Shank", FormCard.family_of(mine), str(mine.name))
 	var what: Dictionary = ClubAbilities.CURSES[id]
-	log_msg("[color=#%s][b]%s: %s.[/b] %s, until a %s mends it or the club goes.[/color]" % [
-		COLOR_FLAG.to_html(false), mine.name, str(what.name).to_lower(), what.does,
-		str(ClubAbilities.BOOSTS[ClubAbilities.MENDS[id]].name).to_lower()])
 	Sound.play("ui_error")
 	if _can_stamp():
 		hole_banner.stamp(str(what.name).to_upper(), _club_kicker(mine), what.does, HoleBanner.Tone.BAD)
@@ -1766,7 +1877,6 @@ func on_wear_in(index: int, choice: int) -> void:
 			var gain := ClubAbilities.gain_info(shot)
 			gained = "%s. %s" % [str(gain.name).to_lower(), gain.does]
 	club["level"] = int(club.get("level", 0)) + 1
-	log_msg("[color=#%s]%s is worn in: %s.[/color]" % [COLOR_ACCENT.to_html(false), club.name, gained])
 	Sound.play("card_place")
 	refresh_ui()
 
@@ -1792,9 +1902,6 @@ func on_stop(index: int) -> void:
 	if me.draft_stop == Route.RANGE:
 		var purged := form_deck.purge_bad(ShotRules.RANGE_SESSION_PURGE)
 		Sound.play("card_discard")
-		log_msg("[color=#%s]The range — %s.[/color]" % [COLOR_ACCENT.to_html(false),
-			"nothing to work out" if purged.is_empty() else "%s leave%s your Form deck" % [
-				" and ".join(PackedStringArray(purged)), "s" if purged.size() == 1 else ""]])
 		begin_next_draft()
 	refresh_ui()
 
@@ -1832,12 +1939,8 @@ func on_boost(boost: String, index: int, tape: int = 0) -> void:
 		if _can_stamp():
 			hole_banner.stamp("MENDED", _club_kicker(club), "%s no more" % ClubAbilities.curse_info(cursed).name,
 				HoleBanner.Tone.GOOD)
-		log_msg("[color=#%s]%s — spent mending %s's %s.[/color]" % [COLOR_ACCENT.to_html(false), what,
-			club.name, str(ClubAbilities.curse_info(cursed).name).to_lower()])
 	else:
 		_apply_gain(club, boost, str(me.draft_tape[tape]) if boost == "lead_tape" else "")
-		log_msg("[color=#%s]%s for %s. %s.[/color]" % [COLOR_ACCENT.to_html(false),
-			what, club.name, ClubAbilities.BOOSTS[boost].does])
 	_boosting = false
 	Sound.play("card_place")
 	begin_next_draft()
@@ -1857,8 +1960,6 @@ func on_event() -> void:
 				var curses: Array = ClubAbilities.CURSES.keys()
 				found["curse"] = _roll("curse", func(): return curses[randi_range(0, curses.size() - 1)])
 				found["marks"] = maxi(int(found.get("marks", 0)), ClubAbilities.WEAR_MARKS)
-				log_msg("[color=#%s]Out of the gorse: %s, with a %s.[/color]" % [COLOR_ACCENT.to_html(false),
-					found.name, str(ClubAbilities.curse_info(str(found.curse)).name).to_lower()])
 				if hand.size() >= HAND_CAP:
 					pending_new_card = found
 					state = State.DISCARD_FOR_DRAFT
@@ -1877,14 +1978,9 @@ func on_event() -> void:
 				var pool: Array = FormCard.bad_names_for(fam)
 				var bad_name: String = _roll("tip_card", func(): return pool[randi_range(0, pool.size() - 1)])
 				form_deck.add_bad_card_to_deck(bad_name, fam)
-				log_msg("[color=#%s]The tip: %s's %s is grooved — and a %s joins your %s form.[/color]" % [
-					COLOR_ACCENT.to_html(false), club.name, shot, bad_name,
-					FormCard.FAMILY_LABEL.get(fam, "").to_lower()])
 		"cart":
 			me.hand_bonus += Route.CART_STROKES
 			form_deck.add_bad_card_to_deck("Top", "wood")
-			log_msg("[color=#%s]The drinks cart: %d strokes in hand, and a Top in your wood form.[/color]" % [
-				COLOR_ACCENT.to_html(false), Route.CART_STROKES])
 		"hustler":
 			# Settled by a real putt (on_putt): one putt, holed or not, on
 			# the green just played, from the hole toward its middle.
@@ -1898,8 +1994,6 @@ func on_event() -> void:
 			_putt_aimed = false
 			putt_dist = Route.HUSTLER_YARDS
 			state = State.PUTTING
-			log_msg("[color=#%s]The hustler: one putt from %s. Hole it.[/color]" % [
-				COLOR_ACCENT.to_html(false), putt_distance_text()])
 			refresh_ui()
 			return
 	begin_next_draft()
@@ -1912,8 +2006,6 @@ func _settle_hustle(won: bool) -> void:
 	state = State.DRAFT
 	var paid: int = Route.HUSTLER_WIN if won else -Route.HUSTLER_LOSS
 	me.hand_bonus += paid
-	log_msg("[color=#%s]The hustler: %s.[/color]" % [(COLOR_ACCENT if won else COLOR_FLAG).to_html(false),
-		"you took him — %d strokes in hand" % paid if won else "he took you — %d strokes gone" % -paid])
 	# The verdict waits for the ball, like any other putt's fanfare.
 	_after_putt_drops(func():
 		Sound.play("ui_confirm" if won else "ui_error")
@@ -2097,10 +2189,12 @@ func _apply_tour_carry() -> void:
 
 # Leaves a club behind while packing for the next course.
 func _on_pack_leave(index: int) -> void:
-	if not tour_continues() or not _valid_index(index, hand) or hand.size() <= TOUR_KEEP:
+	if not tour_continues() or not _valid_index(index, hand) or hand.size() <= TOUR_KEEP \
+			or not DraftRules.can_leave(hand, index):
 		return
 	Sound.play("card_discard")
 	remove_club(index)
+	_save_round(current_hole_index, true)
 	refresh_ui()
 
 
@@ -2155,11 +2249,6 @@ func _celebrate_bag_change(was: Dictionary) -> void:
 		return
 	var woke: Array = (now.awake as Array).filter(func(n): return not (was.awake as Array).has(n))
 	var maker := Brands.display_name(brand)
-	log_msg("[color=#%s][b]%s %d-set complete.[/b] %s.[/color]" % [COLOR_ACCENT.to_html(false), maker, tier,
-		Brands.bonus_text(brand, tier)])
-	if not woke.is_empty():
-		log_msg("[color=#%s]Staff clubs awake: %s.[/color]" % [COLOR_ACCENT.to_html(false),
-			", ".join(PackedStringArray(woke))])
 	Sound.play("ui_confirm")
 	if _can_stamp():
 		var kicker := "The bag" if not is_multiplayer() else "%s bag" % possessive(me)
@@ -2193,13 +2282,7 @@ func on_call_hole() -> void:
 	me.called = not me.called
 	Sound.play("card_slide")
 	if me.called:
-		log_msg("[color=#%s][b]%s called.[/b] Make it: the draft shows %d, keep %d. Miss: it shows %d.[/color]" % [
-			COLOR_ACCENT.to_html(false), DraftRules.CALL_NAME.capitalize(),
-			DraftRules.offer_count(hand, DraftRules.MADE), DraftRules.keep_count(hand, DraftRules.MADE),
-			DraftRules.offer_count(hand, DraftRules.MISSED)])
 		caddy_says("call")
-	else:
-		log_msg("[i]The call is taken back.[/i]")
 	refresh_ui()
 
 
@@ -2233,13 +2316,7 @@ func on_dig() -> void:
 		var fam: String = _roll("dig_family", func(): return fams[randi_range(0, fams.size() - 1)])
 		var pool: Array = FormCard.bad_names_for(fam)
 		var bad_name: String = _roll("dig_card", func(): return pool[randi_range(0, pool.size() - 1)])
-		var card := form_deck.add_bad_card_to_deck(bad_name, fam)
-		log_msg("[color=#%s]Dug for %d fresh club%s — and a %s joins your %s form.[/color]" % [
-			COLOR_FLAG.to_html(false), fresh.size(), "" if fresh.size() == 1 else "s", card.name,
-			FormCard.FAMILY_LABEL.get(card.family, "").to_lower()])
-	else:
-		log_msg("[color=#%s]Dug for %d fresh club%s — Old Faithful digs for nothing.[/color]" % [
-			COLOR_ACCENT.to_html(false), fresh.size(), "" if fresh.size() == 1 else "s"])
+		form_deck.add_bad_card_to_deck(bad_name, fam)
 	refresh_ui()
 
 
@@ -2254,6 +2331,9 @@ func on_trade_in(index: int) -> void:
 		return
 	if not _valid_index(index, hand):
 		_reject("trade in", "index %d outside 0..%d" % [index, hand.size() - 1])
+		return
+	if not DraftRules.can_leave(hand, index):
+		_reject("trade in", "a bag keeps its only putter")
 		return
 	var taken := {}
 	for c in hand:
@@ -2272,8 +2352,6 @@ func on_trade_in(index: int) -> void:
 	me.draft_traded = true
 	_trading = false
 	Sound.play("card_discard")
-	log_msg("[color=#%s]Traded in %s — one more club on offer.[/color]" % [
-		COLOR_ACCENT.to_html(false), removed.name])
 	if removed.get("brand", Brands.NONE) == Brands.STARTER:
 		mark_starter_retired()
 	refresh_ui()
@@ -2291,6 +2369,9 @@ func on_discard_pick(index: int) -> void:
 		# Nothing is waiting to come in, so discarding would shrink the bag
 		# with no replacement.
 		_reject("discard pick", "no incoming card to make room for")
+		return
+	if not DraftRules.can_leave(hand, index, pending_new_card):
+		_reject("discard pick", "a bag keeps its only putter")
 		return
 	var was := _bag_marks()
 	var removed := remove_club(index)
@@ -2330,10 +2411,8 @@ func on_ability(id: String) -> void:
 	if entry.toggle:
 		if me.armed.has(id):
 			me.armed.erase(id)
-			log_msg("[i]%s — switched off.[/i]" % entry.source)
 		else:
 			me.armed[id] = true
-			log_msg("[color=#%s]%s — %s.[/color]" % [COLOR_ACCENT.to_html(false), entry.source, entry.label.to_lower()])
 		Sound.play("card_slide")
 		refresh_ui()
 		return
@@ -2345,8 +2424,6 @@ func on_ability(id: String) -> void:
 			current_form_options.append(card)
 			# A created card is always a real choice, even beside a forced one.
 			current_form_forced = false
-			log_msg("[color=#%s]%s — creates a %s in your hand. It exhausts whether you play it or not.[/color]" % [
-				COLOR_ACCENT.to_html(false), entry.source, card.name])
 		"redraw", "surgeon":
 			var kept: Array = []
 			var drawn: Array = []
@@ -2358,13 +2435,9 @@ func on_ability(id: String) -> void:
 			form_deck.return_unpicked(drawn, -1)
 			current_form_options = form_deck.draw_cards(drawn.size(),
 				FormCard.family_of(pending_club), str(pending_club.name)) + kept
-			log_msg("[color=#%s]%s — the whole hand goes back; %d fresh card%s.[/color]" % [
-				COLOR_ACCENT.to_html(false), entry.source, drawn.size(), "" if drawn.size() == 1 else "s"])
 		"improve_lie":
 			var was := current_lie
 			current_lie = ClubAbilities.lie_improved(current_lie)
-			log_msg("[color=#%s]%s — the lie improves from %s to %s.[/color]" % [
-				COLOR_ACCENT.to_html(false), entry.source, was, current_lie])
 	Sound.play("card_draw")
 	refresh_ui()
 
@@ -2439,25 +2512,18 @@ func _file_played_card(club: Dictionary, card: FormCard) -> void:
 	var fate := "" if card.good or card.created else ClubAbilities.bad_fate(hand, club)
 	match fate:
 		"gone":
-			log_msg("[color=#%s]%s — the %s leaves your Form deck for good.[/color]" % [
-				COLOR_ACCENT.to_html(false), club.name, card.name])
+			pass  # it leaves the Form deck for good
 		"top":
 			form_deck.return_to_top(card)
-			log_msg("[color=#%s]%s — the %s goes back on top of your Form deck.[/color]" % [
-				COLOR_FLAG.to_html(false), club.name, card.name])
 		_:
 			form_deck.discard_played(card)
 
 
 func play_shot(club: Dictionary, card: FormCard, gust: float = 0.0) -> void:
-	match ShotRules.yips_effect(hand, card):
-		ShotRules.Yips.BLOCKED:
-			log_msg("[color=#%s]Yips — shrugged off (Callowell).[/color]" % COLOR_TEXT_SOFT.to_html(false))
-		ShotRules.Yips.TAINTS_PUTT:
-			log_msg("[color=#%s]Yips! Taints your next putt if you're forced to play it near the green.[/color]" % COLOR_FLAG.to_html(false))
-			yips_pending = true
-			Sound.play("ui_error")
-			caddy_says("yips")
+	if ShotRules.yips_effect(hand, card) == ShotRules.Yips.TAINTS_PUTT:
+		yips_pending = true
+		Sound.play("ui_error")
+		caddy_says("yips")
 
 	var aimed_distance: float = ball_pos.distance_to(aim_target)
 	# The card as this swing plays it (a Stock Shot off the Mid tier is pushed).
@@ -2471,17 +2537,10 @@ func play_shot(club: Dictionary, card: FormCard, gust: float = 0.0) -> void:
 	var before_pos := ball_pos
 	_caddy_card = card.name
 
-	log_msg("[b]Stroke %d[/b] — played %s with %s (lie: %s)" % [strokes, card.name, club.name, current_lie])
-	log_msg("%s: %s" % [card.name, played.effect_text()])
-	if card.created:
-		log_msg("[i]%s was created by a club — it exhausts now it's played.[/i]" % card.name)
 	if card.purges_bad > 0:
 		# The family it was played from first: a good swing with the driver
 		# mends the driver.
-		var purged := form_deck.purge_bad(card.purges_bad, FormCard.family_of(club))
-		if not purged.is_empty():
-			log_msg("[color=#%s]In the Zone — a %s card leaves your Form deck.[/color]" % [
-				COLOR_ACCENT.to_html(false), ", ".join(PackedStringArray(purged))])
+		form_deck.purge_bad(card.purges_bad, FormCard.family_of(club))
 
 	pending_club = {}
 	_animating = true
@@ -2499,8 +2558,6 @@ func play_shot(club: Dictionary, card: FormCard, gust: float = 0.0) -> void:
 		gust = 0.0
 	var outcome := ShotResolver.shot_outcome(hole, before_pos, aim_dir, result, club, true, gust)
 	outcome["gust"] = gust
-	if gust >= GUST_TOLD:
-		log_msg("[color=#%s]Struck in a gust: %d mph.[/color]" % [COLOR_FLAG.to_html(false), Wind.mph(Wind.gusted(hole.wind, gust))])
 
 	map_view.play_aim_animation(aim_dir, outcome.carry, float(result.degree), result.side, club.max_yard, func():
 		_resolve_shot_landing(before_pos, aim_dir, result, outcome, club, played, aim_point)
@@ -2520,22 +2577,12 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 	# ShotResolver.shot_outcome(). From here on "landing" means where the
 	# ball comes to rest, roll included.
 	var landing_pos: Vector2 = outcome.rest
-	var rolled: float = outcome.carry_pos.distance_to(landing_pos)
-
 	var lie_result := hole.terrain_at(landing_pos)
-	if rolled >= 1.0:
-		log_msg("Carried %d yards, rolled %d -> finished in %s, %d yards from the pin." % [
-			int(round(outcome.carry)), int(round(rolled)), lie_result,
-			int(landing_pos.distance_to(hole.pin_pos))])
-	else:
-		log_msg("Carried %d yards -> landed in %s, %d yards from the pin." % [
-			int(round(outcome.carry)), lie_result, int(landing_pos.distance_to(hole.pin_pos))])
 	# What the wind and the ground did to it, kept on the shot panel until
 	# the next shot so the player can read it while choosing the next club.
 	if not club.is_empty():
 		var breakdown := ShotRules.shot_breakdown(hole, before_pos, aim_dir, result, club, outcome)
 		me.last_shot = {"club": club.name, "text": ShotRules.breakdown_text(breakdown)}
-		log_msg("[color=#%s]%s[/color]" % [COLOR_TEXT_SOFT.to_html(false), me.last_shot.text])
 		# ...and told as a story: the card, where it finished against the
 		# aim, and why. The map marks the aim beside the ball (refresh_ui).
 		if card != null:
@@ -2559,8 +2606,6 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 			shot_path.append(ball_pos)
 			map_view.set_ball(ball_pos, shot_path)
 			map_view.set_aim_target(ball_pos)
-			log_msg("[color=#%s][b]d20: %d — IN THE HOLE, from %d yards![/b][/color]" % [
-				COLOR_ACCENT.to_html(false), roll, int(before_pos.distance_to(hole.pin_pos))])
 			map_view.drop_in_cup()
 			_mark_club(club)
 			caddy_says("hole_out", {"strokes": strokes})
@@ -2568,8 +2613,6 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 			return
 		# Rimmed out, leaving a short putt to actually play — see
 		# ShotRules.rim_out_position() for why it's never a gimme.
-		log_msg("[color=#%s]d20: %d — rattles the cup and stays out.[/color]" % [
-			COLOR_FLAG.to_html(false), roll])
 		Sound.play("rim_out")
 		caddy_says("rim_out")
 		ball_pos = ShotRules.rim_out_position(hole.pin_pos, landing_pos, roll)
@@ -2586,17 +2629,6 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 	strokes += int(settled.penalty)
 	ball_pos = settled.ball_pos
 	current_lie = settled.lie
-	match lie_result:
-		"out":
-			log_msg("[color=#%s]Out of bounds! +1 penalty stroke, replayed from your previous position.[/color]" % COLOR_FLAG.to_html(false))
-		"water":
-			log_msg("[color=#%s]Splash! Water hazard — +1 penalty stroke, dropped back near your previous position.[/color]" % COLOR_WATER.to_html(false))
-		"bunker":
-			log_msg("[color=#%s]In the sand.[/color]" % COLOR_SAND.to_html(false))
-	if settled.lie_downgraded:
-		log_msg("[color=#%s]Shank — lie downgraded to %s.[/color]" % [COLOR_FLAG.to_html(false), current_lie])
-	if lie_result == "rough" and current_lie == "green":
-		log_msg("[i]On the fringe — the Jigger putts it from here.[/i]")
 	var hazard_hit: bool = settled.hazard
 	# What the shot did to the club that hit it (ClubAbilities, "Growth").
 	if int(settled.penalty) > 0:
@@ -2631,16 +2663,10 @@ func apply_landing_abilities(terrain: String, hazard: bool) -> void:
 	var fx := ClubAbilities.on_landing(hand, terrain, hazard, me.ability_log, current_hole_index)
 	for id in fx.used:
 		ClubAbilities.record(me.ability_log, id, current_hole_index)
-	var by := ", ".join(PackedStringArray(fx.by))
 	if not fx.create.is_empty():
 		me.created_next.append_array(fx.create)
-		log_msg("[color=#%s]%s — your next draw includes %s.[/color]" % [
-			COLOR_ACCENT.to_html(false), by, " and ".join(PackedStringArray(fx.create))])
 	if fx.purge > 0:
-		var purged := form_deck.purge_bad(fx.purge)
-		if not purged.is_empty():
-			log_msg("[color=#%s]%s — purged %s from your Form deck.[/color]" % [
-				COLOR_ACCENT.to_html(false), by, ", ".join(PackedStringArray(purged))])
+		form_deck.purge_bad(fx.purge)
 
 
 # Section 5 "Bad cards from hazards": landing in rough/bunker/water carries
@@ -2662,11 +2688,8 @@ func maybe_add_bad_card_to_form_deck(lie_result: String, chance: float, family: 
 		var pool: Array = FormCard.bad_names_for(family)
 		var bad_name: String = _roll("decay_card", func():
 			return pool[randi_range(0, pool.size() - 1)])
-		var card := form_deck.add_bad_card_to_deck(bad_name, family)
+		form_deck.add_bad_card_to_deck(bad_name, family)
 		Sound.play("ui_error")
-		log_msg("[color=#%s](The %s left a %s card in your %s form.)[/color]" % [
-			COLOR_TEXT_SOFT.to_html(false), lie_result, card.name,
-			FormCard.FAMILY_LABEL.get(card.family, "")])
 		teach("bad_card")
 		caddy_says("bad_card")
 
@@ -2716,10 +2739,8 @@ func start_putting() -> void:
 	if ShotRules.is_gimme(putt_dist):
 		strokes += 1
 		_putt_rolled(hole.pin_pos, [], true)
-		log_msg("[color=#%s]Tap-in conceded.[/color]" % COLOR_TEXT_SOFT.to_html(false))
 		finish_hole()
 		return
-	log_msg("\n[b]On the green.[/b] %s to the pin — set your line and weight, then strike." % putt_distance_text())
 	caddy_says("putt", {"dist": putt_dist, "dist_text": putt_distance_text()})
 	refresh_ui()
 
@@ -2762,11 +2783,7 @@ func on_putt(aim: Vector2) -> void:
 	if me.armed.has("putt_retry") and not holed:
 		me.armed.erase("putt_retry")
 		ClubAbilities.record(me.ability_log, "putt_retry", current_hole_index)
-		if yips_pending:
-			yips_pending = false
-			log_msg("[color=#%s]The Yips strike — but the Blade Putter takes it again.[/color]" % COLOR_TEXT_SOFT.to_html(false))
-		else:
-			log_msg("[color=#%s]Missed — the Blade Putter takes it again, no stroke added.[/color]" % COLOR_TEXT_SOFT.to_html(false))
+		yips_pending = false
 		Sound.play("rim_out")
 		# The map shows the one that got away; the ball stays where it was.
 		if map_view:
@@ -2780,18 +2797,14 @@ func on_putt(aim: Vector2) -> void:
 	if me.armed.has("old_reliable"):
 		me.armed.erase("old_reliable")
 		ClubAbilities.record(me.ability_log, "old_reliable", current_hole_index)
-		log_msg("[i]Steady Hands (Old Reliable Putter).[/i]")
 	if yips_pending:
 		yips_pending = false
-		log_msg("[color=#%s]The Yips strike — the putt is jabbed off line, however well you read it.[/color]" % COLOR_FLAG.to_html(false))
 		Sound.play("ui_error")
 
 	_putt_rolled(roll.rest, roll.path, holed)
 	if holed:
-		log_msg("[color=#%s]In the hole![/color]" % COLOR_ACCENT.to_html(false))
 		finish_hole()
 		return
-	log_msg("It stays out — %s left." % putt_distance_text())
 
 	# The gimme: once you're inside tap-in range there's no drama left to
 	# play for, so it's conceded. Also keeps a putting sequence from
@@ -2799,7 +2812,6 @@ func on_putt(aim: Vector2) -> void:
 	if ShotRules.is_gimme(putt_dist):
 		strokes += 1
 		_putt_rolled(hole.pin_pos, [], true)
-		log_msg("[color=#%s]Tap-in conceded.[/color]" % COLOR_TEXT_SOFT.to_html(false))
 		finish_hole()
 		return
 
@@ -3230,8 +3242,6 @@ func mark_starter_retired() -> void:
 	for club in hand:
 		if club.get("brand", Brands.NONE) == Brands.STARTER:
 			return
-	log_msg("[color=#%s][b]The last of the Bogey-Mart set is gone.[/b] Every club in %s bag is one you chose.[/color]" % [
-		COLOR_ACCENT.to_html(false), possessive(me).to_lower()])
 	Sound.play("ui_confirm")
 	if _can_stamp():
 		var kicker := "The bag" if not is_multiplayer() else "%s bag" % possessive(me)
@@ -3314,7 +3324,6 @@ func _on_header_restart_pressed() -> void:
 
 	_restart_armed = true
 	_show_restart_armed(true)
-	log_msg("\n[color=#%s][b]Restart?[/b] Press Restart again to abandon this round and start over from hole 1.[/color]" % COLOR_FLAG.to_html(false))
 	# Disarms on its own, so an ignored prompt can't sit armed for the rest
 	# of the round waiting to eat an unrelated press much later.
 	var t := get_tree().create_timer(5.0)
@@ -3322,7 +3331,6 @@ func _on_header_restart_pressed() -> void:
 		if _restart_armed:
 			_restart_armed = false
 			_show_restart_armed(false)
-			log_msg("[color=#%s]Restart cancelled.[/color]" % COLOR_TEXT_SOFT.to_html(false))
 	)
 
 
@@ -3331,13 +3339,11 @@ func _on_header_restart_pressed() -> void:
 # in, so this hands over rather than going straight to the draft.
 # `holed_from` is the distance in yards when the ball went in from off the
 # green (the d20 came up 20), or -1 when it was putted in.
-# A hole costs triple par at most (ShotRules.hole_cap): once there, the
+# A hole costs double par at most (ShotRules.hole_cap): once there, the
 # ball is picked up and the hole is scored at the cap.
 func _pick_up() -> bool:
 	if strokes < ShotRules.hole_cap(hole_par):
 		return false
-	log_msg("[color=#%s]Picked up at %d — the most a par %d can cost.[/color]" % [
-		COLOR_FLAG.to_html(false), ShotRules.hole_cap(hole_par), hole_par])
 	finish_hole()
 	return true
 
@@ -3360,8 +3366,6 @@ func _putter_after_hole() -> void:
 		var level: int = mini(ClubAbilities.MAX_LEVEL, int(putter.marks) / ClubAbilities.WEAR_MARKS)
 		if level > int(putter.get("level", 0)):
 			putter["level"] = level
-			log_msg("[color=#%s][b]%s is worn in.[/b] The cup plays bigger.[/color]" % [
-				COLOR_ACCENT.to_html(false), putter.name])
 			if _can_stamp():
 				hole_banner.stamp("WORN IN", _club_kicker(putter), "The cup plays bigger",
 					HoleBanner.Tone.GOOD)
@@ -3369,8 +3373,6 @@ func _putter_after_hole() -> void:
 			and _roll("twitchy", func(): return randf()) < ClubAbilities.CURSE_CHANCE:
 		putter["curse"] = "twitchy"
 		var what := ClubAbilities.curse_info("twitchy")
-		log_msg("[color=#%s][b]%s: twitchy.[/b] %s, until a regrip mends it.[/color]" % [
-			COLOR_FLAG.to_html(false), putter.name, what.does])
 		if _can_stamp():
 			hole_banner.stamp("TWITCHY", _club_kicker(putter), "%d putts. %s" % [putts, what.does],
 				HoleBanner.Tone.BAD)
@@ -3385,9 +3387,7 @@ func finish_hole(holed_from: int = -1) -> void:
 	# A called hole is settled here; the draft that follows pays it out.
 	me.call_result = DraftRules.call_result(me.called, strokes, hole_par)
 	if records_this_seat(active_index):
-		var prev_best := Records.record_hole(current_hole_index, strokes)
-		if prev_best > 0 and strokes < prev_best:
-			log_msg("[color=#%s]Your best on this hole — beats %d.[/color]" % [COLOR_ACCENT.to_html(false), prev_best])
+		Records.record_hole(current_hole_index, strokes)
 	var streak := under_par_streak(me)
 	show_hole_banner(diff, holed_from, streak)
 	_putter_after_hole()
@@ -3402,13 +3402,6 @@ func finish_hole(holed_from: int = -1) -> void:
 		caddy_says("streak", {"count": streak})
 	else:
 		caddy_says("holed", {"diff": diff})
-
-	if is_multiplayer():
-		log_msg("\n[b]%s holed out![/b] %d strokes (par %d) — %s" % [
-			me.name, strokes, hole_par, score_diff_text(diff)])
-	else:
-		log_msg("\n[b]Holed out![/b] Total strokes: %d (par %d) — %s" % [
-			strokes, hole_par, score_diff_text(diff)])
 
 	# Anyone still out on the hole plays on.
 	if advance_turn():
@@ -3427,15 +3420,6 @@ func finish_hole(holed_from: int = -1) -> void:
 # can take the card another player wanted).
 func begin_end_of_hole() -> void:
 	if is_multiplayer():
-		log_msg("\n[b]Hole %d complete.[/b]" % current_hole_index)
-		for p in players:
-			var entry = p.round_scores[p.round_scores.size() - 1] if not p.round_scores.is_empty() else null
-			if entry != null:
-				log_msg("  %s — %d strokes (%s)" % [
-					p.name, int(entry.strokes), score_name(int(entry.strokes) - int(entry.par))])
-		var lead := lead_text()
-		if lead != "":
-			log_msg("[color=#%s]%s[/color]" % [COLOR_ACCENT.to_html(false), lead])
 		# Halfway round a full course, the caddy takes stock of the match.
 		var you := lone_human()
 		if you != null and Course.hole_count() >= 4 and current_hole_index * 2 == Course.hole_count():
@@ -3444,8 +3428,6 @@ func begin_end_of_hole() -> void:
 	# Played for keeps, a round with no strokes left in hand ends here.
 	if plays_for_keeps() and current_hole_index < Course.hole_count() and strokes_in_hand() <= 0:
 		_run_over = true
-		log_msg("[color=#%s][b]Out of strokes in hand.[/b] The round is over after %d holes.[/color]" % [
-			COLOR_FLAG.to_html(false), current_hole_index])
 		if _can_stamp():
 			hole_banner.stamp("OUT OF STROKES", "After %d holes" % current_hole_index,
 				"The round is over", HoleBanner.Tone.BAD)
@@ -3460,6 +3442,13 @@ func begin_end_of_hole() -> void:
 		finish_hole_done()
 		return
 
+	_save_round(current_hole_index)
+	_begin_stops()
+
+
+# The stop after a hole, for every player: all at once online, one at a
+# time on a shared screen.
+func _begin_stops() -> void:
 	if online:
 		begin_simultaneous_draft()
 		return
@@ -3480,16 +3469,25 @@ const DRAFT_DONE := "done"
 
 
 func begin_simultaneous_draft() -> void:
+	_deal_simultaneous_draft()
+	Sound.play("card_draw")
+	_show_simultaneous_draft()
+
+
+# Every seat's draft dealt: state only, so it can run on a round that has
+# no screen (deal_opening).
+func _deal_simultaneous_draft() -> void:
 	_simul_draft = true
 	_draft_queue = []
-	log_msg("\n[b]Everyone drafts at once.[/b] The next hole starts when the last pick is in.")
 	for i in range(players.size()):
 		active_index = i
 		if me.abandoned or not _draw_draft_options():
 			me.draft_stage = DRAFT_DONE
 		else:
 			me.draft_stage = DRAFT_PICK
-	Sound.play("card_draw")
+
+
+func _show_simultaneous_draft() -> void:
 	if not _finish_simultaneous_draft_if_done():
 		view_seat(my_seat)
 		refresh_ui()
@@ -3564,10 +3562,6 @@ func begin_next_draft() -> void:
 		return
 	active_index = int(_draft_queue.pop_front())
 	sync_map_to_active()
-	if is_multiplayer():
-		log_msg("\n[b]%s draft.[/b] Draw 3, pick 1 to add to the bag permanently." % possessive(me))
-	else:
-		log_msg("\n[b]End of hole.[/b] Draw 3, pick 1 to add to your hand permanently.")
 	begin_draft_phase()
 
 
@@ -3579,6 +3573,7 @@ func finish_hole_done() -> void:
 	if current_hole_index >= Course.hole_count():
 		finish_round()
 	else:
+		_opening = false
 		current_hole_index += 1
 		start_hole()
 
@@ -3586,42 +3581,15 @@ func finish_hole_done() -> void:
 func finish_round() -> void:
 	state = State.DONE
 	_play_round_jingle()
-	log_entries.clear()
-	log_msg("[b]Round Complete — %s[/b]\n" % Course.active_name)
 	record_finished_round()
+	# The round is over and so is its save, unless it was a tour course
+	# with another to come: that is kept, with the bag still to pack.
+	if tour_continues():
+		_save_round(current_hole_index, true)
+	elif _saves():
+		RoundSave.clear()
 
 	if is_multiplayer():
-		# Leaderboard first — in a group round the result is the comparison,
-		# and the hole-by-hole detail for one player matters less than who
-		# won. Stroke play: lowest total wins.
-		var standings := players.duplicate()
-		standings.sort_custom(func(a, b): return a.total_strokes() < b.total_strokes())
-
-		log_msg("[b]Final standings[/b]")
-		var place := 0
-		var shown := 0
-		var prev_strokes := -1
-		for p in standings:
-			shown += 1
-			# Ties share a place, the way a real card reads.
-			if p.total_strokes() != prev_strokes:
-				place = shown
-				prev_strokes = p.total_strokes()
-			log_msg("  %d. %s — %d strokes (%s)" % [
-				place, p.name, p.total_strokes(), score_diff_text(p.score_diff())])
-
-		var best: Player = standings[0]
-		var tied: Array = []
-		for p in standings:
-			if p.total_strokes() == best.total_strokes():
-				tied.append(p.name)
-		if tied.size() > 1:
-			log_msg("\n[b]Tied — %s, on %d strokes.[/b]" % [
-				", ".join(tied), best.total_strokes()])
-		else:
-			log_msg("\n[b]%s %s, on %d strokes (%s).[/b]" % [
-				best.name, "win" if best.name == "You" else "wins",
-				best.total_strokes(), score_diff_text(best.score_diff())])
 		# Against the computer, the caddy has the last word on the match.
 		var you := lone_human()
 		if you != null and not you.abandoned:
@@ -3635,9 +3603,7 @@ func finish_round() -> void:
 	for entry in round_scores:
 		total_strokes += entry.strokes
 		total_par += entry.par
-		log_msg("Hole %2d — Par %d — %d strokes — %s" % [entry.hole, entry.par, entry.strokes, score_name(entry.strokes - entry.par)])
 	var diff := total_strokes - total_par
-	log_msg("\n[b]Total: %d (%s)[/b]" % [total_strokes, score_diff_text(diff)])
 	caddy_says("round", {"diff": diff, "holes": round_scores.size()}, false, true)
 	refresh_ui()
 
@@ -3677,7 +3643,6 @@ func record_finished_round() -> void:
 	_record_rounds()
 	if was_locked and CourseLibrary.lock_on(str(next.id)).is_empty():
 		_opened_course = str(next.name)
-		log_msg("[b]%s is now open.[/b]" % _opened_course)
 
 
 func _record_rounds() -> void:
@@ -3687,19 +3652,7 @@ func _record_rounds() -> void:
 		var p: Player = players[i]
 		if p.round_scores.size() < Course.hole_count():
 			continue
-		var r := Records.record_round(p.name, p.total_strokes(), p.total_par(), round_mode())
-		var who := "" if not is_multiplayer() else "%s — " % p.name
-		var prev: Dictionary = r.previous_best
-		if prev.is_empty():
-			log_msg("[color=#%s][b]%sFirst round on %s — that's the record to beat.[/b][/color]" % [
-				COLOR_ACCENT.to_html(false), who, Course.active_name])
-		elif r.new_best:
-			log_msg("[color=#%s][b]%sNew course record! %d beats %d.[/b][/color]" % [
-				COLOR_ACCENT.to_html(false), who, p.total_strokes(), int(prev.strokes)])
-		else:
-			log_msg("[i]%sCourse record: %d (%s), by %s.[/i]" % [
-				who, int(prev.strokes), Records.diff_text(int(prev.diff)), str(prev.player)])
-	log_msg("")
+		Records.record_round(p.name, p.total_strokes(), p.total_par(), round_mode())
 
 
 var _settings_popup: PopupPanel
@@ -3747,14 +3700,13 @@ func restart_round() -> void:
 		GameSetup.start_tour()
 		get_tree().change_scene_to_file(MAIN_SCENE)
 		return
-	current_hole_index = 1
 	_restart_armed = false
 	_show_restart_armed(false)
 	# A fresh round: guided again only while the setting still asks for one.
 	GameSetup.guided = GameSetup.guided and bool(Settings.get_value("guided"))
 	_taught.clear()
 	init_game()
-	start_hole()
+	begin_round()
 
 
 # ---------------------------------------------------------
@@ -3925,7 +3877,8 @@ func refresh_ui() -> void:
 		else:
 			scorecard.set_round(round_scores, current_hole_index, strokes)
 	if course_line:
-		course_line.text = "%s · Hole %d of %d" % [Course.active_name, current_hole_index, Course.hole_count()]
+		course_line.text = "%s · Before the first tee" % Course.active_name if _opening \
+			else "%s · Hole %d of %d" % [Course.active_name, current_hole_index, Course.hole_count()]
 	if hole_title and hole:
 		hole_title.text = "Hole %d" % current_hole_index
 		hole_caption.text = "Par %d  ·  %d yards" % [hole_par, int(hole_yardage)]
@@ -3944,7 +3897,7 @@ func refresh_ui() -> void:
 		interlude.visible = between
 		game_page.visible = not between
 	if between:
-		build_interlude()
+		pages().build()
 		return
 
 	rebuild_shot_outlook()
@@ -4110,55 +4063,17 @@ func make_draft_card(card: Dictionary, interactive: bool, notes: Array,
 
 
 # ---------------------------------------------------------
-# BETWEEN HOLES — full pages over the shot screen (yardage book v2)
-#   the stops: the hole just played and where to go next (or a wear-in)
-#   the pro shop: the rack, dig / trade in / that'll do, the bag-full cut
-#   the fitting bay: the bench of boosts, then the club they go on
-#   the hut: what is there, take it or walk on
-#   the card: the round complete, and the tour's packing
+# BETWEEN HOLES — the full pages over the shot screen (the stops, the pro
+# shop, the fitting bay, the hut and the card) are BetweenHoles.gd. It is
+# loaded at run time, not preloaded: it preloads this script for its types.
 # ---------------------------------------------------------
-
-func build_interlude() -> void:
-	clear_container(interlude)
-	coverage_view = null
-	var cpu := is_cpu_turn()
-	match state:
-		State.DONE:
-			_page_end()
-		State.DISCARD_FOR_DRAFT, State.DISCARD_FOR_HAZARD:
-			_page_shop("cut", cpu)
-		State.WAITING:
-			_page_stops("waiting", cpu)
-		State.DRAFT:
-			if _trading and not cpu:
-				_page_shop("trade", cpu)
-			elif _boosting and not cpu and me.draft_stop == Route.FIT:
-				_page_fit("club", cpu)
-			elif not cpu and wear_due() >= 0:
-				_page_stops("wear", cpu)
-			elif me.draft_stop == "":
-				_page_stops("choose", cpu)
-			elif me.draft_stop == Route.FIT:
-				_page_fit("bench", cpu)
-			elif me.draft_stop == Route.HUT:
-				_page_hut(cpu)
-			else:
-				_page_shop("offers", cpu)
+var _between: RefCounted
 
 
-# A page's body, inside its margins.
-func _page(pad_x: int = PAGE_PAD_X, pad_y: int = PAGE_PAD_Y) -> VBoxContainer:
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 0)
-	interlude.add_child(BogeyUI.margin(col, pad_x, pad_y, pad_x, pad_y))
-	return col
-
-
-func _gap(h: int) -> Control:
-	var c := Control.new()
-	c.custom_minimum_size = Vector2(0, h)
-	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	return c
+func pages() -> RefCounted:
+	if _between == null:
+		_between = load("res://scripts/BetweenHoles.gd").new(self)
+	return _between
 
 
 func _italic(text: String, size: int, ink: Color = BogeyTheme.INK) -> Label:
@@ -4167,770 +4082,6 @@ func _italic(text: String, size: int, ink: Color = BogeyTheme.INK) -> Label:
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	BogeyUI.set_font(l, BogeyUI.serif_italic(500), size, ink)
 	return l
-
-
-# A wide-set capitals button: TO THE 8TH TEE, WALK ON, PLAY AGAIN.
-func _caps_btn(text: String, primary: bool, on_press: Callable, height: int = 52, size: int = 12) -> Button:
-	var b := Button.new()
-	b.text = text.to_upper()
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(0, height)
-	BogeyUI.style_button(b, primary, size)
-	b.add_theme_font_override("font", BogeyUI.sans(600, 4))
-	b.pressed.connect(on_press)
-	return b
-
-
-# The next tee, as words: "the 8th tee".
-func _next_tee() -> String:
-	return "the %s tee" % _ordinal(current_hole_index + 1)
-
-
-# A white card to choose: a kicker in small capitals, a name, and words at
-# the foot. The whole card is the button; it edges in ink under the cursor.
-func _choice_card(kicker: String, kicker_ink: Color, title: String, title_size: int,
-		words: String, foot: String, min_size: Vector2, on_press: Callable,
-		disabled: bool = false, foot_size: int = 12) -> Button:
-	var b := Button.new()
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = min_size
-	b.disabled = disabled
-	b.mouse_default_cursor_shape = Control.CURSOR_ARROW if disabled else Control.CURSOR_POINTING_HAND
-	var rest := BogeyUI._box(BogeyTheme.CARD_BG, BogeyTheme.NEUTRAL_300, 1, BogeyUI.RADIUS, 22, 20)
-	var over := BogeyUI._box(BogeyTheme.CARD_BG, BogeyTheme.INK, 2, BogeyUI.RADIUS, 22, 20)
-	over.shadow_color = BogeyTheme.SHADOW_MD
-	over.shadow_size = 18
-	over.shadow_offset = Vector2(0, 8)
-	b.add_theme_stylebox_override("normal", rest)
-	b.add_theme_stylebox_override("disabled", rest)
-	b.add_theme_stylebox_override("hover", over)
-	b.add_theme_stylebox_override("pressed", over)
-	b.add_theme_stylebox_override("hover_pressed", over)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 6)
-	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	if kicker != "":
-		col.add_child(BogeyUI.kicker(kicker, kicker_ink, 9))
-	var t := BogeyUI.heading(title, title_size)
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	col.add_child(t)
-	if words != "":
-		col.add_child(BogeyUI.body(words, 14, BogeyTheme.NEUTRAL_800))
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	col.add_child(spacer)
-	if foot != "":
-		col.add_child(BogeyUI.body(foot, foot_size, BogeyTheme.INK_SOFT if foot_size <= 12 else BogeyTheme.INK))
-	for c in col.get_children():
-		(c as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var pad := BogeyUI.margin(col, 22, 20, 22, 20)
-	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	b.add_child(pad)
-	if disabled:
-		b.modulate.a = 0.55
-	b.pressed.connect(on_press)
-	return b
-
-
-# A small club tile for the pages' bag grids: the maker's dot, the name, the
-# carry, and at the foot a line on what choosing it would do.
-func _club_tile(club: Dictionary, foot: String, foot_ink: Color, on_press: Callable,
-		enabled: bool = true, hover_ink: Color = BogeyTheme.INK) -> Button:
-	var b := Button.new()
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(196, 150)
-	b.disabled = not enabled
-	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if enabled else Control.CURSOR_ARROW
-	var rest := BogeyUI._box(BogeyTheme.CARD_BG, BogeyTheme.NEUTRAL_300, 1, BogeyUI.RADIUS, 12, 12)
-	var over := BogeyUI._box(BogeyTheme.CARD_BG, hover_ink, 2, BogeyUI.RADIUS, 12, 12)
-	b.add_theme_stylebox_override("normal", rest)
-	b.add_theme_stylebox_override("disabled", rest)
-	b.add_theme_stylebox_override("hover", over)
-	b.add_theme_stylebox_override("pressed", over)
-	b.add_theme_stylebox_override("hover_pressed", over)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 2)
-	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var dot := BogeyUI.dot(Brands.color(str(club.get("brand", Brands.NONE))), 6)
-	dot.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	col.add_child(dot)
-	var n := BogeyUI.heading(str(club.name), 19)
-	n.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	col.add_child(n)
-	var band := BogeyUI.heading("%d–%d" % [int(club.min_yard), int(club.max_yard)], 17)
-	band.add_theme_color_override("font_color", BogeyTheme.INK_SOFT)
-	col.add_child(band)
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	col.add_child(spacer)
-	var f := BogeyUI.body(foot, 11, foot_ink)
-	f.max_lines_visible = 3
-	col.add_child(f)
-	for c in col.get_children():
-		(c as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var pad := BogeyUI.margin(col, 12, 12, 12, 12)
-	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	b.add_child(pad)
-	if not enabled:
-		b.modulate.a = 0.5
-	b.pressed.connect(on_press)
-	return b
-
-
-func _tile_grid(columns: int = 7) -> GridContainer:
-	var g := GridContainer.new()
-	g.columns = columns
-	g.add_theme_constant_override("h_separation", 12)
-	g.add_theme_constant_override("v_separation", 12)
-	return g
-
-
-# The stamp, set on a page: the hole and its score, struck at an angle.
-func _stamp(over: Control, title: String, sub: String, ink: Color) -> void:
-	var holder := CenterContainer.new()
-	holder.set_anchors_preset(Control.PRESET_FULL_RECT)
-	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	over.add_child(holder)
-	var s := BogeyUI._box(BogeyTheme.PARCHMENT, BogeyTheme.INK, 1, 0, 36, 16)
-	s.shadow_color = Color(0, 0, 0, 0.3)
-	s.shadow_size = 24
-	s.shadow_offset = Vector2(0, 12)
-	var outer := BogeyUI.make_panel(BogeyUI._box(BogeyTheme.PARCHMENT, BogeyTheme.INK, 1, 0, 5, 5))
-	outer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var inner := BogeyUI.make_panel(s)
-	outer.add_child(inner)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 0)
-	inner.add_child(col)
-	var k := BogeyUI.kicker("Hole %d" % current_hole_index, BogeyTheme.INK, 10)
-	k.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(k)
-	var t := BogeyUI.heading(title, 60)
-	t.add_theme_color_override("font_color", ink)
-	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(t)
-	var u := BogeyUI.kicker(sub, BogeyTheme.INK_SOFT, 10)
-	u.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(u)
-	holder.add_child(outer)
-	outer.resized.connect(func():
-		outer.pivot_offset = outer.size / 2.0
-		outer.rotation_degrees = -6.0)
-
-
-# --- The stops ----------------------------------------------------------
-
-func _page_stops(mode: String, cpu: bool) -> void:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 80)
-	interlude.add_child(BogeyUI.margin(row, PAGE_PAD_X, PAGE_PAD_Y, PAGE_PAD_X, PAGE_PAD_Y))
-
-	# The hole just played, mounted, with its score stamped across it.
-	var mv := CourseMapView.new()
-	mv.skip_animation = true
-	var plate := BogeyUI.plate(mv)
-	plate.custom_minimum_size = Vector2(480, 0)
-	plate.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	plate.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	row.add_child(plate)
-	mv.set_hole(hole)
-	mv.set_ball(hole.pin_pos, shot_path)
-	var entry: Dictionary = round_scores[-1] if not round_scores.is_empty() \
-		and int(round_scores[-1].hole) == current_hole_index else {}
-	if not entry.is_empty():
-		var diff: int = int(entry.strokes) - int(entry.par)
-		_stamp(plate, score_name(diff), "%d stroke%s" % [int(entry.strokes), "" if int(entry.strokes) == 1 else "s"],
-			BogeyTheme.FAIRWAY_DEEP if diff < 0 else (BogeyTheme.FLAG if diff > 0 else BogeyTheme.INK))
-
-	var right := VBoxContainer.new()
-	right.add_theme_constant_override("separation", 0)
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(right)
-
-	# Where the round stands, in three big figures.
-	var stats := HBoxContainer.new()
-	stats.add_theme_constant_override("separation", 56)
-	right.add_child(stats)
-	if plays_for_keeps():
-		stats.add_child(_big_figure("Strokes in hand", str(strokes_in_hand()),
-			BogeyTheme.FLAG if strokes_in_hand() <= 3 else BogeyTheme.INK))
-	var run := running_score_diff()
-	stats.add_child(_big_figure("Round", running_score_diff_text(run).replace("-", "−"),
-		BogeyTheme.FAIRWAY_DEEP if run < 0 else (BogeyTheme.FLAG if run > 0 else BogeyTheme.INK)))
-	var best := Records.hole_best(current_hole_index)
-	if best > 0:
-		stats.add_child(_big_figure("Your best here", str(best)))
-	right.add_child(_gap(18))
-	right.add_child(BogeyUI.hairline(1.0))
-
-	match mode:
-		"waiting":
-			right.add_child(_gap(36))
-			right.add_child(_italic("Drafted — waiting for %s" % ", ".join(PackedStringArray(waiting_on_names())), 30))
-			right.add_child(_gap(8))
-			right.add_child(BogeyUI.body("The next hole starts when the last pick is in.", 14, BogeyTheme.INK_SOFT))
-		"wear":
-			_wear_block(right, wear_due())
-		"choose":
-			right.add_child(_gap(32))
-			right.add_child(_italic("Before %s, choose a stop" % _next_tee(), 30))
-			var ahead := Route.ahead_text(wind_seed, current_hole_index + 1, Course.hole_count())
-			var sub := "One stop, and the other is passed by."
-			if ahead != "":
-				sub += " Beside the pro shop ahead: %s." % ahead
-			if cpu:
-				sub = "%s is choosing a stop…" % me.name
-			right.add_child(BogeyUI.margin(BogeyUI.body(sub, 13, BogeyTheme.INK_SOFT), 0, 4, 0, 20))
-			var fork_note := _lesson_note(["fork"])
-			if fork_note != null:
-				right.add_child(BogeyUI.margin(fork_note, 0, 0, 0, 20))
-			var grid := GridContainer.new()
-			grid.columns = 2
-			grid.add_theme_constant_override("h_separation", 16)
-			grid.add_theme_constant_override("v_separation", 16)
-			right.add_child(grid)
-			var stops := Route.stops(wind_seed, current_hole_index)
-			for i in range(stops.size()):
-				var id: String = stops[i]
-				var tag := ""
-				match id:
-					Route.SHOP:
-						tag = "ALWAYS OPEN"
-					Route.FIT:
-						tag = "On the bench: " + ", ".join(PackedStringArray(me.draft_boosts.map(
-							func(b): return str(ClubAbilities.BOOSTS[b].name))))
-					Route.RANGE:
-						var bad := form_deck.bad_count()
-						tag = "No bad cards to work out" if bad == 0 else "The worst %d of your %d bad card%s leave%s." % [
-							mini(bad, ShotRules.RANGE_SESSION_PURGE), bad, "" if bad == 1 else "s", "s" if bad == 1 else ""]
-					Route.HUT:
-						tag = "Today: %s" % Route.EVENTS[Route.event(wind_seed, current_hole_index, plays_for_keeps())].title.to_lower()
-				var stop_name := str(Route.STOPS[id].name).capitalize()
-				if not stop_name.begins_with("The "):
-					stop_name = "The " + stop_name
-				var card := _choice_card("", BogeyTheme.INK, stop_name,
-					32, "%s." % Route.STOPS[id].does, tag, Vector2(0, 168),
-					func(): submit("stop", {"index": i}), cpu)
-				card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-				grid.add_child(card)
-
-
-func _big_figure(label: String, value: String, ink: Color = BogeyTheme.INK) -> Control:
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 0)
-	col.add_child(BogeyUI.kicker(label, BogeyTheme.INK_SOFT, 10))
-	var v := BogeyUI.heading(value, 72)
-	v.add_theme_color_override("font_color", ink)
-	col.add_child(v)
-	return col
-
-
-# A club worn in: what the wear does to it — groove a good shot, lose a
-# bad one, or take the maker's gain. The draft follows.
-func _wear_block(into: VBoxContainer, index: int) -> void:
-	var club: Dictionary = hand[index]
-	into.add_child(_gap(36))
-	into.add_child(BogeyUI.kicker("Worn in", BogeyTheme.INK_SOFT, 10))
-	into.add_child(BogeyUI.margin(BogeyUI.heading("Your %s has worn in" % club.name, 40), 0, 6, 0, 0))
-	into.add_child(BogeyUI.margin(BogeyUI.body(
-		"It has found the fairway or the green often enough to be trusted. Choose what the wear does to it; the stop follows.",
-		15, BogeyTheme.NEUTRAL_800), 0, 8, 0, 22))
-	var wear_note := _lesson_note(["wear"])
-	if wear_note != null:
-		into.add_child(BogeyUI.margin(wear_note, 0, 0, 0, 22))
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 18)
-	grid.add_theme_constant_override("v_separation", 18)
-	into.add_child(grid)
-	var choices := ClubAbilities.wear_choices(club)
-	for i in range(choices.size()):
-		var c: Dictionary = choices[i]
-		var kick := "Groove"
-		var ink: Color = BogeyTheme.FAIRWAY
-		var words := "Whenever its %s is dealt, one more card is dealt beside it." % c.shot
-		match str(c.kind):
-			"drop":
-				kick = "Strip"
-				ink = BogeyTheme.FLAG
-				words = "Its %s leaves your Form deck for good." % c.shot
-			"maker":
-				kick = "The maker's gain"
-				ink = BogeyTheme.GOLD
-				words = str(ClubAbilities.gain_info(str(c.shot)).get("does", ""))
-		var card := _choice_card(kick, ink, str(c.text), 30, "", words, Vector2(0, 200),
-			func(): submit("wear", {"index": index, "choice": i}))
-		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		grid.add_child(card)
-
-
-# --- The pro shop -------------------------------------------------------
-
-func _page_shop(mode: String, cpu: bool) -> void:
-	var page := _page(72, 48)
-	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 40)
-	page.add_child(head)
-	var names := VBoxContainer.new()
-	names.add_theme_constant_override("separation", 6)
-	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	names.size_flags_vertical = Control.SIZE_SHRINK_END
-	head.add_child(names)
-	var chart := VBoxContainer.new()
-	chart.custom_minimum_size = Vector2(620, 0)
-	head.add_child(chart)
-
-	var shown := current_draft_options.size()
-	var keeps: int = clampi(me.draft_keeps, 1, maxi(shown, 1))
-	match mode:
-		"cut":
-			names.add_child(BogeyUI.kicker("Bag full · %d / %d" % [hand.size(), HAND_CAP], BogeyTheme.INK_SOFT, 10))
-			names.add_child(BogeyUI.heading("Something has to go", 60))
-			add_coverage_chart(chart, "Hover a club to see the yards it covers")
-		"trade":
-			names.add_child(BogeyUI.kicker("After hole %d · trade in" % current_hole_index, BogeyTheme.INK_SOFT, 10))
-			names.add_child(BogeyUI.heading("The Pro Shop", 60))
-			add_coverage_chart(chart, "")
-		_:
-			names.add_child(BogeyUI.kicker("After hole %d · take %s" % [current_hole_index,
-				"one" if keeps == 1 else str(keeps)], BogeyTheme.INK_SOFT, 10))
-			names.add_child(BogeyUI.heading("The Pro Shop", 60))
-			var cap := draft_caption()
-			if cpu:
-				cap = "%s is at the rack." % me.name
-			if cap != "It joins your bag for the rest of the round.":
-				names.add_child(_italic(cap, 22))
-			var lesson_keys: Array = ["shop"]
-			if current_hole_index >= 2:
-				lesson_keys.append("sets")
-			if opens("hunt"):
-				lesson_keys.append("hunt")
-			if current_draft_options.any(func(c): return ClubAbilities.is_staff(c)):
-				lesson_keys.append("staff")
-			if current_draft_options.any(func(c): return ClubAbilities.curse(c) != ""):
-				lesson_keys.append("second_hand")
-			var lesson := null if cpu else _lesson_note(lesson_keys)
-			if lesson != null:
-				names.add_child(BogeyUI.margin(lesson, 0, 10, 0, 0))
-			add_coverage_chart(chart, "Hover an offer to slot it into your yardages")
-
-	match mode:
-		"offers":
-			# The rack, and under it the shop's other moves in a row.
-			var row := VBoxContainer.new()
-			row.add_theme_constant_override("separation", 28)
-			row.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			row.alignment = BoxContainer.ALIGNMENT_CENTER
-			page.add_child(row)
-			var rack := HBoxContainer.new()
-			rack.add_theme_constant_override("separation", 20)
-			rack.alignment = BoxContainer.ALIGNMENT_CENTER
-			rack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			row.add_child(rack)
-			_rack = rack
-			var offer_width := draft_card_width(shown)
-			for i in range(shown):
-				var offer: Dictionary = current_draft_options[i]
-				var cv := make_draft_card(offer, not cpu,
-					DraftAdvisor.gains(hand, offer, HAND_CAP), offer_width)
-				cv.picked.connect(_make_draft_pick_callback(i))
-				# Passing over an offer slots it into the yardage chart.
-				cv.hover_started.connect(func(_v): _set_coverage_offer(offer))
-				cv.hover_ended.connect(func(_v): _set_coverage_offer({}))
-				rack.add_child(cv)
-			var side := make_draft_side(cpu)
-			side.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-			row.add_child(side)
-		"trade":
-			page.add_child(_gap(36))
-			page.add_child(_italic("Give up a club for one more offer. Under each, what losing it costs.", 24))
-			page.add_child(_gap(20))
-			var grid := _tile_grid()
-			page.add_child(grid)
-			for i in range(hand.size()):
-				var club: Dictionary = hand[i]
-				var losses := DraftAdvisor.losses(hand, club)
-				var foot := "Nothing depends on it" if losses.is_empty() else str(losses[0].text)
-				var ink: Color = BogeyTheme.FLAG if not losses.is_empty() and losses[0].strong else BogeyTheme.NEUTRAL_700
-				var t := _club_tile(club, foot, ink, _make_trade_callback(i).bind(null))
-				if not losses.is_empty():
-					t.tooltip_text = "\n".join(PackedStringArray(losses.map(func(n): return str(n.text))))
-				grid.add_child(t)
-			page.add_child(_gap(16))
-			var back := Button.new()
-			back.text = "KEEP THEM ALL"
-			BogeyUI.style_link_button(back, 10)
-			back.add_theme_color_override("font_color", BogeyTheme.INK)
-			back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-			back.pressed.connect(_on_trade_cancelled)
-			page.add_child(back)
-		"cut":
-			page.add_child(_gap(36))
-			var what := str(pending_new_card.name) if pending_new_card is Dictionary and not (pending_new_card as Dictionary).is_empty() else "the new club"
-			page.add_child(_italic("Your bag is full. Tap a club to drop it for %s." % what, 24))
-			page.add_child(_gap(20))
-			var grid := _tile_grid()
-			page.add_child(grid)
-			for i in range(hand.size()):
-				var club: Dictionary = hand[i]
-				var losses := DraftAdvisor.losses(hand, club)
-				var foot := "Nothing depends on it" if losses.is_empty() else str(losses[0].text)
-				var t := _club_tile(club, foot, BogeyTheme.NEUTRAL_700, _make_discard_callback(i).bind(null),
-					not cpu, BogeyTheme.FLAG)
-				t.mouse_entered.connect(func(): _set_coverage_focus(club))
-				t.mouse_exited.connect(func(): _set_coverage_focus({}))
-				if not losses.is_empty():
-					t.tooltip_text = "\n".join(PackedStringArray(losses.map(func(n): return str(n.text))))
-				grid.add_child(t)
-
-
-# The pro shop's other moves, in a column beside the offers (DraftRules.gd):
-# a dig for fresh offers, a club traded in for one more — and, once
-# something has been kept from a draft that keeps two, a way to stop there.
-func make_draft_side(cpu: bool) -> Control:
-	var col := HBoxContainer.new()
-	col.add_theme_constant_override("separation", 12)
-	var shown := current_draft_options.size()
-	if opens("hunt") and DraftRules.can_dig(hand, me.draft_taken, me.draft_digs, shown):
-		var costs := DraftRules.dig_costs_card(hand)
-		col.add_child(_side_button("Dig", "%d fresh · %s" % [shown, "a bad card in" if costs else "no charge"],
-			"Send these back and see %d fresh club%s.\n%s" % [shown, "" if shown == 1 else "s",
-				"A bad card joins your Form deck, in a family you don't choose." if costs \
-				else "Old Faithful digs for nothing."],
-			func(): submit("dig", {}), cpu, false))
-	if opens("hunt") and DraftRules.can_trade(hand, me.draft_taken, me.draft_traded, shown):
-		col.add_child(_side_button("Trade in", "A club out, one more in",
-			"Give up a club from your bag for one more offer.\nThe club is gone for good, and the shot it brought leaves your Form deck.",
-			_on_trade_pressed, cpu, false))
-	if me.draft_taken > 0:
-		col.add_child(_side_button("That'll do", "Keep what you have",
-			"Stop here and leave the rest on the rack.", func(): submit("done", {}), cpu, true))
-	return col
-
-
-# One of the side column's moves: what it is in capitals, under it what it costs.
-func _side_button(title: String, sub: String, tip: String, on_press: Callable,
-		disabled: bool, primary: bool) -> Button:
-	var b := Button.new()
-	b.custom_minimum_size = Vector2(DRAFT_SIDE_WIDTH, 66)
-	b.tooltip_text = tip
-	b.focus_mode = Control.FOCUS_NONE
-	BogeyUI.style_button(b, primary, 12)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 4)
-	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var ink: Color = BogeyTheme.NEUTRAL_100 if primary else BogeyTheme.INK
-	var name_label := BogeyUI.kicker(title, ink, 12)
-	name_label.add_theme_font_override("font", BogeyUI.sans(600, 3))
-	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	col.add_child(name_label)
-	var sub_label := BogeyUI.label(sub, 12, Color(ink, 0.7))
-	sub_label.clip_text = true
-	sub_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	col.add_child(sub_label)
-	var pad := BogeyUI.margin(col, 16, 14, 12, 14)
-	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	b.add_child(pad)
-	b.pressed.connect(on_press)
-	b.disabled = disabled
-	return b
-
-
-func _on_trade_pressed() -> void:
-	Sound.play("ui_click")
-	_trading = true
-	refresh_ui()
-
-
-func _on_trade_cancelled() -> void:
-	Sound.play("ui_back")
-	_trading = false
-	refresh_ui()
-
-
-func _on_boost_pressed(boost: String) -> void:
-	Sound.play("ui_click")
-	_boosting = true
-	_boost_pick = boost
-	_tape_pick = 0
-	refresh_ui()
-
-
-func _on_boost_cancelled() -> void:
-	Sound.play("ui_back")
-	_boosting = false
-	refresh_ui()
-
-
-# --- The fitting bay ----------------------------------------------------
-
-func _page_fit(mode: String, cpu: bool) -> void:
-	var page := _page(PAGE_PAD_X, 56)
-	var head := HBoxContainer.new()
-	page.add_child(head)
-	var names := VBoxContainer.new()
-	names.add_theme_constant_override("separation", 6)
-	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(names)
-	names.add_child(BogeyUI.kicker("Before %s" % _next_tee(), BogeyTheme.INK_SOFT, 10))
-	if mode == "bench":
-		names.add_child(BogeyUI.heading("The Fitting Bay", 60))
-		names.add_child(BogeyUI.body("%s. Only the right one mends a curse." % (
-			"%s is on the bench" % me.name if cpu else "Choose a boost, then the club it goes on"),
-			15, BogeyTheme.NEUTRAL_800))
-		var leave := _caps_btn("Leave the bay", false, func(): submit("leave", {}), 48, 11)
-		leave.custom_minimum_size.x = 200
-		leave.disabled = cpu
-		leave.size_flags_vertical = Control.SIZE_SHRINK_END
-		head.add_child(leave)
-	else:
-		var boost: Dictionary = ClubAbilities.BOOSTS[_boost_pick]
-		names.add_child(BogeyUI.heading(str(boost.name), 60))
-		names.add_child(BogeyUI.body("%s. Choose the club it goes on." % boost.does, 15, BogeyTheme.NEUTRAL_800))
-	page.add_child(_gap(16))
-	page.add_child(BogeyUI.hairline(1.0))
-
-	if mode == "bench":
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 24)
-		row.alignment = BoxContainer.ALIGNMENT_CENTER
-		page.add_child(BogeyUI.margin(row, 0, 72, 0, 0))
-		for boost in me.draft_boosts:
-			var what: Dictionary = ClubAbilities.BOOSTS[boost]
-			var can: bool = hand.any(func(c): return ClubAbilities.can_boost(c, boost))
-			var card := _choice_card("Boost", BogeyTheme.FAIRWAY, str(what.name), 40, "",
-				str(what.does) if can else "No club of yours can take it",
-				Vector2(300, 300), func(): _on_boost_pressed(boost), cpu or not can, 16)
-			row.add_child(card)
-		return
-
-	# The club the boost goes on — Lead tape first asks which shot it adds.
-	var boost := _boost_pick
-	if boost == "lead_tape":
-		var tapes := HBoxContainer.new()
-		tapes.add_theme_constant_override("separation", 12)
-		page.add_child(BogeyUI.margin(tapes, 0, 24, 0, 0))
-		tapes.add_child(BogeyUI.margin(BogeyUI.kicker("The shot it adds", BogeyTheme.INK_SOFT, 10), 0, 14, 8, 0))
-		for i in range(me.draft_tape.size()):
-			var shot := str(me.draft_tape[i])
-			var b := Button.new()
-			b.text = shot
-			b.tooltip_text = FormCard.make(shot).effect_text()
-			b.custom_minimum_size = Vector2(180, 44)
-			b.focus_mode = Control.FOCUS_NONE
-			BogeyUI.style_button(b, i == _tape_pick, 14)
-			b.pressed.connect(func():
-				_tape_pick = i
-				refresh_ui())
-			tapes.add_child(b)
-	var grid := _tile_grid()
-	page.add_child(BogeyUI.margin(grid, 0, 32, 0, 0))
-	for i in range(hand.size()):
-		var club: Dictionary = hand[i]
-		var can := ClubAbilities.can_boost(club, boost)
-		var note := "Putters take no boost" if not ClubAbilities.grows(club) else "Already has one"
-		if ClubAbilities.curse(club) != "":
-			note = "Cursed: it needs a %s" % str(ClubAbilities.BOOSTS[ClubAbilities.MENDS[ClubAbilities.curse(club)]].name).to_lower()
-		if can:
-			var cursed := ClubAbilities.curse(club)
-			note = str(ClubAbilities.BOOSTS[boost].does)
-			if cursed != "":
-				note = "Mends its %s" % str(ClubAbilities.curse_info(cursed).name).to_lower()
-			elif boost == "lead_tape":
-				note = "Adds a %s to its shots" % str(me.draft_tape[_tape_pick])
-		grid.add_child(_club_tile(club, note, BogeyTheme.FAIRWAY_DEEP if can else BogeyTheme.INK_SOFT,
-			func(): submit("boost", {"boost": boost, "index": i, "shot": _tape_pick}), can))
-	var back := Button.new()
-	back.text = "BACK TO THE BENCH"
-	BogeyUI.style_link_button(back, 10)
-	back.add_theme_color_override("font_color", BogeyTheme.INK)
-	back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	back.pressed.connect(_on_boost_cancelled)
-	page.add_child(BogeyUI.margin(back, 0, 16, 0, 0))
-
-
-# --- The hut ------------------------------------------------------------
-
-func _page_hut(cpu: bool) -> void:
-	var what: Dictionary = Route.EVENTS[Route.event(wind_seed, current_hole_index, plays_for_keeps())]
-	var center := CenterContainer.new()
-	interlude.add_child(center)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 24)
-	col.custom_minimum_size = Vector2(1000, 0)
-	center.add_child(col)
-	var k := BogeyUI.kicker("The hut · before %s" % _next_tee(), BogeyTheme.INK_SOFT, 10)
-	k.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(k)
-	var t := BogeyUI.heading(str(what.title), 72)
-	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	col.add_child(t)
-	var words := BogeyUI.body(str(what.text), 18, BogeyTheme.NEUTRAL_800)
-	words.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	words.custom_minimum_size = Vector2(640, 0)
-	words.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	col.add_child(words)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	col.add_child(BogeyUI.margin(row, 0, 12, 0, 0))
-	var walk := _caps_btn("Walk on", false, func(): submit("leave", {}), 56)
-	walk.custom_minimum_size.x = 180
-	walk.disabled = cpu
-	row.add_child(walk)
-	var take := _caps_btn(str(what.take), true, func(): submit("event", {}), 56)
-	take.custom_minimum_size.x = 220
-	take.disabled = cpu
-	row.add_child(take)
-	if cpu:
-		var w := _italic("%s is at the hut…" % me.name, 22)
-		w.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		col.add_child(w)
-
-
-# --- The card -----------------------------------------------------------
-
-func _page_end() -> void:
-	var center := CenterContainer.new()
-	interlude.add_child(center)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 0)
-	center.add_child(col)
-
-	var total_strokes := 0
-	var total_par := 0
-	for entry in round_scores:
-		total_strokes += int(entry.strokes)
-		total_par += int(entry.par)
-	var diff := total_strokes - total_par
-
-	var kick := "%s · round complete" % Course.active_name
-	var headline := "%d — %s" % [total_strokes, score_diff_text(diff)]
-	if _run_over:
-		kick = "%s · out of strokes" % Course.active_name
-		headline = "The run ended after %d hole%s" % [round_scores.size(), "" if round_scores.size() == 1 else "s"]
-	if is_multiplayer():
-		headline = _winner_line()
-	if on_tour():
-		kick = "The tour · %s · %d of %d" % [Course.active_name, GameSetup.tour_leg + 1, TOUR.size()]
-	var k := BogeyUI.kicker(kick, BogeyTheme.INK_SOFT, 10)
-	k.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(k)
-	var h := BogeyUI.heading(headline, 56)
-	h.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(BogeyUI.margin(h, 0, 8, 0, 0))
-	if _opened_course != "":
-		var opened := BogeyUI.heading("%s is now open" % _opened_course, 26)
-		opened.add_theme_color_override("font_color", BogeyTheme.FAIRWAY_DEEP)
-		opened.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		col.add_child(BogeyUI.margin(opened, 0, 10, 0, 0))
-
-	# The card itself, printed large.
-	var card := ScorecardView.new()
-	if is_multiplayer():
-		var rows: Array = []
-		for i in range(players.size()):
-			var p: Player = players[i]
-			rows.append({"name": p.name, "color": CourseMapView.seat_color(i),
-				"scores": p.round_scores, "live": 0, "active": false})
-		card.set_card(rows, -1)
-	else:
-		card.set_round(round_scores, -1, 0)
-	var big := 1.3
-	card.scale = Vector2(big, big)
-	var holder := Control.new()
-	holder.custom_minimum_size = card.custom_minimum_size * big
-	holder.add_child(card)
-	var sheet := BogeyUI.make_panel(BogeyUI.card_style(28, 22))
-	sheet.add_child(holder)
-	sheet.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	col.add_child(BogeyUI.margin(sheet, 0, 32, 0, 0))
-
-	var bag_line := bag_summary()
-	if on_tour():
-		bag_line = "The tour, %s. %s" % [tour_total_text(), bag_line]
-	var bl := BogeyUI.body(bag_line, 13, BogeyTheme.INK_SOFT)
-	bl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(BogeyUI.margin(bl, 0, 14, 0, 0))
-	var end_note := _lesson_note(["end"])
-	if end_note != null:
-		end_note.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		col.add_child(BogeyUI.margin(end_note, 0, 22, 0, 0))
-
-	var buttons := HBoxContainer.new()
-	buttons.add_theme_constant_override("separation", 14)
-	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
-	var menu := _caps_btn("Menu", false, _on_header_menu_pressed, 52, 11)
-	menu.custom_minimum_size.x = 140
-	if tour_continues():
-		# Pack for the next course: the bag down to what travels, then on.
-		var next_course := tour_course_name(GameSetup.tour_leg + 1)
-		var over: int = hand.size() - TOUR_KEEP
-		if over > 0:
-			col.add_child(_gap(28))
-			col.add_child(BogeyUI.hairline(1.0))
-			var ph := HBoxContainer.new()
-			ph.add_child(BogeyUI.heading("Pack for %s: leave %d behind" % [next_course, over], 30))
-			col.add_child(BogeyUI.margin(ph, 0, 14, 0, 0))
-			col.add_child(BogeyUI.body("%d clubs travel, with everything they have gained. Tap a club to leave it behind." % TOUR_KEEP,
-				13, BogeyTheme.NEUTRAL_800))
-			var grid := _tile_grid(mini(hand.size(), 14))
-			grid.add_theme_constant_override("h_separation", 6)
-			col.add_child(BogeyUI.margin(grid, 0, 14, 0, 0))
-			var putters: int = hand.filter(func(c): return ClubAbilities.is_putter(c)).size()
-			for i in range(hand.size()):
-				var club: Dictionary = hand[i]
-				var stays: bool = ClubAbilities.is_putter(club) and putters <= 1
-				var losses := DraftAdvisor.losses(hand, club)
-				var foot := "Your only putter travels" if stays else ("" if losses.is_empty() else str(losses[0].text))
-				var t := _club_tile(club, foot, BogeyTheme.FLAG, func(): _on_pack_leave(i), not stays, BogeyTheme.FLAG)
-				t.custom_minimum_size = Vector2(96, 110)
-				grid.add_child(t)
-		buttons.add_child(_caps_btn("Start the tour again", false, restart_round, 52, 11))
-		var go := _caps_btn("Tee off at %s" % next_course, true, _on_tour_next, 52, 12)
-		go.custom_minimum_size.x = 300
-		go.disabled = over > 0
-		buttons.add_child(go)
-	else:
-		buttons.add_child(menu)
-		var again := _caps_btn("Start the tour again" if on_tour() else "Play again", true, restart_round, 52, 12)
-		again.custom_minimum_size.x = 220
-		buttons.add_child(again)
-	col.add_child(BogeyUI.margin(buttons, 0, 32, 0, 0))
-
-
-# The headline of a group's card: who won, and by how much — a tie said as one.
-func _winner_line() -> String:
-	var standings: Array = players.filter(func(p): return not p.round_scores.is_empty())
-	if standings.size() < 2:
-		return "Round complete"
-	standings.sort_custom(func(a, b): return a.total_strokes() < b.total_strokes())
-	var low: int = standings[0].total_strokes()
-	var tied: Array = standings.filter(func(p): return p.total_strokes() == low)
-	if tied.size() > 1:
-		return "%s tie on %d" % [" & ".join(PackedStringArray(tied.map(func(p): return p.name))), low]
-	var gap: int = standings[1].total_strokes() - low
-	var who: String = standings[0].name
-	return "%s %s by %d" % [who, "win" if who == "You" else "wins", gap]
-
-
-# What the draft's caption says about how it was earned.
-func draft_caption() -> String:
-	if me.draft_taken > 0:
-		return "One kept. Keep another, or call it done."
-	match me.call_result:
-		DraftRules.MADE:
-			return "You called %s and made it: more to choose from, and %d to keep." % [
-				DraftRules.CALL_NAME, me.draft_keeps]
-		DraftRules.MISSED:
-			return "You called %s and missed: a short rack this hole." % DraftRules.CALL_NAME
-	return "It joins your bag for the rest of the round."
 
 
 # How wide a bag card may be with `count` of them in the row: as wide as
@@ -5975,6 +5126,7 @@ func apply_deck_snapshot(decks: Dictionary) -> void:
 	# on the host as part of this action.
 	if decks.has("hole") and int(decks["hole"]) != current_hole_index:
 		current_hole_index = int(decks["hole"])
+		_opening = false
 		hole = HoleData.for_round(current_hole_index, wind_seed)
 		hole_yardage = hole.yardage
 		hole_par = hole.par
@@ -6022,7 +5174,6 @@ func _retire_seat(seat: int) -> void:
 	if p.abandoned:
 		return
 	p.abandoned = true
-	log_msg("\n[b]%s left the game.[/b]" % p.name)
 
 	# Concede the current hole if they were still playing it, so the hole
 	# can complete and the scorecard isn't left with a gap.
@@ -6066,6 +5217,5 @@ func net_seat_abandoned(seat: int) -> void:
 func on_host_lost() -> void:
 	if not online:
 		return
-	log_msg("\n[b]The host left — the round can't continue.[/b]")
 	state = State.DONE
 	refresh_ui()
