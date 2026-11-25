@@ -984,6 +984,29 @@ A round is an hour or more and a tour is four of them, and until this date nothi
 
 ---
 
+### Marking what goes well (2026-11-25)
+
+Alastair, the same evening: *"i feel like i need better dopamine hits from this game."* The game marked a hole when it finished and a bag when it grew, and nothing in between: about fifty long shots and twenty-eight putts a round against four birdies, so the good news arrived four times an hour and a shot hit stiff got a landing sound and a paragraph. No rule changed. Six things that already happened are now shown happening:
+
+| What happens | What the screen does |
+|---|---|
+| A long shot finds the green | A note on the map with what is left: "12 FT", gilt inside 6 feet ("Stiff"), green inside 15 ("Close"), plain beyond. Not for a ball conceded as a gimme: the hole's own stamp is next |
+| A drive finds the fairway | A lesser note, "FAIRWAY" |
+| ...and each good long shot in a run | A bell, a step higher up a pentatonic scale for each one running (fairway or green keeps the run, anything else ends it) |
+| A shot leaves a mark on its club | The note names it ("7-Iron · mark 2 of 3") and the club's tile in the bag swells and settles in green. The third mark was already stamped WORN IN |
+| A hole is finished in fewer than ever before | "your best here" on the hole's stamp, and the card counts them. One putt from distance says "a mark on the putter" |
+| A course record falls | "A new course record: 71 beats 74" on the card. The record was kept before and never announced: the line that said so went to the play-by-play log, which had not been on screen since 2026-11-16 |
+| Strokes in hand change | On the stops page the figure starts where it stood and counts to where it stands, a tick a stroke, with "+1" in green or "−2" in claret beside the label |
+| The rack is dealt | Offers come up one at a time. A limited edition, a Staff club or a club that would make a set lands with a bell, swells once and holds the next one back a beat |
+| The round ends | The card is told a line at a time: the strokes counted up, then the record, the bests, the course opened, the scorecard, the bag (which now names its biggest set) |
+
+- **All of it is cosmetic.** No game state waits on any of it, a computer golfer's shots are not rung or noted, and with the shot-speed setting on Instant none of it plays.
+- **Not judged by eye or ear.** It was built with windowed launches switched off (Alastair's request the same day), so the sizes, colours, timings and the bell are first guesses that nobody has seen or heard. What was checked is that each one fires: `PayoffTest.gd` plays a three-hole round with the animations on and reads the real nodes.
+
+**As built**: `HoleBanner.note()` (the stamp, at about two-thirds the size and half the stay), `Main._shot_payoff()` (`STIFF_YARDS`, `CLOSE_YARDS`), `Player.good_run` and `bests`, `Sound.chime()` and `play_pitched()` (the bell is the `chime` group, one file, `ui/select_001.ogg`; not `ui_bong`, which is the sound of a ball out of bounds), `CardView.flash_mark()`, `Main.flourish()` (a one-off that may start again for a third of a second, because a page is often built twice in a frame and the second build frees the first one's nodes), and in `BetweenHoles.gd` `_count_in_hand()`, `_deal_in()` / `_worth_a_beat()` and `_tally()`. A container resets a child's scale when it sorts, so the swells are tweens with `from()`.
+
+---
+
 ## 7A. The Guided Round (2026-11-25)
 
 A new player's first solo round brings the game in a piece at a time. Nothing is cut; pieces are held back by hole, and Charlie says what each one is the first time it turns up (`scripts/Lessons.gd`). Why: the first tee showed about ten ideas at once and the first pro shop five more, and the systems had outrun what a new player could take in.
@@ -1074,6 +1097,7 @@ Suggested build order, each stage playable before moving to the next. **Note**: 
 16. ~~**The way round**~~ **Done** (2026-11-19) — a fork after every hole (pro shop, or a fitting bay, the range or the hut), four things that can happen at the hut, a solo round played for ten strokes in hand, and trouble that bites harder late. See Section 3F.
 17. ~~**Seven follow-ups**~~ **Done** (2026-11-20) — growth shown on the bag tile, a hole capped at triple par, a livelier late wind and tighter late pins, the putter wearing in and going twitchy, the tour of four courses, Tempo and Pocket cards, and the hustler settled by a real putt. See Sections 3E, 3F, 3G, 4 and 5.
 18. ~~**The shape of a run**~~ **Done** (2026-11-25) — the round opens at the pro shop, a hole is capped at double par, a round and a tour are saved at every stop and picked up from the title, and the ladder's target steps down. In the code, `Main.gd` lost its play-by-play log (written by 103 calls and read by nothing since the log left the screen) and its between-holes pages, which are `BetweenHoles.gd`. See Sections 3H, 5, 7 and 8.
+19. ~~**Marking what goes well**~~ **Done** (2026-11-25) — a good shot is noted on the map and rung, a club's mark lands on its tile, bests and course records are announced, strokes in hand count, the rack is dealt and the card is tallied. No rule changed. See Section 7, "Marking what goes well".
 
 ---
 

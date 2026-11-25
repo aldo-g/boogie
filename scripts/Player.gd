@@ -103,6 +103,12 @@ var hand_bonus: int = 0
 # {club, text}. Empty at the start of each hole.
 var last_shot: Dictionary = {}
 
+# --- What has gone well, for the screen to mark (Main._shot_payoff) ---
+# Long shots in a row that found the fairway or the green, and the hole
+# bests beaten this round.
+var good_run: int = 0
+var bests: int = 0
+
 # --- Mid-turn selections (never outlive this player's own turn) ---
 var pending_club: Dictionary = {}
 var pending_new_card = null

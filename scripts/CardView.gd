@@ -547,6 +547,21 @@ func set_selected(on: bool) -> void:
 	CardFace.apply_state(_panel_style, _edge, _hovered, _selected)
 
 
+# A mark has just landed on this club (Main._mark_club): the tile swells
+# and settles, green for a moment. Call it once the card is in the tree.
+func flash_mark() -> void:
+	if _panel == null or not is_inside_tree():
+		return
+	pivot_offset = _size / 2.0
+	_panel.modulate = Color(0.78, 1.0, 0.80)
+	var tw := create_tween().set_parallel(true)
+	# from(): the row is a container, which puts a child's scale back to
+	# one when it sorts, so the swell has to be the tween's own start.
+	tw.tween_property(self, "scale", Vector2.ONE, 0.45).from(Vector2(1.08, 1.08)) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_panel, "modulate", Color.WHITE, 0.7)
+
+
 # Steps a card back — the rest of the bag while one club is in hand, or a
 # club the lie won't let you play.
 func set_dimmed(on: bool) -> void:

@@ -13,6 +13,7 @@ extends Control
 enum Tone { GREAT, GOOD, PLAIN, BAD, NOTE }
 
 const HOLD_SEC := 1.7
+const NOTE_HOLD_SEC := 0.9   # a note() is gone sooner
 const TILT := -0.07   # radians — stamped by hand, not typeset
 
 # The control it lands on (the hole map). Set by Main.
@@ -112,7 +113,19 @@ static func result_tone(diff: int) -> int:
 # Lands the stamp. `kicker` is the small line above the title (who or
 # where), `subtitle` the one below (the detail); either may be empty.
 func stamp(title: String, kicker: String = "", subtitle: String = "", tone: int = Tone.PLAIN) -> void:
+	_land(title, kicker, subtitle, tone, false)
+
+
+# A lesser mark, for one good shot (Main._shot_payoff): smaller, sooner
+# gone, and lower on the map so the green it is about stays in view.
+func note(title: String, kicker: String = "", subtitle: String = "", tone: int = Tone.PLAIN) -> void:
+	_land(title, kicker, subtitle, tone, true)
+
+
+func _land(title: String, kicker: String, subtitle: String, tone: int, small: bool) -> void:
 	var ink: Array = inks(tone)
+	_title.add_theme_font_size_override("font_size", 34 if small else 54)
+	_sub.add_theme_font_size_override("font_size", 15 if small else 19)
 	_style.border_color = ink[0]
 	_title.text = title
 	_title.add_theme_color_override("font_color", ink[0])
@@ -124,11 +137,11 @@ func stamp(title: String, kicker: String = "", subtitle: String = "", tone: int 
 	_sub.add_theme_color_override("font_color", ink[1])
 
 	_panel.reset_size()
-	_place()
+	_place(0.62 if small else 0.42)
 	_panel.visible = true
 	_panel.rotation = TILT
 	_panel.modulate.a = 0.0
-	_panel.scale = Vector2(1.7, 1.7)
+	_panel.scale = Vector2(1.35, 1.35) if small else Vector2(1.7, 1.7)
 
 	if _tween != null and _tween.is_valid():
 		_tween.kill()
@@ -139,7 +152,7 @@ func stamp(title: String, kicker: String = "", subtitle: String = "", tone: int 
 	_tween.tween_property(_panel, "scale", Vector2.ONE, 0.26) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_tween.set_parallel(false)
-	_tween.tween_interval(HOLD_SEC + (0.5 if tone == Tone.GREAT else 0.0))
+	_tween.tween_interval(NOTE_HOLD_SEC if small else HOLD_SEC + (0.5 if tone == Tone.GREAT else 0.0))
 	_tween.tween_property(_panel, "modulate:a", 0.0, 0.35)
 	_tween.tween_callback(func(): _panel.visible = false)
 
@@ -149,12 +162,13 @@ func is_showing() -> bool:
 
 
 # Centred on the anchor, a little above its middle so the ball and the
-# green — usually at the top of the map — stay readable around it.
-func _place() -> void:
+# green — usually at the top of the map — stay readable around it. `down`
+# is how far down the anchor its centre sits.
+func _place(down: float = 0.42) -> void:
 	var rect := Rect2(Vector2.ZERO, size)
 	if anchor != null and anchor.is_inside_tree():
 		rect = Rect2(anchor.global_position - global_position, anchor.size)
 	var sz := _panel.get_combined_minimum_size()
 	_panel.size = sz
 	_panel.pivot_offset = sz / 2.0
-	_panel.position = rect.position + Vector2(rect.size.x * 0.5, rect.size.y * 0.42) - sz / 2.0
+	_panel.position = rect.position + Vector2(rect.size.x * 0.5, rect.size.y * down) - sz / 2.0

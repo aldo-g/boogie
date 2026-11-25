@@ -24,6 +24,10 @@ const SFX := {
 	"ui_back": ["ui/back_001.ogg", "ui/back_002.ogg", "ui/back_003.ogg", "ui/back_004.ogg"],
 	"ui_error": ["ui/error_001.ogg", "ui/error_002.ogg", "ui/error_003.ogg", "ui/error_004.ogg"],
 	"ui_bong": ["ui/bong_001.ogg"],
+	# The bell for something gone well (chime()). One file, so that its
+	# pitch is the only thing that changes; and not the bong, which is the
+	# sound of a ball out of bounds.
+	"chime": ["ui/select_001.ogg"],
 
 	# Cards — club bag and Form hand
 	"card_slide": ["cards/card-slide-1.ogg", "cards/card-slide-2.ogg", "cards/card-slide-3.ogg", "cards/card-slide-4.ogg",
@@ -130,6 +134,28 @@ func apply_volumes() -> void:
 # pitch shift (0.0 = exact); the default is just enough that two slides in
 # a row don't sound identical.
 func play(group: String, pitch_spread: float = 0.06, db: float = 0.0) -> void:
+	_start(group, db, 0.0, pitch_spread)
+
+
+# ...or at an exact pitch (1.0 is as recorded).
+func play_pitched(group: String, pitch: float, db: float = 0.0) -> void:
+	_start(group, db, pitch, 0.0)
+
+
+# The note for a good shot, and a step higher for each one in a run: a
+# pentatonic scale, in semitones above the first, so any run of them sits
+# well together. It tops out an octave and a fifth up.
+const CHIME_STEPS := [0, 2, 4, 7, 9, 12, 14, 16, 19]
+
+func chime(run: int, db: float = -6.0) -> void:
+	var step: int = CHIME_STEPS[clampi(run - 1, 0, CHIME_STEPS.size() - 1)]
+	play_pitched("chime", pow(2.0, step / 12.0), db)
+
+
+# `pitch` above zero is exact; otherwise it is drawn within `pitch_spread`
+# of 1.0. Nothing random is drawn until there is a sound to play, so a
+# harness with no sounds loaded draws exactly what it drew without this.
+func _start(group: String, db: float, pitch: float, pitch_spread: float) -> void:
 	if not sfx_enabled or Settings.is_muted("sfx"):
 		return
 	# Before _ready() has loaded anything (the headless harnesses never
@@ -143,7 +169,7 @@ func play(group: String, pitch_spread: float = 0.06, db: float = 0.0) -> void:
 	var voice: AudioStreamPlayer = _voices[_next_voice]
 	_next_voice = (_next_voice + 1) % VOICES
 	voice.stream = list[randi() % list.size()]
-	voice.pitch_scale = randf_range(1.0 - pitch_spread, 1.0 + pitch_spread)
+	voice.pitch_scale = pitch if pitch > 0.0 else randf_range(1.0 - pitch_spread, 1.0 + pitch_spread)
 	voice.volume_db = SFX_DB + db + Settings.volume_db("sfx")
 	voice.play()
 

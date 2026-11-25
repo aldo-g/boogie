@@ -111,6 +111,32 @@ var _run_over: bool = false
 # harness turns off to play a round without it.
 var _opening: bool = false
 var opening_draft: bool = true
+
+# --- Marking what goes well (cosmetic; nothing in the game waits on it) ---
+# The club whose bag tile should show a mark landing: {seat, name, until}.
+var _mark_flash: Dictionary = {}
+# Strokes in hand before the hole just finished, for the stops page to
+# count from (-1: nothing to count).
+var _in_hand_from: int = -1
+# What the round did to the course record, once recorded: {new_best,
+# previous}.
+var _round_record: Dictionary = {}
+# One-off flourishes already started (flourish()): key -> when, in msec.
+var _flourish: Dictionary = {}
+
+
+# Whether a one-off flourish named `key` should play in the screen being
+# built: the first time it is asked, and again for a moment after. A page
+# is often built twice in a frame (refresh_ui is called freely) and the
+# second build frees the first one's nodes, so "once" has to mean "until
+# it has had time to start". Never with animations off.
+func flourish(key: String, window_msec: int = 350) -> bool:
+	if not _can_stamp():
+		return false
+	var now := Time.get_ticks_msec()
+	if not _flourish.has(key):
+		_flourish[key] = now
+	return now - int(_flourish[key]) < window_msec
 # Guided round (Lessons.gd): lesson key -> the hole it was said on.
 var _taught: Dictionary = {}
 var _lesson_fresh: bool = false   # a lesson has been said since the player last acted
@@ -389,6 +415,7 @@ func opens_at_shop() -> bool:
 # (deal_opening) and it came with the round, so nothing is dealt here.
 func begin_round() -> void:
 	_save_round(0)
+	_flourish = {}
 	current_hole_index = 1
 	if not online:
 		_opening = opens_at_shop()
@@ -446,6 +473,7 @@ func save_data(holes_done: int, done: bool = false) -> Dictionary:
 			"round_scores": p.round_scores.duplicate(true),
 			"ability_log": p.ability_log.duplicate(true),
 			"hand_bonus": p.hand_bonus,
+			"bests": p.bests,
 			"tempo": p.tempo,
 			"pocket": form_card_names(p.pocket),
 			# The call on the hole just scored: the stop that follows pays it.
@@ -495,6 +523,7 @@ func apply_save(data: Dictionary) -> void:
 		p.round_scores = (e.get("round_scores", []) as Array).duplicate(true)
 		p.ability_log = (e.get("ability_log", {}) as Dictionary).duplicate(true)
 		p.hand_bonus = int(e.get("hand_bonus", 0))
+		p.bests = int(e.get("bests", 0))
 		p.tempo = int(e.get("tempo", 0))
 		p.pocket = form_cards_from_names(e.get("pocket", []))
 		p.call_result = str(e.get("call_result", ""))
@@ -1773,19 +1802,75 @@ func _club_kicker(club: Dictionary) -> String:
 
 # A shot that found the fairway or the green leaves a mark on its club;
 # enough of them and the club is worn in, a choice taken at the next draft.
-func _mark_club(club: Dictionary) -> void:
+# Returns what the shot did to the club: nothing, a mark, or a level.
+const MARK_NONE := 0
+const MARK_MADE := 1
+const MARK_LEVEL := 2
+
+func _mark_club(club: Dictionary) -> int:
 	var mine := _held(club)
 	if not ClubAbilities.grows(mine):
-		return
+		return MARK_NONE
 	var due := ClubAbilities.wear_pending(mine)
+	# Past its last level a club has nothing left to earn.
+	var full: bool = int(mine.get("marks", 0)) >= ClubAbilities.MAX_LEVEL * ClubAbilities.WEAR_MARKS
 	mine["marks"] = int(mine.get("marks", 0)) + 1
+	if full:
+		return MARK_NONE
+	# Its tile in the bag shows the mark landing (rebuild_bag_row).
+	_mark_flash = {"seat": active_index, "name": str(mine.get("name", "")),
+		"until": Time.get_ticks_msec() + 700}
 	# Not on the last hole: no draft follows it to make the choice at.
 	if ClubAbilities.wear_pending(mine) <= due or current_hole_index >= Course.hole_count():
-		return
+		return MARK_MADE
 	Sound.play("ui_confirm")
 	if _can_stamp():
 		hole_banner.stamp("WORN IN", _club_kicker(mine), "Choose what it gains at the draft",
 			HoleBanner.Tone.GOOD)
+	return MARK_LEVEL
+
+
+# --- The good shot, paid off (2026-11-25) --------------------------------
+# A hole was marked when it finished and a bag when it grew, but a shot
+# that came off was not, and it is the thing done most: about fifty long
+# shots a round against four birdies. Now a long shot that finds the green
+# is called on the map with what it has left, a drive that finds the
+# fairway gets a lesser mark, the club's mark is named, and each good shot
+# in a run rings a step higher (Sound.chime). Cosmetic: no game state
+# waits on any of it, and a computer golfer's shots are not rung.
+const STIFF_YARDS := 2.0    # an approach inside this is stiff
+const CLOSE_YARDS := 5.0    # ...and inside this it is close
+
+func _shot_payoff(club: Dictionary, from_pos: Vector2, marked: int) -> void:
+	var good: bool = current_lie == "fairway" or current_lie == "green"
+	me.good_run = me.good_run + 1 if good else 0
+	if not good or not _can_stamp() or is_cpu_seat(active_index):
+		return
+	Sound.chime(me.good_run)
+	# A club that has just worn in has the map to itself.
+	if marked == MARK_LEVEL:
+		return
+	var sub := ""
+	if marked == MARK_MADE:
+		var mine := _held(club)
+		sub = "%s · mark %d of %d" % [str(mine.get("name", "")),
+			(int(mine.get("marks", 1)) - 1) % ClubAbilities.WEAR_MARKS + 1, ClubAbilities.WEAR_MARKS]
+	elif me.good_run >= 3:
+		sub = "%d good shots running" % me.good_run
+	if current_lie == "green":
+		var left: float = ball_pos.distance_to(hole.pin_pos)
+		# Conceded: the hole's own stamp is next.
+		if ShotRules.is_gimme(left):
+			return
+		var title := "%d FT" % maxi(1, roundi(left * 3.0))
+		if left <= STIFF_YARDS:
+			hole_banner.note(title, "Stiff", sub, HoleBanner.Tone.GREAT)
+		elif left <= CLOSE_YARDS:
+			hole_banner.note(title, "Close", sub, HoleBanner.Tone.GOOD)
+		else:
+			hole_banner.note(title, "On the green", sub, HoleBanner.Tone.PLAIN)
+	elif from_pos.distance_to(hole.tee_pos) < 0.5:
+		hole_banner.note("FAIRWAY", "Off the tee", sub, HoleBanner.Tone.NOTE)
 
 
 # A ball in the water or out of bounds can leave a curse on the club that
@@ -2220,7 +2305,15 @@ func bag_summary() -> String:
 		levels += int(c.get("level", 0))
 		boosts += (c.get("boosts", []) as Array).size()
 		cursed += 1 if ClubAbilities.curse(c) != "" else 0
-	return "The bag: %d clubs, %d level%s worn in, %d boost%s, %d cursed." % [hand.size(),
+	# The biggest set it made, when it made one of four or more.
+	var set_text := ""
+	var top := 0
+	var tiers: Dictionary = _bag_marks().tiers
+	for b in tiers:
+		if int(tiers[b]) >= 4 and int(tiers[b]) > top:
+			top = int(tiers[b])
+			set_text = " a %s %d-set," % [Brands.display_name(b), top]
+	return "The bag: %d clubs,%s %d level%s worn in, %d boost%s, %d cursed." % [hand.size(), set_text,
 		levels, "" if levels == 1 else "s", boosts, "" if boosts == 1 else "s", cursed]
 
 
@@ -2631,10 +2724,11 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 	current_lie = settled.lie
 	var hazard_hit: bool = settled.hazard
 	# What the shot did to the club that hit it (ClubAbilities, "Growth").
+	var marked := MARK_NONE
 	if int(settled.penalty) > 0:
 		maybe_curse_club(club)
 	elif current_lie == "fairway" or current_lie == "green":
-		_mark_club(club)
+		marked = _mark_club(club)
 
 	# (The sound of the landing is the map's: it plays it as the ball
 	# touches down, not here once it has stopped.)
@@ -2652,6 +2746,7 @@ func _resolve_shot_landing(before_pos: Vector2, aim_dir: Vector2, result: Dictio
 	apply_landing_abilities(lie_result, hazard_hit)
 	caddy_says("landing", {"terrain": lie_result, "card": _caddy_card, "carry": outcome.carry,
 		"distance_cap": ShotRules.lie_distance_cap(hand, current_lie)})
+	_shot_payoff(club, before_pos, marked)
 
 	advance_after_shot()
 
@@ -3183,7 +3278,7 @@ func under_par_streak(p: Player) -> int:
 
 
 # The stamp for the hole the active player has just finished.
-func show_hole_banner(diff: int, holed_from: int, streak: int) -> void:
+func show_hole_banner(diff: int, holed_from: int, streak: int, best_here: bool = false) -> void:
 	if not _can_stamp():
 		return
 	var kicker := "Hole %d" % current_hole_index
@@ -3198,6 +3293,11 @@ func show_hole_banner(diff: int, holed_from: int, streak: int) -> void:
 		detail += " · called it"
 	elif me.call_result == DraftRules.MISSED:
 		detail += " · the call missed"
+	if best_here:
+		detail += " · your best here"
+	# One putt from distance marks the putter (_putter_after_hole).
+	if me.putt_from >= 0 and strokes - me.putt_from == 1 and me.putt_first >= ClubAbilities.PUTT_MARK_YARDS:
+		detail += " · a mark on the putter"
 	# Worked out now, stamped when the ball has dropped: by then the turn
 	# may have passed to someone else.
 	var title := HoleBanner.result_title(diff, strokes)
@@ -3383,13 +3483,20 @@ func finish_hole(holed_from: int = -1) -> void:
 	var diff := strokes - hole_par
 	me.holed_out = true
 	_after_putt_drops(func(): Sound.jingle(diff))
+	# What was in hand before this hole: the stops page counts from it.
+	_in_hand_from = strokes_in_hand() if plays_for_keeps() else -1
 	round_scores.append({"hole": current_hole_index, "par": hole_par, "strokes": strokes})
 	# A called hole is settled here; the draft that follows pays it out.
 	me.call_result = DraftRules.call_result(me.called, strokes, hole_par)
+	# The best this player has made here goes on the stamp, and on the card.
+	var best_here := false
 	if records_this_seat(active_index):
-		Records.record_hole(current_hole_index, strokes)
+		var prev := Records.record_hole(current_hole_index, strokes)
+		best_here = prev > 0 and strokes < prev
+		if best_here:
+			me.bests += 1
 	var streak := under_par_streak(me)
-	show_hole_banner(diff, holed_from, streak)
+	show_hole_banner(diff, holed_from, streak, best_here)
 	_putter_after_hole()
 	if is_cpu_seat(active_index):
 		caddy_says("rival_holed", {"diff": diff, "rival": me.name}, true)
@@ -3580,6 +3687,7 @@ func finish_hole_done() -> void:
 
 func finish_round() -> void:
 	state = State.DONE
+	_round_record = {}
 	_play_round_jingle()
 	record_finished_round()
 	# The round is over and so is its save, unless it was a tour course
@@ -3652,7 +3760,10 @@ func _record_rounds() -> void:
 		var p: Player = players[i]
 		if p.round_scores.size() < Course.hole_count():
 			continue
-		Records.record_round(p.name, p.total_strokes(), p.total_par(), round_mode())
+		var r := Records.record_round(p.name, p.total_strokes(), p.total_par(), round_mode())
+		# The first of them is the one the card speaks of (a solo round's own).
+		if _round_record.is_empty():
+			_round_record = {"new_best": bool(r.new_best), "previous": r.previous_best}
 
 
 var _settings_popup: PopupPanel
@@ -4671,6 +4782,11 @@ func rebuild_bag_row() -> void:
 			cv.set_selected(i == in_hand)
 			cv.set_dimmed(i != in_hand)
 		options_container.add_child(cv)
+		# The mark the last shot left on this club lands on its tile.
+		if choosing and not _mark_flash.is_empty() and int(_mark_flash.seat) == active_index \
+				and str(card.get("name", "")) == str(_mark_flash.name) \
+				and Time.get_ticks_msec() < int(_mark_flash.until) and _can_stamp():
+			cv.flash_mark()
 
 
 # --- Draft pick: pop, then fade the whole offer row out before actually

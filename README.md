@@ -398,6 +398,7 @@ Bogey/
     ├── TestBags.gd        Ability loadouts the flow harnesses play with (dev tool)
     ├── RecordsTest.gd     Records and settings persistence harness (dev tool)
     ├── SaveTest.gd        Leaving a round and coming back (dev tool)
+    ├── PayoffTest.gd      The marks the screen makes when something goes well (dev tool)
     ├── ShotResolver.gd    Shot math — distance, deviation, cup radius
     ├── FormCard.gd        A single Form card and its known effect
     ├── FormDeck.gd        The shared Form deck and per-tier draws
@@ -464,6 +465,12 @@ godot --headless --script res://scripts/RecordsTest.gd
 # built from the save stands where the first did and plays on, a tour and
 # a computer golfer come back. Uses a scratch file — never your own save
 godot --headless --script res://scripts/SaveTest.gd
+
+# The marks the screen makes when something goes well: a good shot noted on
+# the map, a club's mark landing on its tile, a best on the stamp, strokes
+# in hand counting, the rack dealt, the card tallied. Plays three holes with
+# the animations on, so it takes about half a minute. Scratch files only
+godot --headless --script res://scripts/PayoffTest.gd
 
 # Full 18-hole rounds for 1-4 players: turn order, hole flow, bag caps
 godot --headless --script res://scripts/MPTest.gd
@@ -594,6 +601,11 @@ takes a few seconds.
 - **Multiplayer for 2-4 players, online or hot-seat** — furthest-from-pin
   turn order, per-player bags/Form decks/draft pools, standings and a
   winner; host-authoritative online with disconnect recovery
+- **Good things are marked as they happen**: a shot that finds the green is
+  called on the map with what it has left, a run of good shots rings a
+  step higher each time, a club's mark lands on its tile, bests and course
+  records are announced, strokes in hand count up and down, the rack is
+  dealt and the card is tallied
 - **A round you can leave**: saved at every stop, picked up from the title
   with Continue — a tour between its courses too
 - Starting Bogey-Mart bag, and an opening pro shop (five on the rack, keep

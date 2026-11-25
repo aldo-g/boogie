@@ -254,8 +254,16 @@ func _page_stops(mode: String, cpu: bool) -> void:
 	stats.add_theme_constant_override("separation", 56)
 	right.add_child(stats)
 	if main.plays_for_keeps():
-		stats.add_child(_big_figure("Strokes in hand", str(main.strokes_in_hand()),
-			BogeyTheme.FLAG if main.strokes_in_hand() <= 3 else BogeyTheme.INK))
+		var in_hand: int = main.strokes_in_hand()
+		var fig := _big_figure("Strokes in hand", str(in_hand),
+			BogeyTheme.FLAG if in_hand <= 3 else BogeyTheme.INK)
+		stats.add_child(fig)
+		# The hole just played is paid in or taken out in front of you, once.
+		# What the hole just played paid in or took out stays beside the
+		# label, and the first time the page is shown the figure counts to it.
+		if main._in_hand_from >= 0 and main._in_hand_from != in_hand:
+			_count_in_hand(fig, main._in_hand_from, in_hand,
+				main.flourish("in hand %d" % main.current_hole_index))
 	var run := main.running_score_diff()
 	stats.add_child(_big_figure("Round", main.running_score_diff_text(run).replace("-", "−"),
 		BogeyTheme.FAIRWAY_DEEP if run < 0 else (BogeyTheme.FLAG if run > 0 else BogeyTheme.INK)))
@@ -325,6 +333,31 @@ func _big_figure(label: String, value: String, ink: Color = BogeyTheme.INK) -> C
 	v.add_theme_color_override("font_color", ink)
 	col.add_child(v)
 	return col
+
+
+# Strokes in hand moving after a hole: what the hole paid or cost is said
+# beside the label in green or claret, and while `counting` the figure
+# starts where it stood and steps to where it stands, a tick a stroke.
+func _count_in_hand(fig: Control, from: int, to: int, counting: bool) -> void:
+	var kicker := fig.get_child(0) as Label
+	var value := fig.get_child(1) as Label
+	if kicker == null or value == null:
+		return
+	var gain := to - from
+	kicker.text = "%s  %s%d" % [kicker.text, "+" if gain > 0 else "−", absi(gain)]
+	kicker.add_theme_color_override("font_color", BogeyTheme.FAIRWAY_DEEP if gain > 0 else BogeyTheme.FLAG)
+	if not counting:
+		return
+	value.text = str(from)
+	var tw := main.create_tween()
+	tw.bind_node(value)
+	tw.tween_interval(0.5)
+	var step := 1 if gain > 0 else -1
+	for v in range(from + step, to + step, step):
+		tw.tween_callback(func():
+			value.text = str(v)
+			Sound.play_pitched("ui_click", 1.25 if gain > 0 else 0.8, -2.0))
+		tw.tween_interval(0.18)
 
 
 # A club worn in: what the wear does to it — groove a good shot, lose a
@@ -432,6 +465,7 @@ func _page_shop(mode: String, cpu: bool) -> void:
 			row.add_child(rack)
 			main._rack = rack
 			var offer_width := main.draft_card_width(shown)
+			var dealt := 0.0   # how many beats into the deal the next new club lands
 			for i in range(shown):
 				var offer: Dictionary = main.current_draft_options[i]
 				var cv := main.make_draft_card(offer, not cpu,
@@ -441,6 +475,11 @@ func _page_shop(mode: String, cpu: bool) -> void:
 				cv.hover_started.connect(func(_v): main._set_coverage_offer(offer))
 				cv.hover_ended.connect(func(_v): main._set_coverage_offer({}))
 				rack.add_child(cv)
+				# A club new to the rack is dealt on to it, not just there.
+				if not cpu and main.flourish("rack %d %d %s" % [main.active_index, main.current_hole_index,
+						str(offer.get("name", ""))]):
+					_deal_in(cv, dealt, _worth_a_beat(offer))
+					dealt += 1.6 if _worth_a_beat(offer) else 1.0
 			var side := make_draft_side(cpu)
 			side.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 			row.add_child(side)
@@ -493,6 +532,43 @@ func _page_shop(mode: String, cpu: bool) -> void:
 				if not losses.is_empty():
 					t.tooltip_text = "\n".join(PackedStringArray(losses.map(func(n): return str(n.text))))
 				grid.add_child(t)
+
+
+# Deals one offer on to the rack: it comes up out of nothing `beat` beats
+# after the first, with the slide of a card. A club worth a second look (a
+# limited edition, a Staff club, one that would make a set) lands with a
+# bell and swells once, and holds the next club back a little longer.
+const DEAL_BEAT := 0.13
+
+func _deal_in(cv: CardView, beat: float, special: bool) -> void:
+	cv.modulate.a = 0.0
+	cv.pivot_offset = (cv.custom_minimum_size if cv.custom_minimum_size.x > 0.0 else cv._size) / 2.0
+	var tw := main.create_tween()
+	tw.bind_node(cv)
+	tw.tween_interval(DEAL_BEAT * beat)
+	tw.tween_callback(func(): Sound.play("card_slide"))
+	tw.set_parallel(true)
+	tw.tween_property(cv, "modulate:a", 1.0, 0.16)
+	# from(): the rack is a container, which resets a child's scale when it sorts.
+	tw.tween_property(cv, "scale", Vector2.ONE, 0.2).from(Vector2(0.94, 0.94)) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if special:
+		tw.set_parallel(false)
+		tw.tween_callback(func(): Sound.play_pitched("chime", 1.5, -5.0))
+		tw.tween_property(cv, "scale", Vector2(1.05, 1.05), 0.1)
+		tw.tween_property(cv, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _worth_a_beat(offer: Dictionary) -> bool:
+	if bool(offer.get("limited", false)) or ClubAbilities.is_staff(offer):
+		return true
+	# Would it make a set (or the next tier of one)?
+	var was := Brands.counts(main.hand)
+	var now := Brands.counts(main.hand + [offer])
+	for b in now:
+		if Brands.tier_reached(int(now[b])) > Brands.tier_reached(int(was.get(b, 0))):
+			return true
+	return false
 
 
 # The pro shop's other moves, in a column beside the offers (DraftRules.gd):
@@ -732,10 +808,26 @@ func _page_end() -> void:
 	var h := BogeyUI.heading(headline, 56)
 	h.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(BogeyUI.margin(h, 0, 8, 0, 0))
+	# What the round did, a line each: the course record, the holes where
+	# a best was beaten, the course it opened.
+	var record: Dictionary = main._round_record
+	if bool(record.get("new_best", false)) and not (record.get("previous", {}) as Dictionary).is_empty():
+		var was_best := int((record.previous as Dictionary).get("strokes", 0))
+		var rec := BogeyUI.heading("A new course record: %d beats %d" % [total_strokes, was_best], 26)
+		rec.add_theme_color_override("font_color", BogeyTheme.GOLD_800)
+		rec.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rec.set_meta("ring", true)
+		col.add_child(BogeyUI.margin(rec, 0, 10, 0, 0))
+	if not main.is_multiplayer() and main.me.bests > 0:
+		var bests := BogeyUI.body("Your best beaten on %d hole%s." % [main.me.bests, "" if main.me.bests == 1 else "s"],
+			15, BogeyTheme.FAIRWAY_DEEP)
+		bests.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		col.add_child(BogeyUI.margin(bests, 0, 8, 0, 0))
 	if main._opened_course != "":
 		var opened := BogeyUI.heading("%s is now open" % main._opened_course, 26)
 		opened.add_theme_color_override("font_color", BogeyTheme.FAIRWAY_DEEP)
 		opened.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		opened.set_meta("ring", true)
 		col.add_child(BogeyUI.margin(opened, 0, 10, 0, 0))
 
 	# The card itself, printed large.
@@ -809,6 +901,42 @@ func _page_end() -> void:
 		again.custom_minimum_size.x = 220
 		buttons.add_child(again)
 	col.add_child(BogeyUI.margin(buttons, 0, 32, 0, 0))
+
+	# The first time the card is shown it is tallied, not just there.
+	if main.flourish("tally"):
+		_tally(col, h, headline, total_strokes if not main.is_multiplayer() and not main._run_over else -1)
+
+
+# The card told a line at a time: the score counted up, then each thing
+# below it in turn, the ones worth a bell (a record, a course opened) with
+# one. `count_to` is the strokes the headline counts up to, or -1 for a
+# headline that is not a score.
+const TALLY_BEAT := 0.32
+
+func _tally(col: VBoxContainer, head: Label, headline: String, count_to: int) -> void:
+	var at := 0.25
+	for child in col.get_children():
+		var line := child as Control
+		if line == null:
+			continue
+		line.modulate.a = 0.0
+		var tw := main.create_tween()
+		tw.bind_node(line)
+		tw.tween_interval(at)
+		# A margin wraps each line; the bell is asked for on the line itself.
+		var inner: Node = line.get_child(0) if line.get_child_count() > 0 else line
+		if inner.has_meta("ring"):
+			tw.tween_callback(func(): Sound.chime(6, -4.0))
+		tw.tween_property(line, "modulate:a", 1.0, 0.25)
+		if inner == head and count_to > 0:
+			# The strokes run up from nothing, then the verdict lands.
+			head.text = "0"
+			tw.tween_method(func(v: float): head.text = str(roundi(v)), 0.0, float(count_to), 0.8)
+			tw.tween_callback(func():
+				head.text = headline
+				Sound.play("card_place"))
+			at += 0.8
+		at += TALLY_BEAT
 
 
 # The headline of a group's card: who won, and by how much — a tie said as one.
